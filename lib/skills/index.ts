@@ -19,11 +19,12 @@ export async function analyze_task(taskDescription: string) {
 export async function create_workflow(taskAnalysis: any) {
     // Mock workflow creation
     return {
+
         steps: [
             { agent: 'Software Engineer', action: 'read_codebase' },
             { agent: 'Software Engineer', action: 'write_code' },
             { agent: 'Style Architect', action: 'apply_design_system' },
-            { agent: 'QA', action: 'run_tests' }
+            { agent: 'QA', action: 'run_shell_command' }
         ]
     };
 }
