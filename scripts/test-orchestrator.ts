@@ -19,8 +19,19 @@ async function main() {
     console.log(`\nInvoking run() with task: "${taskDescription}"`);
 
     try {
-        await orchestrator.run(taskDescription);
-        console.log('\n--- Orchestrator Run Completed Successfully ---');
+        // 2. Plan
+        console.log(`\n--- [Phase 1] Planning ---`);
+        await orchestrator.plan(taskDescription);
+
+        // 3. Execute
+        console.log(`\n--- [Phase 2] Execution ---`);
+        await orchestrator.execute();
+
+        // 4. Verify
+        console.log(`\n--- [Phase 3] Verification ---`);
+        await orchestrator.verify();
+
+        console.log('\n--- Orchestrator Workflow Completed Successfully ---');
     } catch (error) {
         console.error('\n--- Orchestrator Run Failed ---', error);
     }
