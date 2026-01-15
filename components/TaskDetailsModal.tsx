@@ -110,7 +110,7 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                         <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
                             <Clock className="h-8 w-8 mb-2 opacity-20" />
                             <p className="text-sm">No plan generated yet.</p>
-                            <p className="text-xs">Click "Confirm & Plan" to generate.</p>
+                            <p className="text-xs">Click &quot;Confirm &amp; Plan&quot; to generate.</p>
                         </div>
                     )}
 

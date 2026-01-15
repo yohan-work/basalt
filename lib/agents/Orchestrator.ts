@@ -99,6 +99,16 @@ export class Orchestrator {
             return;
         }
 
+        // Fetch Project Path if available
+        let projectPath = process.cwd();
+        if ((task as any).project_id) {
+            const { data: project } = await supabase.from('Projects').select('path').eq('id', (task as any).project_id).single();
+            if (project?.path) {
+                projectPath = project.path;
+                this.log('System', `Using Project Path: ${projectPath}`);
+            }
+        }
+
         const workflow = task.metadata.workflow;
         await this.updateStatus('working');
         const mainAgentName = this.mainAgentDef.name;
@@ -118,19 +128,31 @@ export class Orchestrator {
                 const skillFunc = this.getSkillFunction(action);
 
                 if (skillFunc) {
-                    // Mocking args as per previous logic
-                    let args: any = '';
-                    if (action === 'read_codebase') args = './app/page.tsx';
+                    // Mocking args as per previous logic, but now supporting baseDir injection
+                    // In a real system, args would come from the plan or previous steps
+
+                    let args: any[] = [];
+                    // Default generic args for demo purposes if not specified in step
+                    if (action === 'read_codebase') args = ['./app/page.tsx'];
                     else if (action === 'write_code') args = ['./app/example.tsx', '// Generated Code'];
-                    else if (action === 'apply_design_system') args = 'ComponentX';
-                    else if (action === 'run_shell_command') args = 'npm test';
+                    else if (action === 'apply_design_system') args = ['ComponentX'];
+                    else if (action === 'run_shell_command') args = ['npm test'];
+                    else if (action === 'manage_git') args = ['status', ''];
+
+                    // Inject projectPath as the last argument for filesystem skills
+                    // Skills signatures are updated to take (..., baseDir) or (..., cwd)
+                    if (['read_codebase', 'write_code', 'run_shell_command', 'manage_git'].includes(action)) {
+                        // Ensure we match the signature: 
+                        // read_codebase(path, baseDir)
+                        // write_code(path, content, baseDir)
+                        // run_shell_command(cmd, cwd)
+                        args.push(projectPath);
+                    }
 
                     let result;
-                    if (Array.isArray(args)) {
-                        result = await skillFunc(...args);
-                    } else {
-                        result = await skillFunc(args);
-                    }
+                    // Spread args into the function call
+                    result = await skillFunc(...args);
+
                     await this.log(stepAgentDef.name, `Executed ${action}`, { result });
                 } else {
                     await this.log(mainAgentName, `Runtime function for skill ${action} not found.`);

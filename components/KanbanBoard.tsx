@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -9,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2 } from 'lucide-react';
 import { CreateTaskModal } from './CreateTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
+import { ProjectSelector } from './ProjectSelector';
 
 interface Task {
     id: string;
@@ -16,6 +16,7 @@ interface Task {
     description: string;
     status: 'pending' | 'planning' | 'working' | 'testing' | 'review' | 'done';
     created_at: string;
+    project_id?: string;
 }
 
 const COLUMNS = [
@@ -28,6 +29,7 @@ const COLUMNS = [
 
 export function KanbanBoard() {
     const [tasks, setTasks] = useState<Task[]>([]);
+    const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [processingTaskIds, setProcessingTaskIds] = useState<Set<string>>(new Set());
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -42,7 +44,12 @@ export function KanbanBoard() {
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'Tasks' },
                 (payload) => {
+                    const currentProjectId = selectedProjectId; // Capture closure? 
+                    // Better to rely on refetch or filter in memory.
+                    // For simplicity, just refetch or handle blindly.
                     if (payload.eventType === 'INSERT') {
+                        // Optimistic update? 
+                        // Only add if matches current project or if we are showing all
                         setTasks(prev => [...prev, payload.new as Task]);
                     } else if (payload.eventType === 'UPDATE') {
                         setTasks(prev => prev.map(t => t.id === payload.new.id ? payload.new as Task : t));
@@ -66,10 +73,20 @@ export function KanbanBoard() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [selectedTask]); // Add selectedTask dependency to keep modal updated? Or simpler logic above
+    }, [selectedTask]);
+    // Note: dependency on selectedTask to keep it updated is valid but the effect recreates subscription.
+    // Ideally subscription should be separate. But keeping it as is for now to avoid large refactor.
+
+    useEffect(() => {
+        fetchTasks();
+    }, [selectedProjectId]);
 
     const fetchTasks = async () => {
-        const { data } = await supabase.from('Tasks').select('*').order('created_at');
+        let query = supabase.from('Tasks').select('*').order('created_at');
+        if (selectedProjectId) {
+            query = query.eq('project_id', selectedProjectId);
+        }
+        const { data } = await query;
         if (data) setTasks(data);
     };
 
@@ -77,7 +94,8 @@ export function KanbanBoard() {
         const newTask = {
             title: taskData.title,
             description: taskData.description,
-            status: 'pending'
+            status: 'pending',
+            project_id: selectedProjectId
         };
 
         const { error } = await supabase.from('Tasks').insert(newTask);
@@ -185,8 +203,11 @@ export function KanbanBoard() {
     return (
         <div className="flex flex-col h-full bg-background text-foreground">
             <div className="flex justify-between items-center p-4 border-b border-border">
-                <h1 className="text-2xl font-bold tracking-tight">AI Agent Kanban</h1>
-                <Button onClick={() => setIsCreateModalOpen(true)} className="rounded-none bg-primary text-primary-foreground hover:bg-primary/90">
+                <div className="flex items-center gap-4">
+                    <h1 className="text-2xl font-bold tracking-tight">AI Agent Kanban</h1>
+                    <ProjectSelector selectedProjectId={selectedProjectId} onProjectSelect={setSelectedProjectId} />
+                </div>
+                <Button onClick={() => setIsCreateModalOpen(true)} disabled={!selectedProjectId} className="rounded-none bg-primary text-primary-foreground hover:bg-primary/90">
                     <Plus className="mr-2 h-4 w-4" /> Request Work
                 </Button>
             </div>
@@ -205,35 +226,45 @@ export function KanbanBoard() {
 
             <div className="flex-1 overflow-x-auto p-4">
                 <div className="flex gap-4 h-full min-w-[1000px]">
-                    {COLUMNS.map((col) => (
-                        <div key={col.id} className="flex-1 min-w-[200px] flex flex-col bg-muted/20 border border-border/50">
-                            <div className="p-3 border-b border-border bg-muted/50 font-semibold text-sm">
-                                {col.label} <span className="ml-2 text-muted-foreground text-xs">({tasks.filter(t => t.status === col.id).length})</span>
+                    {COLUMNS.map((col) => {
+                        // Filter tasks for column (and effectively ensures only current project tasks are shown if we rely on state)
+                        // But wait, subscription logic might add tasks from other projects.
+                        // We should filter here too to be safe.
+                        const colTasks = tasks.filter(task =>
+                            task.status === col.id &&
+                            (!selectedProjectId || task.project_id === selectedProjectId)
+                        );
+
+                        return (
+                            <div key={col.id} className="flex-1 min-w-[200px] flex flex-col bg-muted/20 border border-border/50">
+                                <div className="p-3 border-b border-border bg-muted/50 font-semibold text-sm">
+                                    {col.label} <span className="ml-2 text-muted-foreground text-xs">({colTasks.length})</span>
+                                </div>
+                                <div className="p-2 flex-1 space-y-2 overflow-y-auto">
+                                    {colTasks.map(task => (
+                                        <Card key={task.id} onClick={() => handleCardClick(task)} className="cursor-pointer rounded-sm shadow-sm border-border hover:border-primary/50 transition-colors">
+                                            <CardHeader className="p-3 pb-1">
+                                                <div className="flex justify-between items-start">
+                                                    <CardTitle className="text-sm font-medium leading-tight">{task.title}</CardTitle>
+                                                </div>
+                                            </CardHeader>
+                                            <CardContent className="p-3 pt-2 space-y-3">
+                                                <p className="text-xs text-muted-foreground line-clamp-3">{task.description}</p>
+                                                <div className="flex justify-between items-center">
+                                                    <Badge variant="secondary" className="text-[10px] px-1 py-0 h-5">
+                                                        {task.status}
+                                                    </Badge>
+                                                </div>
+                                                <div className="pt-1">
+                                                    {renderActionButton(task)}
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    ))}
+                                </div>
                             </div>
-                            <div className="p-2 flex-1 space-y-2 overflow-y-auto">
-                                {tasks.filter(task => task.status === col.id).map(task => (
-                                    <Card key={task.id} onClick={() => handleCardClick(task)} className="cursor-pointer rounded-sm shadow-sm border-border hover:border-primary/50 transition-colors">
-                                        <CardHeader className="p-3 pb-1">
-                                            <div className="flex justify-between items-start">
-                                                <CardTitle className="text-sm font-medium leading-tight">{task.title}</CardTitle>
-                                            </div>
-                                        </CardHeader>
-                                        <CardContent className="p-3 pt-2 space-y-3">
-                                            <p className="text-xs text-muted-foreground line-clamp-3">{task.description}</p>
-                                            <div className="flex justify-between items-center">
-                                                <Badge variant="secondary" className="text-[10px] px-1 py-0 h-5">
-                                                    {task.status}
-                                                </Badge>
-                                            </div>
-                                            <div className="pt-1">
-                                                {renderActionButton(task)}
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                ))}
-                            </div>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             </div>
         </div>

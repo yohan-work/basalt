@@ -113,9 +113,9 @@ export async function verify_final_output(outputRef: string) {
 }
 
 // --- Software Engineer Skills ---
-export async function read_codebase(filePath: string) {
+export async function read_codebase(filePath: string, baseDir: string = process.cwd()) {
     try {
-        const fullPath = path.resolve(process.cwd(), filePath);
+        const fullPath = path.resolve(baseDir, filePath);
         const content = fs.readFileSync(fullPath, 'utf-8');
         return content;
     } catch (error: any) {
@@ -123,9 +123,9 @@ export async function read_codebase(filePath: string) {
     }
 }
 
-export async function write_code(filePath: string, content: string) {
+export async function write_code(filePath: string, content: string, baseDir: string = process.cwd()) {
     try {
-        const fullPath = path.resolve(process.cwd(), filePath);
+        const fullPath = path.resolve(baseDir, filePath);
         const dir = path.dirname(fullPath);
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
@@ -167,9 +167,9 @@ export async function check_responsive(url: string) {
 }
 
 // --- QA & Debugger Skills ---
-export async function run_shell_command(command: string) {
+export async function run_shell_command(command: string, cwd: string = process.cwd()) {
     try {
-        const { stdout, stderr } = await execAsync(command);
+        const { stdout, stderr } = await execAsync(command, { cwd });
         return { stdout, stderr };
     } catch (error: any) {
         return { error: error.message };
@@ -181,7 +181,7 @@ export async function analyze_error_logs(logs: string) {
 }
 
 // --- Git & DevOps Manager Skills ---
-export async function manage_git(action: 'checkout' | 'commit' | 'merge', args: string) {
+export async function manage_git(action: 'checkout' | 'commit' | 'merge', args: string, cwd: string = process.cwd()) {
     // Simplified git wrapper
     const commands: Record<string, string> = {
         checkout: `git checkout ${args}`,
@@ -192,7 +192,7 @@ export async function manage_git(action: 'checkout' | 'commit' | 'merge', args: 
     if (!commands[action]) return 'Invalid action';
 
     try {
-        const { stdout } = await execAsync(commands[action]);
+        const { stdout } = await execAsync(commands[action], { cwd });
         return stdout;
     } catch (error: any) {
         return error.message;
