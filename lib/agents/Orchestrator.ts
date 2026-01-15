@@ -72,12 +72,16 @@ export class Orchestrator {
         await this.log(mainAgentName, `Initialized Planning Phase.`);
         await this.updateStatus('planning');
 
+        // Load all available agents to determine who can do the task
+        const availableAgents = AgentLoader.listAgents();
+        await this.log(mainAgentName, `Loaded ${availableAgents.length} potential agents.`);
+
         // Analyze
-        const analysis = await skills.analyze_task(taskDescription);
+        const analysis = await skills.analyze_task(taskDescription, availableAgents);
         await this.log(mainAgentName, 'Task Analysis Completed', analysis);
 
         // Create Workflow
-        const workflow = await skills.create_workflow(analysis);
+        const workflow = await skills.create_workflow(analysis, availableAgents);
         await this.log(mainAgentName, 'Workflow Created', workflow);
 
         // Save Plan to Metadata

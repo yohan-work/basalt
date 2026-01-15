@@ -58,6 +58,35 @@ export class AgentLoader {
     }
 
     /**
+     * Lists all available agents by scanning the lib/agents directory
+     */
+    static listAgents(): AgentDefinition[] {
+        try {
+            const agentsDir = path.join(BASE_DIR, 'lib', 'agents');
+            if (!fs.existsSync(agentsDir)) return [];
+
+            const entries = fs.readdirSync(agentsDir, { withFileTypes: true });
+            const agents: AgentDefinition[] = [];
+
+            for (const entry of entries) {
+                if (entry.isDirectory()) {
+                    try {
+                        const agent = this.loadAgent(entry.name);
+                        agents.push(agent);
+                    } catch (e) {
+                        // Skip invalid agents
+                        console.warn(`Skipping invalid agent directory: ${entry.name}`);
+                    }
+                }
+            }
+            return agents;
+        } catch (error) {
+            console.error('Failed to list agents:', error);
+            return [];
+        }
+    }
+
+    /**
      * Loads a Skill configuration from lib/skills/[skillName]/SKILL.md
      */
     static loadSkill(skillName: string): SkillDefinition {
