@@ -7,6 +7,7 @@ interface AgentTask {
     id: string; // Supabase UUID
     description: string;
     status: 'pending' | 'planning' | 'working' | 'testing' | 'review' | 'done';
+    metadata?: any; // JSONB for storing plan, workflow, results
 }
 
 export class Orchestrator {
@@ -15,7 +16,6 @@ export class Orchestrator {
 
     constructor(taskId: string) {
         this.taskId = taskId;
-        // Load the Main Agent configuration on init
         this.mainAgentDef = AgentLoader.loadAgent('main-agent');
     }
 
@@ -42,56 +42,79 @@ export class Orchestrator {
         }
     }
 
-    /**
-     * Resolves the runtime function for a skill name.
-     */
+    private async updateMetadata(data: any) {
+        try {
+            // Fetch current metadata first to merge? Or just upsert?
+            // Since we don't have existing metadata in memory, let's just fetch and merge or just update top level keys
+            // Simplify: We assume 'data' is the partial update
+            const { data: current } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+            const newMetadata = { ...(current?.metadata || {}), ...data };
+
+            await supabase.from('Tasks').update({ metadata: newMetadata }).eq('id', this.taskId);
+        } catch (e) {
+            console.error('Supabase Metadata Update Error:', e);
+        }
+    }
+
+    private async getTask(): Promise<AgentTask | null> {
+        const { data, error } = await supabase.from('Tasks').select('*').eq('id', this.taskId).single();
+        if (error || !data) return null;
+        return data as AgentTask;
+    }
+
     private getSkillFunction(skillName: string) {
         return (skills as any)[skillName];
     }
 
-    public async run(taskDescription: string) {
-        // 1. Initialization
-        const mainAgentName = this.mainAgentDef.name; // "main-agent"
-        await this.log(mainAgentName, `Initialized. System Prompt loaded from AGENT.md.`);
-        await this.log(mainAgentName, `Starting analysis for task: ${taskDescription}`);
-
+    // --- Phase 1: Planning ---
+    public async plan(taskDescription: string) {
+        const mainAgentName = this.mainAgentDef.name;
+        await this.log(mainAgentName, `Initialized Planning Phase.`);
         await this.updateStatus('planning');
 
-        // 2. Planning (Using Main Agent Skills)
-
+        // Analyze
         const analysis = await skills.analyze_task(taskDescription);
         await this.log(mainAgentName, 'Task Analysis Completed', analysis);
 
+        // Create Workflow
         const workflow = await skills.create_workflow(analysis);
         await this.log(mainAgentName, 'Workflow Created', workflow);
 
-        await this.updateStatus('working');
+        // Save Plan to Metadata
+        await this.updateMetadata({ analysis, workflow });
 
-        // 3. Execution Loop
+        // Wait for user confirmation
+        await this.log(mainAgentName, 'Plan created. Waiting for user approval.');
+    }
+
+    // --- Phase 2: Execution ---
+    public async execute() {
+        const task = await this.getTask();
+        if (!task || !task.metadata?.workflow) {
+            await this.log('System', 'No workflow found in metadata. Please run planning first.');
+            return;
+        }
+
+        const workflow = task.metadata.workflow;
+        await this.updateStatus('working');
+        const mainAgentName = this.mainAgentDef.name;
+
         for (const step of workflow.steps) {
             const { agent, action } = step;
-            // 'agent' from workflow might be "Software Engineer". We need to map to "software-engineer" folder.
             const agentRoleSlug = agent.toLowerCase().replace(/\s+/g, '-');
 
             try {
-                // Dynamically load the agent to ensure it exists and we know its persona
                 const stepAgentDef = AgentLoader.loadAgent(agentRoleSlug);
                 await this.log(mainAgentName, `Delegating to ${stepAgentDef.name}: ${action}`);
 
-                // Check if this agent actually has this skill in its config
-                // NOTE: We assume the extracted skills match the action name exactly
                 if (!stepAgentDef.skills.includes(action)) {
-                    await this.log(mainAgentName, `WARNING: Agent ${stepAgentDef.name} does not have skill '${action}' listed in AGENT.md`);
+                    await this.log(mainAgentName, `WARNING: Agent ${stepAgentDef.name} misses skill '${action}'`);
                 }
 
-                // Load Skill Definition for context 
-                const skillDef = AgentLoader.loadSkill(action);
-
-                // Execute Runtime Logic
                 const skillFunc = this.getSkillFunction(action);
 
                 if (skillFunc) {
-                    // Mocking args (same as before)
+                    // Mocking args as per previous logic
                     let args: any = '';
                     if (action === 'read_codebase') args = './app/page.tsx';
                     else if (action === 'write_code') args = ['./app/example.tsx', '// Generated Code'];
@@ -113,11 +136,16 @@ export class Orchestrator {
                 await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`);
             }
         }
+    }
 
-        // 4. Verification
+    // --- Phase 3: Verification ---
+    public async verify() {
+        const mainAgentName = this.mainAgentDef.name;
         await this.updateStatus('testing');
+
         const verification = await skills.verify_final_output('output_ref');
         await this.log(mainAgentName, 'Final Verification', verification);
+        await this.updateMetadata({ verification });
 
         if (verification.verified) {
             await this.updateStatus('review');
