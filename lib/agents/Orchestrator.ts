@@ -203,6 +203,10 @@ export class Orchestrator {
                 await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`);
             }
         }
+
+        // Auto-transition to review if workflow complete
+        await this.updateStatus('review');
+        await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Review.');
     }
 
     // --- Phase 3: Verification ---
