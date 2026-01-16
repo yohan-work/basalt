@@ -52,3 +52,38 @@ Return the response in the following JSON format ONLY, without any markdown form
         };
     }
 }
+
+export async function generateJSON(systemPrompt: string, userPrompt: string, schemaDescription: string): Promise<any> {
+    const fullPrompt = `
+${systemPrompt}
+
+Goal: ${userPrompt}
+
+Return the response in the following JSON format ONLY, without any markdown formatting or explanation:
+${schemaDescription}
+`;
+
+    try {
+        const response = await fetch('http://localhost:11434/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: 'llama3:latest',
+                prompt: fullPrompt,
+                stream: false,
+                format: 'json'
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Ollama API Error: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        return JSON.parse(data.response);
+
+    } catch (error: any) {
+        console.error('LLM JSON Generation Failed:', error);
+        throw error;
+    }
+}

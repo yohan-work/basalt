@@ -4,108 +4,80 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 
 import { AgentDefinition } from '../agent-loader';
+import * as llm from '../llm';
 
 const execAsync = promisify(exec);
 
 // --- Main Agent Skills ---
 export async function analyze_task(taskDescription: string, availableAgents: AgentDefinition[]) {
-    const requiredAgents: string[] = [];
-    const complexityScore = 0;
+    try {
+        const agentsList = availableAgents.map(a => `- ${a.name} (Role: ${a.role}, Skills: ${a.skills.join(', ')})`).join('\n');
 
-    // Simple heuristic: check if agent's skills or role description match the task
-    // This is a naive implementation; a real LLM would be better here.
-    const lowerDesc = taskDescription.toLowerCase();
+        const systemPrompt = `You are a Lead AI Architect.
+Your goal is to analyze a user request and determine which agents are required to fulfill it.
+Available Agents:
+${agentsList}
+`;
 
-    // Keyword mappings for roles
-    const roleKeywords: Record<string, string[]> = {
-        'style-architect': ['design', 'css', 'style', 'ui', 'ux', 'frontend', 'look', 'modern'],
-        'qa': ['test', 'verify', 'check', 'bug', 'quality'],
-        'git-manager': ['git', 'commit', 'branch', 'merge', 'repo'],
-        'software-engineer': ['code', 'implement', 'build', 'create', 'function', 'api', 'backend', 'logic', 'form', 'page', 'component', 'app', 'feature']
-    };
+        const schema = `{
+    "complexity": "low" | "medium" | "high",
+    "required_agents": ["agent_name1", "agent_name2"],
+    "summary": "Brief analysis of the task"
+}`;
 
-    for (const agent of availableAgents) {
-        if (agent.role === 'main-agent') continue; // Skip self
+        const analysis = await llm.generateJSON(systemPrompt, taskDescription, schema);
+        return analysis;
 
-        let matched = false;
-
-        // 1. Check Role Keywords
-        const keywords = roleKeywords[agent.role] || [];
-        for (const kw of keywords) {
-            if (lowerDesc.includes(kw)) {
-                matched = true;
-                break;
-            }
-        }
-
-        // 2. Match against skills (fuzzy)
-        if (!matched) {
-            for (const skill of agent.skills) {
-                const parts = skill.split('_');
-                // If any significant part of the skill name is in description
-                for (const part of parts) {
-                    if (part.length > 3 && lowerDesc.includes(part)) {
-                        matched = true;
-                        break;
-                    }
-                }
-                if (matched) break;
-            }
-        }
-
-        // 3. Match against basic role/name
-        if (!matched && (lowerDesc.includes(agent.role) || lowerDesc.includes(agent.name.toLowerCase()))) {
-            matched = true;
-        }
-
-        if (matched) {
-            requiredAgents.push(agent.name);
-        }
+    } catch (e) {
+        console.error('LLM Analysis Failed, falling back to heuristic', e);
+        // Fallback or re-throw
+        return {
+            complexity: 'medium',
+            required_agents: ['software-engineer'], // Safer fallback
+            summary: 'Fallback analysis due to LLM error.'
+        };
     }
-
-    // Default if none matched
-    if (requiredAgents.length === 0) {
-        // Fallback to Software Engineer if available, else just pick the first one
-        const swe = availableAgents.find(a => a.role === 'software-engineer');
-        if (swe) requiredAgents.push(swe.name);
-    }
-
-    return {
-        complexity: requiredAgents.length > 2 ? 'high' : 'medium',
-        required_agents: requiredAgents,
-        summary: `Analyzed task: "${taskDescription}". Identified ${requiredAgents.length} required agents.`
-    };
 }
 
 export async function create_workflow(taskAnalysis: any, availableAgents: AgentDefinition[]) {
-    const steps: any[] = [];
-    const agents = taskAnalysis.required_agents as string[];
+    try {
+        const requiredAgents = taskAnalysis.required_agents;
+        const agentsInfo = availableAgents
+            .filter(a => requiredAgents.includes(a.name) || a.role === 'main-agent')
+            .map(a => `- ${a.name}: [${a.skills.join(', ')}]`)
+            .join('\n');
 
-    // Heuristic: Assign 1-2 generic steps per agent
-    for (const agentName of agents) {
-        const agentDef = availableAgents.find(a => a.name === agentName);
-        if (!agentDef) continue;
+        const systemPrompt = `You are a Project Manager.
+Create a step-by-step workflow to complete the task.
+Use ONLY the available agents and their specific skills.
+Supported Skills: read_codebase, write_code, run_shell_command, apply_design_system, manage_git, list_directory.
+`;
 
-        // Try to find relevant skills
-        // For now, just pick the first 1-2 skills that aren't 'manage_git' or generic check
-        const usefulSkills = agentDef.skills.filter(s => !s.includes('check') && !s.includes('manage'));
+        const schema = `{
+    "steps": [
+        { "agent": "agent_name", "action": "skill_name", "reason": "why this step" }
+    ]
+}`;
 
-        if (usefulSkills.length > 0) {
-            steps.push({ agent: agentName, action: usefulSkills[0] });
-            if (usefulSkills.length > 1) {
-                steps.push({ agent: agentName, action: usefulSkills[1] });
-            }
-        } else if (agentDef.skills.length > 0) {
-            steps.push({ agent: agentName, action: agentDef.skills[0] });
+        const workflow = await llm.generateJSON(systemPrompt, `Task Analysis: ${JSON.stringify(taskAnalysis)}`, schema);
+
+        // Ensure verify step exists
+        if (!workflow.steps.find((s: any) => s.action === 'verify_final_output')) {
+            workflow.steps.push({ agent: 'main-agent', action: 'verify_final_output' });
         }
-    }
 
-    // Always add a final verify step if not present
-    if (!steps.find(s => s.action === 'verify_final_output')) {
-        steps.push({ agent: 'main-agent', action: 'verify_final_output' });
-    }
+        return workflow;
 
-    return { steps };
+    } catch (e) {
+        console.error('LLM Workflow Creation Failed, using fallback', e);
+        return {
+            steps: [
+                { agent: 'software-engineer', action: 'read_codebase' },
+                { agent: 'software-engineer', action: 'write_code' },
+                { agent: 'main-agent', action: 'verify_final_output' }
+            ]
+        };
+    }
 }
 
 export async function verify_final_output(outputRef: string) {
