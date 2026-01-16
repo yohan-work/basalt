@@ -205,3 +205,16 @@ export async function check_environment() {
         supabase: !!process.env.NEXT_PUBLIC_SUPABASE_URL
     };
 }
+
+export async function list_directory(dirPath: string = '.', baseDir: string = process.cwd()) {
+    try {
+        const fullPath = path.resolve(baseDir, dirPath);
+        if (!fs.existsSync(fullPath)) return 'Directory does not exist';
+        const entries = fs.readdirSync(fullPath, { withFileTypes: true });
+        return entries.map(entry => {
+            return `${entry.isDirectory() ? '[DIR]' : '[FILE]'} ${entry.name}`;
+        });
+    } catch (error: any) {
+        return `Error listing directory: ${error.message}`;
+    }
+}

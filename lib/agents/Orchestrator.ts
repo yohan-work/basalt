@@ -1,6 +1,7 @@
 
 import { supabase } from '@/lib/supabase';
 import * as skills from '@/lib/skills';
+import * as llm from '@/lib/llm';
 import { AgentLoader, AgentDefinition } from '../agent-loader';
 
 interface AgentTask {
@@ -113,46 +114,86 @@ export class Orchestrator {
         await this.updateStatus('working');
         const mainAgentName = this.mainAgentDef.name;
 
+        // 1. Scan Project Context
+        const dirList = await skills.list_directory('.', projectPath);
+        const isNode = Array.isArray(dirList) && dirList.some((f: string) => f.includes('package.json'));
+        let techStack = 'static-html';
+
+        if (isNode) {
+            try {
+                const pkgJson = await skills.read_codebase('package.json', projectPath);
+                if (pkgJson.includes('next')) techStack = 'nextjs';
+                else if (pkgJson.includes('react')) techStack = 'react';
+                else techStack = 'node-generic';
+            } catch (e) {
+                // ignore
+            }
+        }
+        await this.log(mainAgentName, `Detected Tech Stack: ${techStack}`);
+
         for (const step of workflow.steps) {
             const { agent, action } = step;
             const agentRoleSlug = agent.toLowerCase().replace(/\s+/g, '-');
 
             try {
                 const stepAgentDef = AgentLoader.loadAgent(agentRoleSlug);
-                await this.log(mainAgentName, `Delegating to ${stepAgentDef.name}: ${action}`);
-
-                if (!stepAgentDef.skills.includes(action)) {
-                    await this.log(mainAgentName, `WARNING: Agent ${stepAgentDef.name} misses skill '${action}'`);
-                }
-
                 const skillFunc = this.getSkillFunction(action);
 
                 if (skillFunc) {
-                    // Mocking args as per previous logic, but now supporting baseDir injection
-                    // In a real system, args would come from the plan or previous steps
-
                     let args: any[] = [];
-                    // Default generic args for demo purposes if not specified in step
-                    if (action === 'read_codebase') args = ['./app/page.tsx'];
-                    else if (action === 'write_code') args = ['./app/example.tsx', '// Generated Code'];
-                    else if (action === 'apply_design_system') args = ['ComponentX'];
-                    else if (action === 'run_shell_command') args = ['npm test'];
-                    else if (action === 'manage_git') args = ['status', ''];
+
+                    // --- INTELLIGENT ARGUMENT INJECTION (Rules Engine) ---
+                    // In a real system, an LLM would generate these arguments.
+                    // Here we use a rule-based template engine.
+
+                    if (action === 'read_codebase') {
+                        // Default to sensing key files
+                        args.push(techStack === 'nextjs' ? 'app/page.tsx' : 'index.html');
+                    }
+                    else if (action === 'write_code') {
+                        // DETECT INTENT & CALL LLM
+                        const taskDesc = task.description;
+
+                        // Construct Context String
+                        const context = `
+                        Project Path: ${projectPath}
+                        Tech Stack: ${techStack}
+                        Detected Files: ${JSON.stringify(dirList.slice(0, 10))} ...
+                        `;
+
+                        await this.log(mainAgentName, 'Requesting AI Generation...', { prompt: taskDesc });
+
+                        try {
+                            const aiResponse = await llm.generateCode(taskDesc, context);
+
+                            if (aiResponse.files.length > 0) {
+                                // For simplicity, we just take the first file logic for now
+                                // In reality, we might loop or write multiple
+                                const file = aiResponse.files[0];
+                                args.push(file.path);
+                                args.push(file.content);
+                                await this.log(mainAgentName, `AI Generated File: ${file.path}`);
+                            } else {
+                                // Fallback
+                                args.push('ai_output.txt');
+                                args.push(aiResponse.content || 'AI could not generate code.');
+                            }
+                        } catch (genError: any) {
+                            args.push('error.txt');
+                            args.push(`Generation Error: ${genError.message}`);
+                        }
+                    }
+                    else if (action === 'apply_design_system') args.push('LoginComponent');
+                    else if (action === 'run_shell_command') args.push('ls -la');
+                    else if (action === 'manage_git') args.push('status', '');
+                    else if (action === 'list_directory') args.push('.'); // Default
 
                     // Inject projectPath as the last argument for filesystem skills
-                    // Skills signatures are updated to take (..., baseDir) or (..., cwd)
-                    if (['read_codebase', 'write_code', 'run_shell_command', 'manage_git'].includes(action)) {
-                        // Ensure we match the signature: 
-                        // read_codebase(path, baseDir)
-                        // write_code(path, content, baseDir)
-                        // run_shell_command(cmd, cwd)
+                    if (['read_codebase', 'write_code', 'run_shell_command', 'manage_git', 'list_directory'].includes(action)) {
                         args.push(projectPath);
                     }
 
-                    let result;
-                    // Spread args into the function call
-                    result = await skillFunc(...args);
-
+                    const result = await skillFunc(...args);
                     await this.log(stepAgentDef.name, `Executed ${action}`, { result });
                 } else {
                     await this.log(mainAgentName, `Runtime function for skill ${action} not found.`);
