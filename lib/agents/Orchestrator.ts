@@ -204,9 +204,9 @@ export class Orchestrator {
             }
         }
 
-        // Auto-transition to review if workflow complete
-        await this.updateStatus('review');
-        await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Review.');
+        // Transition to testing (verification) instead of review
+        await this.updateStatus('testing');
+        await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase. Waiting for verification.');
     }
 
     // --- Phase 3: Verification ---
@@ -219,6 +219,37 @@ export class Orchestrator {
         await this.updateMetadata({ verification });
 
         if (verification.verified) {
+            await this.log(mainAgentName, 'Verification Successful. Starting Git Automation...');
+
+            // Git Automation
+            const branchName = `feature/task-${this.taskId.slice(0, 8)}`;
+            const commitMsg = `feat: Task ${this.taskId.slice(0, 8)} implementation`;
+
+            try {
+                // 1. Create Branch
+                // We try to checkout -b. If it fails (exists), we might want to just checkout.
+                // For simplicity in this iteration, we try -b.
+                await skills.manage_git('checkout', `-b ${branchName}`);
+
+                // 2. Add
+                await skills.manage_git('add', '.');
+
+                // 3. Commit
+                await skills.manage_git('commit', commitMsg);
+
+                // 4. Push
+                await skills.manage_git('push', `origin ${branchName}`);
+
+                // 5. PR
+                // specific CLI flags might depend on user config, strictly following "pr생성"
+                await skills.manage_git('create_pr', `--fill --title "${commitMsg}" --body "Automated PR for task ${this.taskId}"`);
+
+                await this.log(mainAgentName, 'Git Automation Completed (Branch, Commit, Push, PR).');
+
+            } catch (gitError: any) {
+                await this.log(mainAgentName, `Git Automation Warning: ${gitError.message}`);
+            }
+
             await this.updateStatus('review');
             await this.log(mainAgentName, 'Task moved to Review');
         }
