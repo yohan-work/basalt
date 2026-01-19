@@ -178,6 +178,8 @@ export class Orchestrator {
                                 args.push('ai_output.txt');
                                 args.push(aiResponse.content || 'AI could not generate code.');
                             }
+
+
                         } catch (genError: any) {
                             args.push('error.txt');
                             args.push(`Generation Error: ${genError.message}`);
@@ -204,9 +206,9 @@ export class Orchestrator {
             }
         }
 
-        // Auto-transition to review if workflow complete
-        await this.updateStatus('review');
-        await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Review.');
+        // Transition to testing (verification) instead of review
+        await this.updateStatus('testing');
+        await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase. Waiting for verification.');
     }
 
     // --- Phase 3: Verification ---
@@ -214,11 +216,41 @@ export class Orchestrator {
         const mainAgentName = this.mainAgentDef.name;
         await this.updateStatus('testing');
 
+        // Fetch Project Path
+        let projectPath = process.cwd();
+        const task = await this.getTask();
+        if (task && (task as any).project_id) {
+            const { data: project } = await supabase.from('Projects').select('path').eq('id', (task as any).project_id).single();
+            if (project?.path) {
+                projectPath = project.path;
+                this.log('System', `Using Project Path for Verification: ${projectPath}`);
+            }
+        }
+
         const verification = await skills.verify_final_output('output_ref');
         await this.log(mainAgentName, 'Final Verification', verification);
         await this.updateMetadata({ verification });
 
         if (verification.verified) {
+            await this.log(mainAgentName, 'Verification Successful. Starting Git Automation...');
+
+            const branchName = `feature/task-${this.taskId.slice(0, 8)}`;
+            const commitMsg = `feat: Task ${this.taskId.slice(0, 8)} implementation`;
+
+            try {
+                await skills.manage_git('checkout', `-b ${branchName}`, projectPath);
+                await skills.manage_git('add', '.', projectPath);
+                await skills.manage_git('commit', commitMsg, projectPath);
+                await skills.manage_git('push', `origin ${branchName}`, projectPath);
+                // specific CLI flags
+                await skills.manage_git('create_pr', `--fill --title "${commitMsg}" --body "Automated PR for task ${this.taskId}"`, projectPath);
+
+                await this.log(mainAgentName, 'Git Automation Completed (Branch, Commit, Push, PR).');
+
+            } catch (gitError: any) {
+                await this.log(mainAgentName, `Git Automation Warning: ${gitError.message}`);
+            }
+
             await this.updateStatus('review');
             await this.log(mainAgentName, 'Task moved to Review');
         }
