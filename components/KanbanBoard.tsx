@@ -185,8 +185,8 @@ export function KanbanBoard() {
                 );
             case 'testing':
                 return (
-                    <Button size="sm" disabled className="w-full text-xs h-7 bg-gray-500">
-                        Running Tests...
+                    <Button size="sm" onClick={(e) => handleRunTests(e, task)} className="w-full text-xs h-7 bg-green-600 hover:bg-green-700">
+                        <CheckCircle className="mr-2 h-3 w-3" /> Verify & Git Push
                     </Button>
                 );
             case 'review':
