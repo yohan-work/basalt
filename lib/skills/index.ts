@@ -153,12 +153,16 @@ export async function analyze_error_logs(logs: string) {
 }
 
 // --- Git & DevOps Manager Skills ---
-export async function manage_git(action: 'checkout' | 'commit' | 'merge', args: string, cwd: string = process.cwd()) {
+export async function manage_git(action: 'checkout' | 'commit' | 'merge' | 'add' | 'push' | 'status' | 'create_pr', args: string, cwd: string = process.cwd()) {
     // Simplified git wrapper
     const commands: Record<string, string> = {
         checkout: `git checkout ${args}`,
         commit: `git commit -m "${args}"`,
-        merge: `git merge ${args}`
+        merge: `git merge ${args}`,
+        add: `git add ${args}`,
+        push: `git push ${args}`,
+        status: `git status`,
+        create_pr: `gh pr create ${args}`
     };
 
     if (!commands[action]) return 'Invalid action';
