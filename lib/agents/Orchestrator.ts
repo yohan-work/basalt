@@ -93,6 +93,47 @@ export class Orchestrator {
     }
 
     // --- Phase 2: Execution ---
+    private async generateSkillArguments(
+        skillName: string,
+        taskDescription: string,
+        projectPath: string,
+        contextData: any
+    ): Promise<any[]> {
+        const skillDef = AgentLoader.loadSkill(skillName);
+        const inputsDef = skillDef.inputs ? `\nInputs Definition:\n${skillDef.inputs}` : '';
+
+        const systemPrompt = `
+You are an intelligent agent orchestrator.
+Your goal is to generate the exact arguments needed to call a TypeScript function for a specific skill.
+
+Skill Name: ${skillName}
+Skill Instructions: ${skillDef.instructions}
+${inputsDef}
+
+Context:
+- Task: ${taskDescription}
+- Project Path: ${projectPath}
+- Detected Files: ${JSON.stringify(contextData.files || [])}
+- Tech Stack: ${contextData.techStack}
+
+Return ONLY a JSON object with a key "arguments" which is an array of values to pass to the function.
+Example: { "arguments": ["someValue", "anotherValue"] }
+Do not return markdown.
+`;
+
+        try {
+            const response = await llm.generateJSON(
+                systemPrompt,
+                "Generate valid arguments for this skill based on the task.",
+                '{ "arguments": [] }'
+            );
+            return response.arguments || [];
+        } catch (e) {
+            console.error(`Failed to generate arguments for ${skillName}`, e);
+            return [];
+        }
+    }
+
     public async execute() {
         const task = await this.getTask();
         if (!task || !task.metadata?.workflow) {
@@ -114,7 +155,8 @@ export class Orchestrator {
         await this.updateStatus('working');
         const mainAgentName = this.mainAgentDef.name;
 
-        // 1. Scan Project Context
+        // 1. Scan Project Context and Tech Stack
+        // (Simplified for now, in reality we might want a 'ProjectAnalyst' agent to do this)
         const dirList = await skills.list_directory('.', projectPath);
         const isNode = Array.isArray(dirList) && dirList.some((f: string) => f.includes('package.json'));
         let techStack = 'static-html';
@@ -125,11 +167,14 @@ export class Orchestrator {
                 if (pkgJson.includes('next')) techStack = 'nextjs';
                 else if (pkgJson.includes('react')) techStack = 'react';
                 else techStack = 'node-generic';
-            } catch (e) {
-                // ignore
-            }
+            } catch (e) { /* ignore */ }
         }
         await this.log(mainAgentName, `Detected Tech Stack: ${techStack}`);
+
+        const contextData = {
+            files: dirList ? dirList.slice(0, 15) : [],
+            techStack
+        };
 
         for (const step of workflow.steps) {
             const { agent, action } = step;
@@ -140,62 +185,32 @@ export class Orchestrator {
                 const skillFunc = this.getSkillFunction(action);
 
                 if (skillFunc) {
-                    let args: any[] = [];
+                    await this.log(mainAgentName, `Generative Logic: Determining arguments for ${action}...`);
 
-                    // --- INTELLIGENT ARGUMENT INJECTION (Rules Engine) ---
-                    // In a real system, an LLM would generate these arguments.
-                    // Here we use a rule-based template engine.
+                    // --- DYNAMIC ARGUMENT GENERATION ---
+                    // Let the LLM decide what arguments to pass based on the Task + Skill Def
+                    let args = await this.generateSkillArguments(action, task.description, projectPath, contextData);
 
-                    if (action === 'read_codebase') {
-                        // Default to sensing key files
-                        args.push(techStack === 'nextjs' ? 'app/page.tsx' : 'index.html');
-                    }
-                    else if (action === 'write_code') {
-                        // DETECT INTENT & CALL LLM
-                        const taskDesc = task.description;
-
-                        // Construct Context String
-                        const context = `
-                        Project Path: ${projectPath}
-                        Tech Stack: ${techStack}
-                        Detected Files: ${JSON.stringify(dirList.slice(0, 10))} ...
-                        `;
-
-                        await this.log(mainAgentName, 'Requesting AI Generation...', { prompt: taskDesc });
-
-                        try {
-                            const aiResponse = await llm.generateCode(taskDesc, context);
-
-                            if (aiResponse.files.length > 0) {
-                                // For simplicity, we just take the first file logic for now
-                                // In reality, we might loop or write multiple
-                                const file = aiResponse.files[0];
-                                args.push(file.path);
-                                args.push(file.content);
-                                await this.log(mainAgentName, `AI Generated File: ${file.path}`);
-                            } else {
-                                // Fallback
-                                args.push('ai_output.txt');
-                                args.push(aiResponse.content || 'AI could not generate code.');
-                            }
-
-
-                        } catch (genError: any) {
-                            args.push('error.txt');
-                            args.push(`Generation Error: ${genError.message}`);
+                    // Safety: Inject projectPath if the skill likely needs it and the LLM missed it or it wasn't explicit
+                    // For file system skills, the last argument is often projectPath in this codebase's convention.
+                    // We can check if the last arg looks like a path or just force inject if missing.
+                    // For now, let's strictly follow the convention that many skills here take projectPath as last arg.
+                    // A better way is to update SKILL.md to explicitly ask for projectPath in inputs, 
+                    // but as a fallback/safeguard for this transition:
+                    const filesystemSkills = ['read_codebase', 'write_code', 'run_shell_command', 'manage_git', 'list_directory'];
+                    if (filesystemSkills.includes(action)) {
+                        // Check if last arg is already projectPath (simple check)
+                        if (args.length === 0 || args[args.length - 1] !== projectPath) {
+                            args.push(projectPath);
                         }
                     }
-                    else if (action === 'apply_design_system') args.push('LoginComponent');
-                    else if (action === 'run_shell_command') args.push('ls -la');
-                    else if (action === 'manage_git') args.push('status', '');
-                    else if (action === 'list_directory') args.push('.'); // Default
 
-                    // Inject projectPath as the last argument for filesystem skills
-                    if (['read_codebase', 'write_code', 'run_shell_command', 'manage_git', 'list_directory'].includes(action)) {
-                        args.push(projectPath);
-                    }
-
+                    await this.log(stepAgentDef.name, `Executing ${action}`, { args });
                     const result = await skillFunc(...args);
+
+                    // Store result in context for next steps?
+                    // contextData.lastResult = result; 
+
                     await this.log(stepAgentDef.name, `Executed ${action}`, { result });
                 } else {
                     await this.log(mainAgentName, `Runtime function for skill ${action} not found.`);
@@ -203,12 +218,13 @@ export class Orchestrator {
 
             } catch (err: any) {
                 await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`);
+                // Continue? or Break? -> Continue for now to attempt recovery?
             }
         }
 
-        // Transition to testing (verification) instead of review
+        // Transition to testing
         await this.updateStatus('testing');
-        await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase. Waiting for verification.');
+        await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
     }
 
     // --- Phase 3: Verification ---

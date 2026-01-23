@@ -104,15 +104,47 @@ export class AgentLoader {
             const fileContent = fs.readFileSync(filePath, 'utf-8');
             const { data, content } = matter(fileContent);
 
+            // Extract "Inputs" section if it exists
+            const inputsSection = this.extractSection(content, 'Inputs');
+
             return {
                 name: data.name || skillName,
                 description: data.description || '',
-                instructions: content.trim()
+                instructions: content.trim(),
+                inputs: inputsSection
             };
         } catch (error: any) {
             console.error(`Failed to load skill ${skillName}:`, error);
             throw error;
         }
+    }
+
+    /**
+     * Helper to extract a full section content by header
+     */
+    private static extractSection(markdown: string, header: string): string {
+        const lines = markdown.split('\n');
+        let inSection = false;
+        let content = '';
+
+        for (const line of lines) {
+            // Check for header (e.g., "## Inputs")
+            if (line.match(new RegExp(`^#{1,3}\\s+${header}`))) {
+                inSection = true;
+                continue;
+            }
+
+            // If we hit another header that is same level or higher, stop
+            // Simple heuristic to stop at next ## or #
+            if (inSection && line.match(/^#{1,3}\s/)) {
+                break;
+            }
+
+            if (inSection) {
+                content += line + '\n';
+            }
+        }
+        return content.trim();
     }
 
     /**

@@ -1,10 +1,12 @@
 
+import { MODEL_CONFIG } from './model-config';
+
 export interface LLMResponse {
     content: string;
     files: Array<{ path: string; content: string }>;
 }
 
-export async function generateCode(prompt: string, context: string): Promise<LLMResponse> {
+export async function generateCode(prompt: string, context: string, model: string = MODEL_CONFIG.CODING_MODEL): Promise<LLMResponse> {
     const fullPrompt = `
 You are an expert AI software engineer.
 Context: ${context}
@@ -20,11 +22,11 @@ Return the response in the following JSON format ONLY, without any markdown form
 `;
 
     try {
-        const response = await fetch('http://localhost:11434/api/generate', {
+        const response = await fetch('http://127.0.0.1:11434/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'llama3:latest',
+                model: model,
                 prompt: fullPrompt,
                 stream: false,
                 format: 'json'
@@ -36,6 +38,8 @@ Return the response in the following JSON format ONLY, without any markdown form
         }
 
         const data = await response.json();
+        // Sometimes models return text before JSON or markdown code blocks
+        // We might need a cleaner parser, but for now we trust 'format: json'
         const parsed = JSON.parse(data.response);
 
         return {
@@ -45,7 +49,6 @@ Return the response in the following JSON format ONLY, without any markdown form
 
     } catch (error: any) {
         console.error('LLM Generation Failed:', error);
-        // Fallback to a safe error message if LLM fails
         return {
             content: `Failed to generate code via AI: ${error.message}`,
             files: []
@@ -53,7 +56,12 @@ Return the response in the following JSON format ONLY, without any markdown form
     }
 }
 
-export async function generateJSON(systemPrompt: string, userPrompt: string, schemaDescription: string): Promise<any> {
+export async function generateJSON(
+    systemPrompt: string,
+    userPrompt: string,
+    schemaDescription: string,
+    model: string = MODEL_CONFIG.SMART_MODEL
+): Promise<any> {
     const fullPrompt = `
 ${systemPrompt}
 
@@ -64,11 +72,11 @@ ${schemaDescription}
 `;
 
     try {
-        const response = await fetch('http://localhost:11434/api/generate', {
+        const response = await fetch('http://127.0.0.1:11434/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                model: 'llama3:latest',
+                model: model,
                 prompt: fullPrompt,
                 stream: false,
                 format: 'json'
