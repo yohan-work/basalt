@@ -100,6 +100,7 @@ export class Orchestrator {
         skillName: string,
         taskDescription: string,
         projectPath: string,
+        techStack: string
         // contextData removed, using contextManager
     ): Promise<any[]> {
         const skillDef = AgentLoader.loadSkill(skillName);
@@ -119,7 +120,7 @@ ${inputsDef}
 Context:
 - Task: ${taskDescription}
 - Project Path: ${projectPath}
-- Tech Stack: (Available in file context if relevant)
+- Tech Stack: ${techStack}
 
 ${dynamicContext}
 
@@ -171,6 +172,9 @@ Do not return markdown.
         if (isNode) {
             try {
                 const pkgJson = await skills.read_codebase('package.json', projectPath);
+                // Add package.json to context so the agent knows about dependencies (tailwind, shadcn, etc.)
+                this.contextManager.addFile('package.json', pkgJson);
+
                 if (pkgJson.includes('next')) techStack = 'nextjs';
                 else if (pkgJson.includes('react')) techStack = 'react';
                 else techStack = 'node-generic';
@@ -193,10 +197,11 @@ Do not return markdown.
                 const skillFunc = this.getSkillFunction(action);
 
                 if (skillFunc) {
-                    await this.log(mainAgentName, `Generative Logic: Determining arguments for ${action}...`);
+                    // THOUGHT: Agent is thinking about arguments
+                    await this.log(mainAgentName, `Generative Logic: Determining arguments for ${action}...`, { type: 'THOUGHT' });
 
                     // Generate Arguments with Context Manager
-                    let args = await this.generateSkillArguments(action, task.description, projectPath);
+                    let args = await this.generateSkillArguments(action, task.description, projectPath, techStack);
 
                     // Safety Injection (Project Path)
                     const filesystemSkills = ['read_codebase', 'write_code', 'run_shell_command', 'manage_git', 'list_directory'];
@@ -206,7 +211,8 @@ Do not return markdown.
                         }
                     }
 
-                    await this.log(stepAgentDef.name, `Executing ${action}`, { args });
+                    // ACTION: Agent is about to execute
+                    await this.log(stepAgentDef.name, `Executing ${action}`, { args, type: 'ACTION' });
 
                     // --- EXECUTE ---
                     const result = await skillFunc(...args);
@@ -216,7 +222,7 @@ Do not return markdown.
                     if (action === 'read_codebase' && typeof result === 'string') {
                         const filePath = args[0]; // Convention: first arg is file path
                         this.contextManager.addFile(filePath, result);
-                        this.log('System', `Captured file content for ${filePath} into memory.`);
+                        this.log('System', `Captured file content for ${filePath} into memory.`, { type: 'System' });
                     }
                     else if (action === 'read_codebase' && typeof result === 'object' && result.content) {
                         // Some skills might return object
@@ -226,13 +232,14 @@ Do not return markdown.
 
                     this.contextManager.addLog(stepAgentDef.name, `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`);
 
-                    await this.log(stepAgentDef.name, `Executed ${action}`, { result });
+                    // RESULT: Execution finished
+                    await this.log(stepAgentDef.name, `Executed ${action}`, { result, type: 'RESULT' });
                 } else {
-                    await this.log(mainAgentName, `Runtime function for skill ${action} not found.`);
+                    await this.log(mainAgentName, `Runtime function for skill ${action} not found.`, { type: 'ERROR' });
                 }
 
             } catch (err: any) {
-                await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`);
+                await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`, { type: 'ERROR' });
                 this.contextManager.addLog('System', `Error executing ${action}: ${err.message}`);
             }
         }
