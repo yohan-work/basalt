@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import * as skills from '@/lib/skills';
 import * as llm from '@/lib/llm';
 import { AgentLoader, AgentDefinition } from '../agent-loader';
+import { ContextManager } from '../context-manager';
 
 interface AgentTask {
     id: string; // Supabase UUID
@@ -14,10 +15,12 @@ interface AgentTask {
 export class Orchestrator {
     private taskId: string;
     private mainAgentDef: AgentDefinition;
+    private contextManager: ContextManager;
 
     constructor(taskId: string) {
         this.taskId = taskId;
         this.mainAgentDef = AgentLoader.loadAgent('main-agent');
+        this.contextManager = new ContextManager(taskId);
     }
 
     private async log(agentName: string, message: string, metadata: any = {}) {
@@ -97,10 +100,13 @@ export class Orchestrator {
         skillName: string,
         taskDescription: string,
         projectPath: string,
-        contextData: any
+        // contextData removed, using contextManager
     ): Promise<any[]> {
         const skillDef = AgentLoader.loadSkill(skillName);
         const inputsDef = skillDef.inputs ? `\nInputs Definition:\n${skillDef.inputs}` : '';
+
+        // Get Optimized Context
+        const dynamicContext = this.contextManager.getOptimizedContext(6000);
 
         const systemPrompt = `
 You are an intelligent agent orchestrator.
@@ -113,8 +119,9 @@ ${inputsDef}
 Context:
 - Task: ${taskDescription}
 - Project Path: ${projectPath}
-- Detected Files: ${JSON.stringify(contextData.files || [])}
-- Tech Stack: ${contextData.techStack}
+- Tech Stack: (Available in file context if relevant)
+
+${dynamicContext}
 
 Return ONLY a JSON object with a key "arguments" which is an array of values to pass to the function.
 Example: { "arguments": ["someValue", "anotherValue"] }
@@ -171,10 +178,11 @@ Do not return markdown.
         }
         await this.log(mainAgentName, `Detected Tech Stack: ${techStack}`);
 
-        const contextData = {
-            files: dirList ? dirList.slice(0, 15) : [],
-            techStack
-        };
+        // Initial Scan
+        try {
+            const dirList = await skills.list_directory('.', projectPath);
+            this.contextManager.addLog('System', `Initial Directory Scan: ${JSON.stringify(dirList?.slice(0, 5))}...`);
+        } catch (e) { }
 
         for (const step of workflow.steps) {
             const { agent, action } = step;
@@ -187,29 +195,36 @@ Do not return markdown.
                 if (skillFunc) {
                     await this.log(mainAgentName, `Generative Logic: Determining arguments for ${action}...`);
 
-                    // --- DYNAMIC ARGUMENT GENERATION ---
-                    // Let the LLM decide what arguments to pass based on the Task + Skill Def
-                    let args = await this.generateSkillArguments(action, task.description, projectPath, contextData);
+                    // Generate Arguments with Context Manager
+                    let args = await this.generateSkillArguments(action, task.description, projectPath);
 
-                    // Safety: Inject projectPath if the skill likely needs it and the LLM missed it or it wasn't explicit
-                    // For file system skills, the last argument is often projectPath in this codebase's convention.
-                    // We can check if the last arg looks like a path or just force inject if missing.
-                    // For now, let's strictly follow the convention that many skills here take projectPath as last arg.
-                    // A better way is to update SKILL.md to explicitly ask for projectPath in inputs, 
-                    // but as a fallback/safeguard for this transition:
+                    // Safety Injection (Project Path)
                     const filesystemSkills = ['read_codebase', 'write_code', 'run_shell_command', 'manage_git', 'list_directory'];
                     if (filesystemSkills.includes(action)) {
-                        // Check if last arg is already projectPath (simple check)
                         if (args.length === 0 || args[args.length - 1] !== projectPath) {
                             args.push(projectPath);
                         }
                     }
 
                     await this.log(stepAgentDef.name, `Executing ${action}`, { args });
+
+                    // --- EXECUTE ---
                     const result = await skillFunc(...args);
 
-                    // Store result in context for next steps?
-                    // contextData.lastResult = result; 
+                    // --- CAPTURE CONTEXT ---
+                    // If read_codebase, store content
+                    if (action === 'read_codebase' && typeof result === 'string') {
+                        const filePath = args[0]; // Convention: first arg is file path
+                        this.contextManager.addFile(filePath, result);
+                        this.log('System', `Captured file content for ${filePath} into memory.`);
+                    }
+                    else if (action === 'read_codebase' && typeof result === 'object' && result.content) {
+                        // Some skills might return object
+                        const filePath = args[0];
+                        this.contextManager.addFile(filePath, result.content);
+                    }
+
+                    this.contextManager.addLog(stepAgentDef.name, `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`);
 
                     await this.log(stepAgentDef.name, `Executed ${action}`, { result });
                 } else {
@@ -218,11 +233,10 @@ Do not return markdown.
 
             } catch (err: any) {
                 await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`);
-                // Continue? or Break? -> Continue for now to attempt recovery?
+                this.contextManager.addLog('System', `Error executing ${action}: ${err.message}`);
             }
         }
 
-        // Transition to testing
         await this.updateStatus('testing');
         await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
     }
