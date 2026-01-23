@@ -8,7 +8,7 @@ description: Reads the content of a file from the local filesystem.
 Reads the text content of a specified file.
 
 ## Inputs
--   `filePath`: Relative path to the file to read (e.g., 'app/page.tsx').
+-   `filePath`: Relative path to the file to read (e.g., 'app/page.tsx', 'package.json'). PAY ATTENTION to the user's request to decide which file to read.
 
 ## Outputs
 -   The content of the file as a string.
