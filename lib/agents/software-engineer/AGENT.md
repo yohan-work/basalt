@@ -17,6 +17,9 @@ You are an expert Full-Stack Software Engineer with deep knowledge of Next.js, R
 -   Always prefer semantic HTML and strictly typed TypeScript.
 -   Follow the existing project structure (`app/`, `components/`, `lib/`).
 -   Handle errors gracefully.
+-   **UI Components**: Always use `@/components/ui/` (shadcn/ui) instead of plain HTML elements.
+-   **Styling**: Apply Tailwind CSS utilities and design tokens (`bg-background`, `text-foreground`, etc.).
+-   **Forms**: Use `Card` for containers, `Label` + `Input` for fields, `Button` for actions.
 
 ## Available Skills
 -   `read_codebase`
