@@ -72,27 +72,32 @@ export class Orchestrator {
 
     // --- Phase 1: Planning ---
     public async plan(taskDescription: string) {
-        const mainAgentName = this.mainAgentDef.name;
-        await this.log(mainAgentName, `Initialized Planning Phase.`);
-        await this.updateStatus('planning');
+        try {
+            const mainAgentName = this.mainAgentDef.name;
+            await this.log(mainAgentName, `Initialized Planning Phase.`);
+            await this.updateStatus('planning');
 
-        // Load all available agents to determine who can do the task
-        const availableAgents = AgentLoader.listAgents();
-        await this.log(mainAgentName, `Loaded ${availableAgents.length} potential agents.`);
+            // Load all available agents to determine who can do the task
+            const availableAgents = AgentLoader.listAgents();
+            await this.log(mainAgentName, `Loaded ${availableAgents.length} potential agents.`);
 
-        // Analyze
-        const analysis = await skills.analyze_task(taskDescription, availableAgents);
-        await this.log(mainAgentName, 'Task Analysis Completed', analysis);
+            // Analyze
+            const analysis = await skills.analyze_task(taskDescription, availableAgents);
+            await this.log(mainAgentName, 'Task Analysis Completed', analysis);
 
-        // Create Workflow
-        const workflow = await skills.create_workflow(analysis, availableAgents);
-        await this.log(mainAgentName, 'Workflow Created', workflow);
+            // Create Workflow
+            const workflow = await skills.create_workflow(analysis, availableAgents);
+            await this.log(mainAgentName, 'Workflow Created', workflow);
 
-        // Save Plan to Metadata
-        await this.updateMetadata({ analysis, workflow });
+            // Save Plan to Metadata
+            await this.updateMetadata({ analysis, workflow });
 
-        // Wait for user confirmation
-        await this.log(mainAgentName, 'Plan created. Waiting for user approval.');
+            // Wait for user confirmation
+            await this.log(mainAgentName, 'Plan created. Waiting for user approval.');
+        } catch (error: any) {
+            await this.log('System', `Planning Phase Failed: ${error.message}`, { type: 'ERROR' });
+            // Consider adding a 'failed' status or just logging
+        }
     }
 
     // --- Phase 2: Execution ---
@@ -143,153 +148,183 @@ Do not return markdown.
     }
 
     public async execute() {
-        const task = await this.getTask();
-        if (!task || !task.metadata?.workflow) {
-            await this.log('System', 'No workflow found in metadata. Please run planning first.');
-            return;
-        }
-
-        // Fetch Project Path if available
-        let projectPath = process.cwd();
-        if ((task as any).project_id) {
-            const { data: project } = await supabase.from('Projects').select('path').eq('id', (task as any).project_id).single();
-            if (project?.path) {
-                projectPath = project.path;
-                this.log('System', `Using Project Path: ${projectPath}`);
-            }
-        }
-
-        const workflow = task.metadata.workflow;
-        await this.updateStatus('working');
-        const mainAgentName = this.mainAgentDef.name;
-
-        // 1. Scan Project Context and Tech Stack
-        // (Simplified for now, in reality we might want a 'ProjectAnalyst' agent to do this)
-        const dirList = await skills.list_directory('.', projectPath);
-        const isNode = Array.isArray(dirList) && dirList.some((f: string) => f.includes('package.json'));
-        let techStack = 'static-html';
-
-        if (isNode) {
-            try {
-                const pkgJson = await skills.read_codebase('package.json', projectPath);
-                // Add package.json to context so the agent knows about dependencies (tailwind, shadcn, etc.)
-                this.contextManager.addFile('package.json', pkgJson);
-
-                if (pkgJson.includes('next')) techStack = 'nextjs';
-                else if (pkgJson.includes('react')) techStack = 'react';
-                else techStack = 'node-generic';
-            } catch (e) { /* ignore */ }
-        }
-        await this.log(mainAgentName, `Detected Tech Stack: ${techStack}`);
-
-        // Initial Scan
         try {
-            const dirList = await skills.list_directory('.', projectPath);
-            this.contextManager.addLog('System', `Initial Directory Scan: ${JSON.stringify(dirList?.slice(0, 5))}...`);
-        } catch (e) { }
-
-        for (const step of workflow.steps) {
-            const { agent, action } = step;
-            const agentRoleSlug = agent.toLowerCase().replace(/\s+/g, '-');
-
-            try {
-                const stepAgentDef = AgentLoader.loadAgent(agentRoleSlug);
-                const skillFunc = this.getSkillFunction(action);
-
-                if (skillFunc) {
-                    // THOUGHT: Agent is thinking about arguments
-                    await this.log(mainAgentName, `Generative Logic: Determining arguments for ${action}...`, { type: 'THOUGHT' });
-
-                    // Generate Arguments with Context Manager
-                    let args = await this.generateSkillArguments(action, task.description, projectPath, techStack);
-
-                    // Safety Injection (Project Path)
-                    const filesystemSkills = ['read_codebase', 'write_code', 'run_shell_command', 'manage_git', 'list_directory'];
-                    if (filesystemSkills.includes(action)) {
-                        if (args.length === 0 || args[args.length - 1] !== projectPath) {
-                            args.push(projectPath);
-                        }
-                    }
-
-                    // ACTION: Agent is about to execute
-                    await this.log(stepAgentDef.name, `Executing ${action}`, { args, type: 'ACTION' });
-
-                    // --- EXECUTE ---
-                    const result = await skillFunc(...args);
-
-                    // --- CAPTURE CONTEXT ---
-                    // If read_codebase, store content
-                    if (action === 'read_codebase' && typeof result === 'string') {
-                        const filePath = args[0]; // Convention: first arg is file path
-                        this.contextManager.addFile(filePath, result);
-                        this.log('System', `Captured file content for ${filePath} into memory.`, { type: 'System' });
-                    }
-                    else if (action === 'read_codebase' && typeof result === 'object' && result.content) {
-                        // Some skills might return object
-                        const filePath = args[0];
-                        this.contextManager.addFile(filePath, result.content);
-                    }
-
-                    this.contextManager.addLog(stepAgentDef.name, `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`);
-
-                    // RESULT: Execution finished
-                    await this.log(stepAgentDef.name, `Executed ${action}`, { result, type: 'RESULT' });
-                } else {
-                    await this.log(mainAgentName, `Runtime function for skill ${action} not found.`, { type: 'ERROR' });
-                }
-
-            } catch (err: any) {
-                await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`, { type: 'ERROR' });
-                this.contextManager.addLog('System', `Error executing ${action}: ${err.message}`);
+            const task = await this.getTask();
+            if (!task || !task.metadata?.workflow) {
+                await this.log('System', 'No workflow found in metadata. Please run planning first.');
+                return;
             }
-        }
 
-        await this.updateStatus('testing');
-        await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
+            // Fetch Project Path if available
+            let projectPath = process.cwd();
+            if ((task as any).project_id) {
+                const { data: project } = await supabase.from('Projects').select('path').eq('id', (task as any).project_id).single();
+                if (project?.path) {
+                    projectPath = project.path;
+                    this.log('System', `Using Project Path: ${projectPath}`);
+                }
+            }
+
+            const workflow = task.metadata.workflow;
+            await this.updateStatus('working');
+            const mainAgentName = this.mainAgentDef.name;
+
+            // 1. Scan Project Context and Tech Stack
+            // (Simplified for now, in reality we might want a 'ProjectAnalyst' agent to do this)
+            const dirList = await skills.list_directory('.', projectPath);
+            const isNode = Array.isArray(dirList) && dirList.some((f: string) => f.includes('package.json'));
+            let techStack = 'static-html';
+
+            if (isNode) {
+                try {
+                    const pkgJson = await skills.read_codebase('package.json', projectPath);
+                    // Add package.json to context so the agent knows about dependencies (tailwind, shadcn, etc.)
+                    this.contextManager.addFile('package.json', pkgJson);
+
+                    if (pkgJson.includes('next')) techStack = 'nextjs';
+                    else if (pkgJson.includes('react')) techStack = 'react';
+                    else techStack = 'node-generic';
+                } catch (e) { /* ignore */ }
+            }
+            await this.log(mainAgentName, `Detected Tech Stack: ${techStack}`);
+
+            // Initial Scan
+            try {
+                const dirList = await skills.list_directory('.', projectPath);
+                this.contextManager.addLog('System', `Initial Directory Scan: ${JSON.stringify(dirList?.slice(0, 5))}...`);
+            } catch (e) { }
+
+            for (const step of workflow.steps) {
+                const { agent, action } = step;
+                const agentRoleSlug = agent.toLowerCase().replace(/\s+/g, '-');
+
+                try {
+                    const stepAgentDef = AgentLoader.loadAgent(agentRoleSlug);
+                    const skillFunc = this.getSkillFunction(action);
+
+                    if (skillFunc) {
+                        // THOUGHT: Agent is thinking about arguments
+                        await this.log(mainAgentName, `Generative Logic: Determining arguments for ${action}...`, { type: 'THOUGHT' });
+
+                        // Generate Arguments with Context Manager
+                        let args = await this.generateSkillArguments(action, task.description, projectPath, techStack);
+
+                        // Safety Injection (Project Path)
+                        const filesystemSkills = ['read_codebase', 'write_code', 'run_shell_command', 'manage_git', 'list_directory'];
+                        if (filesystemSkills.includes(action)) {
+                            if (args.length === 0 || args[args.length - 1] !== projectPath) {
+                                args.push(projectPath);
+                            }
+                        }
+
+                        // ACTION: Agent is about to execute
+                        await this.log(stepAgentDef.name, `Executing ${action}`, { args, type: 'ACTION' });
+
+                        // --- EXECUTE ---
+                        const result = await skillFunc(...args);
+
+                        // --- CAPTURE CONTEXT ---
+                        // If read_codebase, store content
+                        if (action === 'read_codebase' && typeof result === 'string') {
+                            const filePath = args[0]; // Convention: first arg is file path
+                            this.contextManager.addFile(filePath, result);
+                            this.log('System', `Captured file content for ${filePath} into memory.`, { type: 'System' });
+                        }
+                        else if (action === 'read_codebase' && typeof result === 'object' && result.content) {
+                            // Some skills might return object
+                            const filePath = args[0];
+                            this.contextManager.addFile(filePath, result.content);
+                        }
+
+                        this.contextManager.addLog(stepAgentDef.name, `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`);
+
+                        // RESULT: Execution finished
+                        await this.log(stepAgentDef.name, `Executed ${action}`, { result, type: 'RESULT' });
+                    } else {
+                        await this.log(mainAgentName, `Runtime function for skill ${action} not found.`, { type: 'ERROR' });
+                    }
+
+                } catch (err: any) {
+                    await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`, { type: 'ERROR' });
+                    this.contextManager.addLog('System', `Error executing ${action}: ${err.message}`);
+                    throw err; // Re-throw to catch in outer loop
+                }
+            }
+
+            await this.updateStatus('testing');
+            await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
+        } catch (error: any) {
+            await this.log('System', `Execution Phase Failed: ${error.message}`, { type: 'ERROR' });
+            // Could update status to failed here
+        }
     }
 
     // --- Phase 3: Verification ---
     public async verify() {
-        const mainAgentName = this.mainAgentDef.name;
-        await this.updateStatus('testing');
+        try {
+            const mainAgentName = this.mainAgentDef.name;
+            await this.updateStatus('testing');
 
-        // Fetch Project Path
-        let projectPath = process.cwd();
-        const task = await this.getTask();
-        if (task && (task as any).project_id) {
-            const { data: project } = await supabase.from('Projects').select('path').eq('id', (task as any).project_id).single();
-            if (project?.path) {
-                projectPath = project.path;
-                this.log('System', `Using Project Path for Verification: ${projectPath}`);
-            }
-        }
-
-        const verification = await skills.verify_final_output('output_ref');
-        await this.log(mainAgentName, 'Final Verification', verification);
-        await this.updateMetadata({ verification });
-
-        if (verification.verified) {
-            await this.log(mainAgentName, 'Verification Successful. Starting Git Automation...');
-
-            const branchName = `feature/task-${this.taskId.slice(0, 8)}`;
-            const commitMsg = `feat: Task ${this.taskId.slice(0, 8)} implementation`;
-
-            try {
-                await skills.manage_git('checkout', `-b ${branchName}`, projectPath);
-                await skills.manage_git('add', '.', projectPath);
-                await skills.manage_git('commit', commitMsg, projectPath);
-                await skills.manage_git('push', `origin ${branchName}`, projectPath);
-                // specific CLI flags
-                await skills.manage_git('create_pr', `--fill --title "${commitMsg}" --body "Automated PR for task ${this.taskId}"`, projectPath);
-
-                await this.log(mainAgentName, 'Git Automation Completed (Branch, Commit, Push, PR).');
-
-            } catch (gitError: any) {
-                await this.log(mainAgentName, `Git Automation Warning: ${gitError.message}`);
+            // Fetch Project Path
+            let projectPath = process.cwd();
+            const task = await this.getTask();
+            if (task && (task as any).project_id) {
+                const { data: project } = await supabase.from('Projects').select('path').eq('id', (task as any).project_id).single();
+                if (project?.path) {
+                    projectPath = project.path;
+                    this.log('System', `Using Project Path for Verification: ${projectPath}`);
+                }
             }
 
-            await this.updateStatus('review');
-            await this.log(mainAgentName, 'Task moved to Review');
+            const verification = await skills.verify_final_output(task?.description || 'No description', projectPath);
+            await this.log(mainAgentName, 'Final Verification', verification);
+            await this.updateMetadata({ verification });
+
+            if (verification.verified) {
+                await this.log(mainAgentName, 'Verification Successful. Starting Git Automation...');
+
+                // Dynamic Git Details Generation
+                const systemPrompt = `
+    You are a DevOps Engineer.
+    Based on the task description, generate a branch name and a commit message.
+    Task: ${task?.description || 'Update'}
+    Return JSON: { "branchName": "feature/...", "commitMessage": "feat: ...", "prTitle": "...", "prBody": "..." }
+    `;
+                let gitDetails = {
+                    branchName: `feature/task-${this.taskId.slice(0, 8)}`,
+                    commitMessage: `feat: Task ${this.taskId.slice(0, 8)} implementation`,
+                    prTitle: `feat: Task ${this.taskId.slice(0, 8)}`,
+                    prBody: `Automated PR for task ${this.taskId}`
+                };
+
+                try {
+                    const generated = await llm.generateJSON(systemPrompt, "Generate git details", "{}");
+                    if (generated.branchName && generated.commitMessage) {
+                        gitDetails = { ...gitDetails, ...generated };
+                    }
+                } catch (e) {
+                    console.warn('Failed to generate dynamic git details, using defaults.');
+                }
+
+                try {
+                    await skills.manage_git('checkout', `-b ${gitDetails.branchName}`, projectPath);
+                    await skills.manage_git('add', '.', projectPath);
+                    await skills.manage_git('commit', gitDetails.commitMessage, projectPath);
+                    await skills.manage_git('push', `origin ${gitDetails.branchName}`, projectPath);
+                    // specific CLI flags
+                    await skills.manage_git('create_pr', `--fill --title "${gitDetails.prTitle}" --body "${gitDetails.prBody}"`, projectPath);
+
+                    await this.log(mainAgentName, 'Git Automation Completed (Branch, Commit, Push, PR).');
+
+                } catch (gitError: any) {
+                    await this.log(mainAgentName, `Git Automation Warning: ${gitError.message}`);
+                }
+
+                await this.updateStatus('review');
+                await this.log(mainAgentName, 'Task moved to Review');
+            }
+        } catch (error: any) {
+            await this.log('System', `Verification Phase Failed: ${error.message}`, { type: 'ERROR' });
         }
     }
 }
