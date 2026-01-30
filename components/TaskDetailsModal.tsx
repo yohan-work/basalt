@@ -3,8 +3,9 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { X, CheckCircle2, Circle, Clock, FileText, Activity } from 'lucide-react';
+import { X, CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2 } from 'lucide-react';
 import { LogViewer } from './LogViewer';
+import { supabase } from '@/lib/supabase';
 
 interface TaskDetailsModalProps {
     task: any | null; // using any for flexibility with metadata
@@ -14,12 +15,49 @@ interface TaskDetailsModalProps {
 
 export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalProps) {
     const [view, setView] = useState<'details' | 'logs'>('details');
+    const [isRetrying, setIsRetrying] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     if (!open || !task) return null;
 
     const metadata = task.metadata || {};
     const analysis = metadata.analysis;
     const workflow = metadata.workflow;
+    const isFailed = task.status === 'failed';
+
+    const handleRetry = async () => {
+        setIsRetrying(true);
+        try {
+            await fetch('/api/agent/retry', {
+                method: 'POST',
+                body: JSON.stringify({ taskId: task.id })
+            });
+            onOpenChange(false);
+        } catch (error) {
+            console.error('Retry failed', error);
+        } finally {
+            setIsRetrying(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!confirm(`"${task.title}" 태스크를 삭제하시겠습니까?`)) return;
+
+        setIsDeleting(true);
+        try {
+            const { error } = await supabase.from('Tasks').delete().eq('id', task.id);
+            if (error) {
+                console.error('Delete failed:', error);
+                alert('삭제 실패: ' + error.message);
+            } else {
+                onOpenChange(false);
+            }
+        } catch (error) {
+            console.error('Delete error:', error);
+        } finally {
+            setIsDeleting(false);
+        }
+    };
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in-0">
@@ -30,7 +68,10 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                     <div className="flex items-center gap-4">
                         <div>
                             <h2 className="text-xl font-semibold leading-none tracking-tight">{task.title}</h2>
-                            <p className="text-sm text-muted-foreground mt-1">Status: <span className="uppercase font-bold text-primary">{task.status}</span></p>
+                            <p className="text-sm text-muted-foreground mt-1">
+                                Status: <span className={`uppercase font-bold ${isFailed ? 'text-red-500' : 'text-primary'}`}>{task.status}</span>
+                                {metadata.retryCount ? <span className="text-xs ml-2">(Retry #{metadata.retryCount})</span> : ''}
+                            </p>
                         </div>
                         <div className="flex bg-muted rounded-md p-1 gap-1 ml-4">
                             <button
@@ -67,6 +108,50 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                                     {task.description}
                                 </div>
                             </div>
+
+                            {/* Error Information Section (If Failed) */}
+                            {isFailed && metadata.lastError && (
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-medium text-red-600 flex items-center gap-2">
+                                        <span className="bg-red-100 text-red-700 p-1 rounded-sm"><AlertTriangle className="w-3 h-3" /></span>
+                                        Error Information
+                                    </h3>
+                                    <div className="p-4 border border-red-200 rounded-md bg-red-50 dark:bg-red-950/30 dark:border-red-800 space-y-3">
+                                        <div className="text-sm">
+                                            <span className="font-semibold text-red-700 dark:text-red-400">Error Message:</span>
+                                            <p className="mt-1 font-mono text-xs text-red-600 dark:text-red-300 bg-red-100 dark:bg-red-900/50 p-2 rounded">
+                                                {metadata.lastError}
+                                            </p>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-4 text-xs">
+                                            {metadata.failedAction && (
+                                                <div>
+                                                    <span className="font-semibold text-red-700 dark:text-red-400">Failed Action:</span>
+                                                    <span className="ml-1 font-mono">{metadata.failedAction}</span>
+                                                </div>
+                                            )}
+                                            {metadata.failedAgent && (
+                                                <div>
+                                                    <span className="font-semibold text-red-700 dark:text-red-400">Failed Agent:</span>
+                                                    <span className="ml-1 font-mono">{metadata.failedAgent}</span>
+                                                </div>
+                                            )}
+                                            {metadata.failedStep !== undefined && (
+                                                <div>
+                                                    <span className="font-semibold text-red-700 dark:text-red-400">Failed at Step:</span>
+                                                    <span className="ml-1">{metadata.failedStep + 1}</span>
+                                                </div>
+                                            )}
+                                            {metadata.failedAt && (
+                                                <div>
+                                                    <span className="font-semibold text-red-700 dark:text-red-400">Failed At:</span>
+                                                    <span className="ml-1">{new Date(metadata.failedAt).toLocaleString()}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Analysis Section (If Available) */}
                             {analysis && (
@@ -141,8 +226,28 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                     )}
                 </div>
 
-                <div className="flex justify-end p-4 bg-muted/20 border-t shrink-0">
-                    <Button onClick={() => onOpenChange(false)}>Close</Button>
+                <div className="flex justify-between p-4 bg-muted/20 border-t shrink-0">
+                    <Button
+                        variant="destructive"
+                        onClick={handleDelete}
+                        disabled={isDeleting}
+                    >
+                        <Trash2 className={`mr-2 h-4 w-4 ${isDeleting ? 'animate-pulse' : ''}`} />
+                        {isDeleting ? '삭제 중...' : '태스크 삭제'}
+                    </Button>
+                    <div className="flex gap-2">
+                        {isFailed && (
+                            <Button
+                                onClick={handleRetry}
+                                disabled={isRetrying}
+                                className="bg-red-600 hover:bg-red-700"
+                            >
+                                <RotateCcw className={`mr-2 h-4 w-4 ${isRetrying ? 'animate-spin' : ''}`} />
+                                {isRetrying ? 'Retrying...' : 'Retry Task'}
+                            </Button>
+                        )}
+                        <Button onClick={() => onOpenChange(false)}>Close</Button>
+                    </div>
                 </div>
             </div>
         </div>
