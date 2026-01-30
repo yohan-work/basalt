@@ -139,9 +139,17 @@ Context:
 
 ${dynamicContext}
 
-Return ONLY a JSON object with a key "arguments" which is an array of values to pass to the function.
-Example: { "arguments": ["someValue", "anotherValue"] }
-Do not return markdown.
+IMPORTANT RULES:
+1. Generate ACTUAL values, NOT placeholder names like "filePath", "content", "args" etc.
+2. For file paths, use real paths like "components/MyComponent.tsx", "app/page.tsx", "lib/utils.ts"
+3. For code content, generate the COMPLETE working code that fulfills the task.
+4. Consider the Tech Stack when choosing file extensions (.tsx for React/Next.js, .ts for TypeScript, etc.)
+5. If creating a new component/page, ensure it has proper imports and exports.
+
+Return ONLY a JSON object with a key "arguments" which is an array of actual values to pass to the function.
+Example for write_code: { "arguments": ["components/Button.tsx", "import React from 'react';\\n\\nexport function Button() { return <button>Click</button>; }"] }
+Example for read_codebase: { "arguments": ["package.json"] }
+Do not return markdown or placeholders.
 `;
 
         try {
@@ -178,6 +186,24 @@ Do not return markdown.
             const workflow = task.metadata.workflow;
             await this.updateStatus('working');
             const mainAgentName = this.mainAgentDef.name;
+
+            // Create a new branch for this task BEFORE making any changes
+            const branchName = `feature/task-${this.taskId.slice(0, 8)}`;
+            try {
+                await this.log(mainAgentName, `Creating feature branch: ${branchName}`);
+                await skills.manage_git('checkout', `-b ${branchName}`, projectPath);
+                await this.updateMetadata({ branchName });
+                await this.log(mainAgentName, `Switched to branch: ${branchName}`);
+            } catch (branchError: any) {
+                // Branch might already exist, try to switch to it
+                await this.log(mainAgentName, `Branch creation failed, attempting to switch: ${branchError.message}`);
+                try {
+                    await skills.manage_git('checkout', branchName, projectPath);
+                    await this.updateMetadata({ branchName });
+                } catch (switchError: any) {
+                    await this.log(mainAgentName, `Warning: Could not switch to feature branch: ${switchError.message}`, { type: 'WARNING' });
+                }
+            }
 
             // 1. Scan Project Context and Tech Stack
             // (Simplified for now, in reality we might want a 'ProjectAnalyst' agent to do this)
@@ -313,15 +339,17 @@ Do not return markdown.
             if (verification.verified) {
                 await this.log(mainAgentName, 'Verification Successful. Starting Git Automation...');
 
-                // Dynamic Git Details Generation
+                // Get branch name from metadata (created during execute phase)
+                const branchName = task?.metadata?.branchName || `feature/task-${this.taskId.slice(0, 8)}`;
+
+                // Dynamic Git Details Generation (commit message and PR details only)
                 const systemPrompt = `
     You are a DevOps Engineer.
-    Based on the task description, generate a branch name and a commit message.
+    Based on the task description, generate a commit message and PR details.
     Task: ${task?.description || 'Update'}
-    Return JSON: { "branchName": "feature/...", "commitMessage": "feat: ...", "prTitle": "...", "prBody": "..." }
+    Return JSON: { "commitMessage": "feat: ...", "prTitle": "...", "prBody": "..." }
     `;
                 let gitDetails = {
-                    branchName: `feature/task-${this.taskId.slice(0, 8)}`,
                     commitMessage: `feat: Task ${this.taskId.slice(0, 8)} implementation`,
                     prTitle: `feat: Task ${this.taskId.slice(0, 8)}`,
                     prBody: `Automated PR for task ${this.taskId}`
@@ -329,7 +357,7 @@ Do not return markdown.
 
                 try {
                     const generated = await llm.generateJSON(systemPrompt, "Generate git details", "{}");
-                    if (generated.branchName && generated.commitMessage) {
+                    if (generated.commitMessage) {
                         gitDetails = { ...gitDetails, ...generated };
                     }
                 } catch (e) {
@@ -337,14 +365,14 @@ Do not return markdown.
                 }
 
                 try {
-                    await skills.manage_git('checkout', `-b ${gitDetails.branchName}`, projectPath);
+                    // Branch was already created in execute(), just commit, push and create PR
                     await skills.manage_git('add', '.', projectPath);
                     await skills.manage_git('commit', gitDetails.commitMessage, projectPath);
-                    await skills.manage_git('push', `origin ${gitDetails.branchName}`, projectPath);
-                    // specific CLI flags
+                    await skills.manage_git('push', `origin ${branchName}`, projectPath);
+                    // Create PR from feature branch to main
                     await skills.manage_git('create_pr', `--fill --title "${gitDetails.prTitle}" --body "${gitDetails.prBody}"`, projectPath);
 
-                    await this.log(mainAgentName, 'Git Automation Completed (Branch, Commit, Push, PR).');
+                    await this.log(mainAgentName, `Git Automation Completed (Commit, Push, PR on branch ${branchName}).`);
 
                 } catch (gitError: any) {
                     await this.log(mainAgentName, `Git Automation Warning: ${gitError.message}`);
