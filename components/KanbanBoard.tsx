@@ -174,9 +174,21 @@ export function KanbanBoard() {
 
     const handleDeleteTask = async (e: React.MouseEvent, task: Task) => {
         e.stopPropagation();
-        if (!confirm(`"${task.title}" 태스크를 삭제하시겠습니까?`)) return;
+        if (!confirm(`"${task.title}" 태스크를 삭제하시겠습니까?\n(관련 로그도 함께 삭제됩니다)`)) return;
 
         try {
+            // 1. 먼저 관련 Execution_Logs 삭제
+            const { error: logsError } = await supabase
+                .from('Execution_Logs')
+                .delete()
+                .eq('task_id', task.id);
+
+            if (logsError) {
+                console.error('Logs delete failed:', logsError);
+                // 로그 삭제 실패해도 태스크 삭제 시도
+            }
+
+            // 2. 태스크 삭제
             const { error } = await supabase.from('Tasks').delete().eq('id', task.id);
             if (error) {
                 console.error('Delete failed:', error);

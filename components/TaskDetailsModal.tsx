@@ -41,10 +41,21 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
     };
 
     const handleDelete = async () => {
-        if (!confirm(`"${task.title}" 태스크를 삭제하시겠습니까?`)) return;
+        if (!confirm(`"${task.title}" 태스크를 삭제하시겠습니까?\n(관련 로그도 함께 삭제됩니다)`)) return;
 
         setIsDeleting(true);
         try {
+            // 1. 먼저 관련 Execution_Logs 삭제
+            const { error: logsError } = await supabase
+                .from('Execution_Logs')
+                .delete()
+                .eq('task_id', task.id);
+
+            if (logsError) {
+                console.error('Logs delete failed:', logsError);
+            }
+
+            // 2. 태스크 삭제
             const { error } = await supabase.from('Tasks').delete().eq('id', task.id);
             if (error) {
                 console.error('Delete failed:', error);
