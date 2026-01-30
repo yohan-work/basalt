@@ -8,8 +8,18 @@ import { ContextManager } from '../context-manager';
 interface AgentTask {
     id: string; // Supabase UUID
     description: string;
-    status: 'pending' | 'planning' | 'working' | 'testing' | 'review' | 'done';
+    status: 'pending' | 'planning' | 'working' | 'testing' | 'review' | 'done' | 'failed';
     metadata?: any; // JSONB for storing plan, workflow, results
+}
+
+interface ErrorMetadata {
+    lastError: string;
+    failedStep: number;
+    failedAction: string;
+    failedAgent: string;
+    retryCount: number;
+    failedAt: string;
+    previousStatus: string;
 }
 
 export class Orchestrator {
@@ -247,7 +257,22 @@ Do not return markdown.
                 } catch (err: any) {
                     await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`, { type: 'ERROR' });
                     this.contextManager.addLog('System', `Error executing ${action}: ${err.message}`);
-                    throw err; // Re-throw to catch in outer loop
+
+                    // Save error metadata for retry functionality
+                    const stepIndex = workflow.steps.indexOf(step);
+                    const errorMetadata: ErrorMetadata = {
+                        lastError: err.message,
+                        failedStep: stepIndex,
+                        failedAction: action,
+                        failedAgent: agentRoleSlug,
+                        retryCount: (task.metadata?.retryCount || 0) + 1,
+                        failedAt: new Date().toISOString(),
+                        previousStatus: task.status
+                    };
+                    await this.updateMetadata(errorMetadata);
+                    await this.updateStatus('failed');
+                    await this.log('System', `Task marked as failed. Can be retried from step ${stepIndex + 1}.`, { type: 'ERROR' });
+                    return; // Exit instead of throwing
                 }
             }
 
@@ -255,7 +280,12 @@ Do not return markdown.
             await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
         } catch (error: any) {
             await this.log('System', `Execution Phase Failed: ${error.message}`, { type: 'ERROR' });
-            // Could update status to failed here
+            await this.updateStatus('failed');
+            await this.updateMetadata({
+                lastError: error.message,
+                failedAt: new Date().toISOString(),
+                retryCount: ((await this.getTask())?.metadata?.retryCount || 0) + 1
+            });
         }
     }
 
@@ -325,6 +355,41 @@ Do not return markdown.
             }
         } catch (error: any) {
             await this.log('System', `Verification Phase Failed: ${error.message}`, { type: 'ERROR' });
+            await this.updateStatus('failed');
+            await this.updateMetadata({
+                lastError: error.message,
+                failedAction: 'verify',
+                failedAt: new Date().toISOString(),
+                retryCount: ((await this.getTask())?.metadata?.retryCount || 0) + 1
+            });
+        }
+    }
+
+    // --- Retry: Resume from failed step ---
+    public async retry() {
+        try {
+            const task = await this.getTask();
+            if (!task || task.status !== 'failed') {
+                await this.log('System', 'Task is not in failed state. Cannot retry.');
+                return;
+            }
+
+            const failedStep = task.metadata?.failedStep;
+            const failedAction = task.metadata?.failedAction;
+
+            await this.log('System', `Retrying task from step ${failedStep !== undefined ? failedStep + 1 : 'beginning'}...`);
+
+            // If failed during verification, retry verification
+            if (failedAction === 'verify') {
+                await this.verify();
+                return;
+            }
+
+            // If failed during execution, we need to re-run execute
+            // For now, restart the entire execution (future: resume from failedStep)
+            await this.execute();
+        } catch (error: any) {
+            await this.log('System', `Retry failed: ${error.message}`, { type: 'ERROR' });
         }
     }
 }
