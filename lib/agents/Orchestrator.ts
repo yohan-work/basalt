@@ -22,6 +22,16 @@ interface ErrorMetadata {
     previousStatus: string;
 }
 
+interface ProgressInfo {
+    currentStep: number;      // 현재 실행 중인 step (0-based)
+    totalSteps: number;       // 전체 step 수
+    currentAction: string;    // 현재 실행 중인 action 이름
+    currentAgent: string;     // 현재 담당 agent 이름
+    completedSteps: string[]; // 완료된 step action 목록
+    startedAt?: string;       // 실행 시작 시간
+    stepStatus: 'pending' | 'running' | 'completed' | 'failed'; // 현재 step 상태
+}
+
 export class Orchestrator {
     private taskId: string;
     private mainAgentDef: AgentDefinition;
@@ -67,6 +77,22 @@ export class Orchestrator {
             await supabase.from('Tasks').update({ metadata: newMetadata }).eq('id', this.taskId);
         } catch (e) {
             console.error('Supabase Metadata Update Error:', e);
+        }
+    }
+
+    private async updateProgress(progress: Partial<ProgressInfo>) {
+        try {
+            const { data: current } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+            const currentProgress = current?.metadata?.progress || {};
+            const newProgress: ProgressInfo = {
+                ...currentProgress,
+                ...progress
+            };
+            await supabase.from('Tasks').update({
+                metadata: { ...(current?.metadata || {}), progress: newProgress }
+            }).eq('id', this.taskId);
+        } catch (e) {
+            console.error('Supabase Progress Update Error:', e);
         }
     }
 
@@ -230,13 +256,34 @@ Do not return markdown or placeholders.
                 this.contextManager.addLog('System', `Initial Directory Scan: ${JSON.stringify(dirList?.slice(0, 5))}...`);
             } catch (e) { }
 
-            for (const step of workflow.steps) {
+            // Initialize progress tracking
+            const totalSteps = workflow.steps.length;
+            await this.updateProgress({
+                currentStep: 0,
+                totalSteps,
+                currentAction: '',
+                currentAgent: '',
+                completedSteps: [],
+                startedAt: new Date().toISOString(),
+                stepStatus: 'pending'
+            });
+
+            for (let stepIndex = 0; stepIndex < workflow.steps.length; stepIndex++) {
+                const step = workflow.steps[stepIndex];
                 const { agent, action } = step;
                 const agentRoleSlug = agent.toLowerCase().replace(/\s+/g, '-');
 
                 try {
                     const stepAgentDef = AgentLoader.loadAgent(agentRoleSlug);
                     const skillFunc = this.getSkillFunction(action);
+
+                    // Update progress: step starting
+                    await this.updateProgress({
+                        currentStep: stepIndex,
+                        currentAction: action,
+                        currentAgent: stepAgentDef.name,
+                        stepStatus: 'running'
+                    });
 
                     if (skillFunc) {
                         // THOUGHT: Agent is thinking about arguments
@@ -276,6 +323,14 @@ Do not return markdown or placeholders.
 
                         // RESULT: Execution finished
                         await this.log(stepAgentDef.name, `Executed ${action}`, { result, type: 'RESULT' });
+
+                        // Update progress: step completed
+                        const { data: currentMeta } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+                        const completedSteps = currentMeta?.metadata?.progress?.completedSteps || [];
+                        await this.updateProgress({
+                            completedSteps: [...completedSteps, action],
+                            stepStatus: 'completed'
+                        });
                     } else {
                         await this.log(mainAgentName, `Runtime function for skill ${action} not found.`, { type: 'ERROR' });
                     }
@@ -284,8 +339,12 @@ Do not return markdown or placeholders.
                     await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`, { type: 'ERROR' });
                     this.contextManager.addLog('System', `Error executing ${action}: ${err.message}`);
 
+                    // Update progress: step failed
+                    await this.updateProgress({
+                        stepStatus: 'failed'
+                    });
+
                     // Save error metadata for retry functionality
-                    const stepIndex = workflow.steps.indexOf(step);
                     const errorMetadata: ErrorMetadata = {
                         lastError: err.message,
                         failedStep: stepIndex,

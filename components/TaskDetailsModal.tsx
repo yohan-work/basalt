@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { X, CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2 } from 'lucide-react';
 import { LogViewer } from './LogViewer';
+import { StepProgress } from './StepProgress';
 import { supabase } from '@/lib/supabase';
 
 interface TaskDetailsModalProps {
@@ -194,20 +195,31 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                                         <span className="bg-amber-100 text-amber-700 p-1 rounded-sm"><CheckCircle2 className="w-3 h-3" /></span>
                                         Execution Plan
                                     </h3>
-                                    <div className="rounded-md border bg-card overflow-hidden">
-                                        {workflow.steps.map((step: any, index: number) => (
-                                            <div key={index} className="flex items-center gap-3 p-3 text-sm border-b last:border-0 hover:bg-muted/20">
-                                                <div className="flex h-6 w-6 items-center justify-center rounded-full border bg-background text-xs font-semibold text-muted-foreground shadow-sm shrink-0">
-                                                    {index + 1}
+
+                                    {/* Show StepProgress if progress exists, otherwise show static list */}
+                                    {metadata.progress ? (
+                                        <div className="p-4 border rounded-md bg-card">
+                                            <StepProgress
+                                                progress={metadata.progress}
+                                                workflow={workflow}
+                                            />
+                                        </div>
+                                    ) : (
+                                        <div className="rounded-md border bg-card overflow-hidden">
+                                            {workflow.steps.map((step: any, index: number) => (
+                                                <div key={index} className="flex items-center gap-3 p-3 text-sm border-b last:border-0 hover:bg-muted/20">
+                                                    <div className="flex h-6 w-6 items-center justify-center rounded-full border bg-background text-xs font-semibold text-muted-foreground shadow-sm shrink-0">
+                                                        {index + 1}
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="font-medium truncate">{step.action}</div>
+                                                        <div className="text-xs text-muted-foreground">Assigned to: {step.agent}</div>
+                                                    </div>
+                                                    <Circle className="h-3 w-3 text-muted-foreground/30" />
                                                 </div>
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="font-medium truncate">{step.action}</div>
-                                                    <div className="text-xs text-muted-foreground">Assigned to: {step.agent}</div>
-                                                </div>
-                                                <Circle className="h-3 w-3 text-muted-foreground/30" />
-                                            </div>
-                                        ))}
-                                    </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             )}
 

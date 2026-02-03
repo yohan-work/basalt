@@ -9,6 +9,7 @@ import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCirc
 import { CreateTaskModal } from './CreateTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
 import { ProjectSelector } from './ProjectSelector';
+import { StepProgress } from './StepProgress';
 
 interface Task {
     id: string;
@@ -22,6 +23,15 @@ interface Task {
         failedStep?: number;
         failedAction?: string;
         retryCount?: number;
+        progress?: {
+            currentStep: number;
+            totalSteps: number;
+            currentAction: string;
+            currentAgent: string;
+            completedSteps: string[];
+            startedAt?: string;
+            stepStatus: 'pending' | 'running' | 'completed' | 'failed';
+        };
     };
 }
 
@@ -328,6 +338,10 @@ export function KanbanBoard() {
                                                     <p className="text-xs text-red-600 dark:text-red-400 line-clamp-2 font-mono">
                                                         ⚠️ {task.metadata.lastError}
                                                     </p>
+                                                )}
+                                                {/* Progress for working tasks */}
+                                                {task.status === 'working' && task.metadata?.progress && (
+                                                    <StepProgress progress={task.metadata.progress} compact />
                                                 )}
                                                 <div className="flex justify-between items-center">
                                                     <Badge
