@@ -7,6 +7,7 @@ import { X, CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, Rota
 import { LogViewer } from './LogViewer';
 import { StepProgress } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
+import { AgentStatusDashboard } from './AgentStatusDashboard';
 import { supabase } from '@/lib/supabase';
 
 interface TaskDetailsModalProps {
@@ -199,6 +200,12 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
 
                                     {/* Flowchart Visualization */}
                                     <WorkflowFlowchart
+                                        workflow={workflow}
+                                        progress={metadata.progress}
+                                    />
+
+                                    {/* Agent Status Dashboard */}
+                                    <AgentStatusDashboard
                                         workflow={workflow}
                                         progress={metadata.progress}
                                     />
