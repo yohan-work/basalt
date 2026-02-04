@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { X, CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2 } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { StepProgress } from './StepProgress';
+import { WorkflowFlowchart } from './WorkflowFlowchart';
 import { supabase } from '@/lib/supabase';
 
 interface TaskDetailsModalProps {
@@ -195,6 +196,12 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                                         <span className="bg-amber-100 text-amber-700 p-1 rounded-sm"><CheckCircle2 className="w-3 h-3" /></span>
                                         Execution Plan
                                     </h3>
+
+                                    {/* Flowchart Visualization */}
+                                    <WorkflowFlowchart
+                                        workflow={workflow}
+                                        progress={metadata.progress}
+                                    />
 
                                     {/* Show StepProgress if progress exists, otherwise show static list */}
                                     {metadata.progress ? (
