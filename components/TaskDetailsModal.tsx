@@ -8,6 +8,7 @@ import { LogViewer } from './LogViewer';
 import { StepProgress } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
 import { AgentStatusDashboard } from './AgentStatusDashboard';
+import { FileActivityTree } from './FileActivityTree';
 import { supabase } from '@/lib/supabase';
 
 interface TaskDetailsModalProps {
@@ -209,6 +210,9 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                                         workflow={workflow}
                                         progress={metadata.progress}
                                     />
+
+                                    {/* File Activity Tree */}
+                                    <FileActivityTree taskId={task.id} />
 
                                     {/* Show StepProgress if progress exists, otherwise show static list */}
                                     {metadata.progress ? (
