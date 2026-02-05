@@ -5,7 +5,8 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2 } from 'lucide-react';
+import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3 } from 'lucide-react';
+import Link from 'next/link';
 import { CreateTaskModal } from './CreateTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
 import { ProjectSelector } from './ProjectSelector';
@@ -272,9 +273,16 @@ export function KanbanBoard() {
                     <h1 className="text-2xl font-bold tracking-tight">AI Agent Kanban</h1>
                     <ProjectSelector selectedProjectId={selectedProjectId} onProjectSelect={setSelectedProjectId} />
                 </div>
-                <Button onClick={() => setIsCreateModalOpen(true)} disabled={!selectedProjectId} className="rounded-none bg-primary text-primary-foreground hover:bg-primary/90">
-                    <Plus className="mr-2 h-4 w-4" /> Request Work
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Link href="/analytics">
+                        <Button variant="outline" className="rounded-none">
+                            <BarChart3 className="mr-2 h-4 w-4" /> Analytics
+                        </Button>
+                    </Link>
+                    <Button onClick={() => setIsCreateModalOpen(true)} disabled={!selectedProjectId} className="rounded-none bg-primary text-primary-foreground hover:bg-primary/90">
+                        <Plus className="mr-2 h-4 w-4" /> Request Work
+                    </Button>
+                </div>
             </div>
 
             <CreateTaskModal
