@@ -3,15 +3,16 @@ import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
-import { AgentDefinition } from '../agent-loader';
+import { AgentDefinition, AgentLoader } from '../agent-loader';
 import * as llm from '../llm';
 
 const execAsync = promisify(exec);
 
 // --- Main Agent Skills ---
-export async function analyze_task(taskDescription: string, availableAgents: AgentDefinition[]) {
+export async function analyze_task(taskDescription: string, availableAgents?: AgentDefinition[]) {
     try {
-        const agentsList = availableAgents.map(a => `- ${a.name} (Role: ${a.role}, Skills: ${a.skills.join(', ')})`).join('\n');
+        const agents = availableAgents?.length ? availableAgents : AgentLoader.listAgents();
+        const agentsList = agents.map(a => `- ${a.name} (Role: ${a.role}, Skills: ${a.skills.join(', ')})`).join('\n');
 
         const systemPrompt = `You are a Lead AI Architect.
 Your goal is to analyze a user request and determine which agents are required to fulfill it.
