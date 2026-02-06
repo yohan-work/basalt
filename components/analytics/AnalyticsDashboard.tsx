@@ -17,6 +17,9 @@ import { Activity, CheckCircle2, AlertOctagon, BarChart3, RotateCcw } from 'luci
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TeamActivityView } from './team/TeamActivityView';
+
 export function AnalyticsDashboard() {
     const [agentStats, setAgentStats] = useState<AgentPerformance[]>([]);
     const [taskMetrics, setTaskMetrics] = useState<TaskSuccessMetrics | null>(null);
@@ -52,47 +55,60 @@ export function AnalyticsDashboard() {
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
-                <h2 className="text-3xl font-bold tracking-tight">AI Team Overview</h2>
+                <h2 className="text-3xl font-bold tracking-tight">AI Team Analytics</h2>
                 <Button variant="outline" size="sm" onClick={fetchData}>
                     <RotateCcw className="mr-2 h-4 w-4" />
-                    Refresh
+                    Refresh Data
                 </Button>
             </div>
 
-            {/* Key Metrics */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <StatCard
-                    title="Total Tasks"
-                    value={taskMetrics?.totalTasks || 0}
-                    icon={Activity}
-                    description="All time tasks"
-                />
-                <StatCard
-                    title="Success Rate"
-                    value={`${taskMetrics?.successRate || 0}%`}
-                    icon={CheckCircle2}
-                    trend={taskMetrics?.successRate && taskMetrics.successRate > 80 ? "Healthy" : undefined}
-                    description="Completed / (Completed + Failed)"
-                />
-                <StatCard
-                    title="Completed"
-                    value={taskMetrics?.completedTasks || 0}
-                    icon={CheckCircle2}
-                    description="Succesfully finished"
-                />
-                <StatCard
-                    title="Failed"
-                    value={taskMetrics?.failedTasks || 0}
-                    icon={AlertOctagon}
-                    description="Needs attention"
-                />
-            </div>
+            <Tabs defaultValue="overview" className="space-y-4">
+                <TabsList>
+                    <TabsTrigger value="overview">Overview</TabsTrigger>
+                    <TabsTrigger value="team-activity">Team Activity 🔴 Live</TabsTrigger>
+                </TabsList>
 
-            {/* Charts & Tables */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-                <AgentActivityChart data={agentStats} />
-                <ErrorRankingTable errors={errorStats} />
-            </div>
+                <TabsContent value="overview" className="space-y-4">
+                    {/* Key Metrics */}
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                        <StatCard
+                            title="Total Tasks"
+                            value={taskMetrics?.totalTasks || 0}
+                            icon={Activity}
+                            description="All time tasks"
+                        />
+                        <StatCard
+                            title="Success Rate"
+                            value={`${taskMetrics?.successRate || 0}%`}
+                            icon={CheckCircle2}
+                            trend={taskMetrics?.successRate && taskMetrics.successRate > 80 ? "Healthy" : undefined}
+                            description="Completed / (Completed + Failed)"
+                        />
+                        <StatCard
+                            title="Completed"
+                            value={taskMetrics?.completedTasks || 0}
+                            icon={CheckCircle2}
+                            description="Succesfully finished"
+                        />
+                        <StatCard
+                            title="Failed"
+                            value={taskMetrics?.failedTasks || 0}
+                            icon={AlertOctagon}
+                            description="Needs attention"
+                        />
+                    </div>
+
+                    {/* Charts & Tables */}
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
+                        <AgentActivityChart data={agentStats} />
+                        <ErrorRankingTable errors={errorStats} />
+                    </div>
+                </TabsContent>
+
+                <TabsContent value="team-activity">
+                    <TeamActivityView />
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }
