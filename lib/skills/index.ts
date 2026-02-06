@@ -40,10 +40,11 @@ ${agentsList}
     }
 }
 
-export async function create_workflow(taskAnalysis: any, availableAgents: AgentDefinition[]) {
+export async function create_workflow(taskAnalysis: any, availableAgents?: AgentDefinition[]) {
     try {
-        const requiredAgents = taskAnalysis.required_agents;
-        const agentsInfo = availableAgents
+        const agents = availableAgents?.length ? availableAgents : AgentLoader.listAgents();
+        const requiredAgents = taskAnalysis.required_agents || [];
+        const agentsInfo = agents
             .filter(a => requiredAgents.includes(a.name) || a.role === 'main-agent')
             .map(a => `- ${a.name}: [${a.skills.join(', ')}]`)
             .join('\n');
