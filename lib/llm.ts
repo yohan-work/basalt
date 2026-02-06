@@ -71,7 +71,25 @@ Return the response in the following JSON format ONLY, without any markdown form
 ${schemaDescription}
 `;
 
+
     try {
+        if (process.env.MOCK_LLM === 'true') {
+            console.log('[MockLLM] Generating JSON for prompt:', userPrompt);
+            // Simple mock logic for Team Orchestrator
+            if (systemPrompt.includes('COLLABORATION PROTOCOL')) {
+                return {
+                    thought: "I will check the board and send a message.",
+                    actions: [
+                        {
+                            type: "send_message",
+                            payload: { content: "Hello team, I am ready to work." }
+                        }
+                    ]
+                };
+            }
+            return JSON.parse(schemaDescription || '{}');
+        }
+
         const response = await fetch('http://127.0.0.1:11434/api/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
