@@ -119,3 +119,31 @@ export async function getErrorAnalysis(): Promise<ErrorStats[]> {
         .sort((a, b) => b.count - a.count)
         .slice(0, 10); // Top 10
 }
+
+/**
+ * Fetches the Team State (Messages, Board) from the most recent active team task.
+ */
+export async function getTeamState(taskId?: string): Promise<import('./team-types').TeamState | null> {
+    let query = supabase.from('Tasks').select('metadata');
+
+    if (taskId) {
+        query = query.eq('id', taskId);
+    } else {
+        // Find most recent task with teamState
+        // Filter where metadata contains teamState (requires JSONB filter, simplified here)
+        query = query.order('created_at', { ascending: false }).limit(1);
+    }
+
+    const { data, error } = await query.single();
+
+    if (error || !data) {
+        return null;
+    }
+
+    // Check if metadata has teamState
+    if (data.metadata?.teamState) {
+        return data.metadata.teamState as import('./team-types').TeamState;
+    }
+
+    return null;
+}
