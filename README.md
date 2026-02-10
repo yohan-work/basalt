@@ -39,6 +39,8 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - 컨텍스트 관리 (이전 step에서 읽은 파일 내용 등을 다음 step에 전달)
 - 실패 시 에러 정보 저장 및 실패한 step부터 재시도 지원
 - 매 step 완료 시 컨텍스트를 Supabase에 영속화하여 재시도 시 복원
+- SSE(Server-Sent Events) 기반 실시간 진행 스트리밍 (optional `StreamEmitter` 주입)
+- 파일 변경 diff 추적 (`write_code` 실행 시 before/after 캡처 → `metadata.fileChanges`)
 
 ### TeamOrchestrator
 
@@ -62,6 +64,7 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 - **Exponential backoff 재시도** (최대 3회, 1s → 2s → 4s)
 - **AbortController 기반 타임아웃** (코드 생성 120초, JSON 생성 60초)
 - **환경변수 기반 설정** (`OLLAMA_BASE_URL`, 모델 오버라이드)
+- **SSE 스트리밍 모드** — `stream: true`로 Ollama API 호출 시 토큰 단위 실시간 전송 지원 (`generateCodeStream`, `generateJSONStream`)
 
 용도별로 다른 모델을 사용합니다 (`model-config.ts`):
 
@@ -128,6 +131,7 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | POST | `/api/agent/verify` | 결과 검증 및 Git PR 생성 |
 | POST | `/api/agent/retry` | 실패한 태스크 재시도 (실패 step부터 재개) |
 | POST | `/api/agent/skills` | 스킬 동적 실행 (`skillName`, `args`) |
+| GET | `/api/agent/stream` | SSE 실시간 진행 스트리밍 (`taskId`, `action` 쿼리 파라미터) |
 | POST | `/api/system/dialog` | macOS 폴더 선택 다이얼로그 |
 | POST | `/api/team/execute` | 팀 협업 오케스트레이션 (최대 5분) |
 
@@ -139,10 +143,12 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 
 | 컴포넌트 | 하는 일 |
 |----------|--------|
-| `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독. 스켈레톤 로딩, 에러 토스트, 빈 상태 표시 |
+| `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독. SSE 기반 액션 스트리밍. 스켈레톤 로딩, 에러 토스트, 빈 상태 표시 |
 | `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR). `taskId` 기반 필터링 지원 |
-| `TaskDetailsModal` | 태스크 상세 모달 (Radix Dialog 기반). 워크플로우, 에이전트 상태, 파일 활동, 로그를 한눈에 |
-| `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 제목, 설명, 우선순위. Cmd+Enter 단축키, 폼 자동 초기화 |
+| `TaskDetailsModal` | 태스크 상세 모달 (Radix Dialog 기반). Details, Live, Changes, Logs 4개 탭. 워크플로우, 에이전트 상태, 파일 활동, 코드 diff, 실시간 진행을 한눈에 |
+| `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 8종 템플릿 선택 지원. 제목, 설명, 우선순위. Cmd+Enter 단축키, 폼 자동 초기화 |
+| `CodeDiffViewer` | 파일 변경 diff 뷰어. 사이드바 파일 목록 + split/unified diff. 신규/수정 파일 구분. 다크모드 지원 |
+| `LiveProgressPanel` | SSE 기반 실시간 진행 패널. 프로그레스 바, ETA 카운트다운, LLM 토큰 스트리밍, 완료 step 타이밍 |
 | `ProjectSelector` | 프로젝트 선택/생성. 폴더 브라우저 연동 |
 | `WorkflowFlowchart` | React Flow 기반 워크플로우 시각화. 에이전트별 색상, 상태 표시 |
 | `AgentStatusDashboard` | 에이전트 실시간 상태 대시보드 (idle/active/completed) |
@@ -177,6 +183,7 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 - **Flowchart**: @xyflow/react (React Flow)
 - **Database**: Supabase
 - **LLM**: Ollama (로컬, 환경변수로 설정 가능)
+- **Diff Viewer**: react-diff-viewer-continued
 - **Utilities**: gray-matter (마크다운 파싱)
 - **Theming**: 다크/라이트 모드 (시스템 감지 + 수동 토글, FOUC 방지)
 
@@ -240,6 +247,7 @@ basalt/
 │   │   │   ├── plan/route.ts     # 태스크 분석 및 계획
 │   │   │   ├── retry/route.ts    # 실패 재시도
 │   │   │   ├── skills/route.ts   # 스킬 동적 실행
+│   │   │   ├── stream/route.ts   # SSE 실시간 스트리밍
 │   │   │   └── verify/route.ts   # 결과 검증
 │   │   ├── system/
 │   │   │   └── dialog/route.ts   # macOS 폴더 선택
@@ -265,13 +273,15 @@ basalt/
 │   │   └── StatCard.tsx              # 통계 카드
 │   ├── ui/                    # shadcn/ui 컴포넌트 (13개)
 │   ├── AgentStatusDashboard.tsx  # 에이전트 상태 대시보드
-│   ├── CreateTaskModal.tsx       # 태스크 생성 모달 (Radix Dialog)
+│   ├── CodeDiffViewer.tsx        # 코드 변경 diff 뷰어
+│   ├── CreateTaskModal.tsx       # 태스크 생성 모달 (템플릿 지원)
 │   ├── FileActivityTree.tsx      # 파일 활동 트리
-│   ├── KanbanBoard.tsx           # 메인 칸반 보드
+│   ├── KanbanBoard.tsx           # 메인 칸반 보드 (SSE 연동)
+│   ├── LiveProgressPanel.tsx     # 실시간 진행 패널 (SSE)
 │   ├── LogViewer.tsx             # 실행 로그 뷰어 (task_id 필터링)
 │   ├── ProjectSelector.tsx       # 프로젝트 선택/생성
 │   ├── StepProgress.tsx          # 워크플로우 진행률
-│   ├── TaskDetailsModal.tsx      # 태스크 상세 모달 (Radix Dialog)
+│   ├── TaskDetailsModal.tsx      # 태스크 상세 모달 (4탭: Details/Live/Changes/Logs)
 │   ├── ThemeToggle.tsx           # 다크/라이트 모드 토글
 │   └── WorkflowFlowchart.tsx     # 워크플로우 시각화
 ├── lib/
@@ -280,12 +290,16 @@ basalt/
 │   │   └── TeamOrchestrator.ts # 팀 협업 오케스트레이터
 │   ├── skills/                # 스킬 정의 (SKILL.md × 20)
 │   │   └── index.ts           # 스킬 런타임 구현
+│   ├── hooks/
+│   │   └── useEventStream.ts  # SSE 스트림 소비 React 훅
 │   ├── agent-loader.ts        # 에이전트/스킬 로더
 │   ├── analytics.ts           # 분석 데이터 조회
 │   ├── context-manager.ts     # 실행 컨텍스트 관리 (저장/복원)
-│   ├── llm.ts                 # LLM 통신 (재시도, 타임아웃)
+│   ├── llm.ts                 # LLM 통신 (재시도, 타임아웃, 스트리밍)
 │   ├── model-config.ts        # LLM 모델 설정 (환경변수 오버라이드)
+│   ├── stream-emitter.ts      # SSE 이벤트 발신기 (ETA 계산)
 │   ├── supabase.ts            # Supabase 클라이언트
+│   ├── task-templates.ts      # 태스크 템플릿 프리셋 (8종)
 │   ├── team-types.ts          # 팀 협업 타입 정의
 │   └── utils.ts               # 유틸리티 (cn)
 └── scripts/                   # 테스트/유틸리티 스크립트
