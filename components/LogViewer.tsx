@@ -1,53 +1,77 @@
 
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { Loader2 } from 'lucide-react';
 
 interface LogEntry {
     id: string;
+    task_id?: string;
     agent_role: string;
     message: string;
     created_at: string;
-    metadata?: any;
+    metadata?: Record<string, unknown>;
 }
 
 export function LogViewer({ taskId }: { taskId?: string }) {
     const [logs, setLogs] = useState<LogEntry[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        // Initial fetch
-        const fetchLogs = async () => {
-            const { data } = await supabase
+    const fetchLogs = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            let query = supabase
                 .from('Execution_Logs')
                 .select('*')
                 .order('created_at', { ascending: true })
                 .limit(100);
 
-            if (data) setLogs(data);
-        };
+            if (taskId) {
+                query = query.eq('task_id', taskId);
+            }
 
+            const { data, error: fetchError } = await query;
+
+            if (fetchError) {
+                setError('로그를 불러오는 중 오류가 발생했습니다.');
+                console.error('Error fetching logs:', fetchError);
+                return;
+            }
+            setLogs(data || []);
+        } catch (err) {
+            setError('로그를 불러오는 중 오류가 발생했습니다.');
+            console.error('Error fetching logs:', err);
+        } finally {
+            setIsLoading(false);
+        }
+    }, [taskId]);
+
+    useEffect(() => {
         fetchLogs();
 
-        // Subscribe
+        // Subscribe — taskId가 있으면 해당 태스크 로그만, 없으면 전체 구독
+        const channelName = taskId ? `logs-${taskId}` : 'logs-global';
+        const filter = taskId
+            ? { event: 'INSERT' as const, schema: 'public', table: 'Execution_Logs', filter: `task_id=eq.${taskId}` }
+            : { event: 'INSERT' as const, schema: 'public', table: 'Execution_Logs' };
+
         const channel = supabase
-            .channel('logs')
-            .on(
-                'postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'Execution_Logs' },
-                (payload) => {
-                    setLogs((prev) => [...prev, payload.new as LogEntry]);
-                }
-            )
+            .channel(channelName)
+            .on('postgres_changes', filter, (payload) => {
+                setLogs((prev) => [...prev, payload.new as LogEntry]);
+            })
             .subscribe();
 
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [taskId]);
+    }, [taskId, fetchLogs]);
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -56,10 +80,30 @@ export function LogViewer({ taskId }: { taskId?: string }) {
     }, [logs]);
 
     return (
-        <div className="border border-border p-4 h-full bg-background flex flex-col">
+        <div className="border border-border p-4 h-full bg-background flex flex-col" role="log" aria-label="시스템 로그">
             <h2 className="text-xl font-bold mb-4 font-mono tracking-tight">SYSTEM LOGS</h2>
+
+            {error && (
+                <div className="mb-3 p-3 border border-red-300 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 text-sm rounded-sm">
+                    {error}
+                    <button onClick={fetchLogs} className="ml-2 underline hover:no-underline text-xs">
+                        다시 시도
+                    </button>
+                </div>
+            )}
+
             <ScrollArea className="h-[400px] w-full rounded-none border border-border p-4 font-mono text-sm bg-black/5">
-                {logs.length === 0 && <div className="text-muted-foreground">Waiting for activity...</div>}
+                {isLoading && (
+                    <div className="flex items-center justify-center py-8 text-muted-foreground">
+                        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                        <span>로그를 불러오는 중...</span>
+                    </div>
+                )}
+                {!isLoading && logs.length === 0 && !error && (
+                    <div className="text-muted-foreground text-center py-8">
+                        {taskId ? '이 태스크의 로그가 아직 없습니다.' : '활동 대기 중...'}
+                    </div>
+                )}
                 {logs.map((log) => {
                     const type = log.metadata?.type || 'DEFAULT';
 
