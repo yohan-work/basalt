@@ -274,7 +274,7 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                         disabled={isDeleting}
                     >
                         <Trash2 className={`mr-2 h-4 w-4 ${isDeleting ? 'animate-pulse' : ''}`} />
-                        {isDeleting ? '삭제 중...' : '태스크 삭제'}
+                        {isDeleting ? 'deleting...' : 'delete task'}
                     </Button>
                     <div className="flex gap-2">
                         {isFailed && (
