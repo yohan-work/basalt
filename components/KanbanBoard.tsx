@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3 } from 'lucide-react';
+import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3, AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
 import { CreateTaskModal } from './CreateTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
@@ -52,30 +52,24 @@ export function KanbanBoard() {
     const [processingTaskIds, setProcessingTaskIds] = useState<Set<string>>(new Set());
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [actionError, setActionError] = useState<string | null>(null);
 
+    // Realtime 구독 — selectedTask와 분리하여 불필요한 재구독 방지
     useEffect(() => {
-        fetchTasks();
-
         const channel = supabase
             .channel('tasks')
             .on(
                 'postgres_changes',
                 { event: '*', schema: 'public', table: 'Tasks' },
                 (payload) => {
-                    const currentProjectId = selectedProjectId; // Capture closure? 
-                    // Better to rely on refetch or filter in memory.
-                    // For simplicity, just refetch or handle blindly.
                     if (payload.eventType === 'INSERT') {
-                        // Optimistic update? 
-                        // Only add if matches current project or if we are showing all
                         setTasks(prev => [...prev, payload.new as Task]);
                     } else if (payload.eventType === 'UPDATE') {
                         setTasks(prev => prev.map(t => t.id === payload.new.id ? payload.new as Task : t));
-                        // Update selected task if it's open
-                        if (selectedTask && selectedTask.id === payload.new.id) {
-                            setSelectedTask(payload.new as Task);
-                        }
-
+                        setSelectedTask(prev =>
+                            prev && prev.id === payload.new.id ? payload.new as Task : prev
+                        );
                         setProcessingTaskIds(prev => {
                             const next = new Set(prev);
                             next.delete(payload.new.id);
@@ -91,21 +85,35 @@ export function KanbanBoard() {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [selectedTask]);
-    // Note: dependency on selectedTask to keep it updated is valid but the effect recreates subscription.
-    // Ideally subscription should be separate. But keeping it as is for now to avoid large refactor.
+    }, []);
 
     useEffect(() => {
         fetchTasks();
     }, [selectedProjectId]);
 
     const fetchTasks = async () => {
-        let query = supabase.from('Tasks').select('*').order('created_at');
-        if (selectedProjectId) {
-            query = query.eq('project_id', selectedProjectId);
+        setIsLoading(true);
+        try {
+            let query = supabase.from('Tasks').select('*').order('created_at');
+            if (selectedProjectId) {
+                query = query.eq('project_id', selectedProjectId);
+            }
+            const { data, error } = await query;
+            if (error) {
+                console.error('Error fetching tasks:', error);
+                return;
+            }
+            if (data) setTasks(data);
+        } catch (err) {
+            console.error('Error fetching tasks:', err);
+        } finally {
+            setIsLoading(false);
         }
-        const { data } = await query;
-        if (data) setTasks(data);
+    };
+
+    const showActionError = (msg: string) => {
+        setActionError(msg);
+        setTimeout(() => setActionError(null), 5000);
     };
 
     const handleCreateTask = async (taskData: { title: string; description: string; priority: string }) => {
@@ -117,7 +125,10 @@ export function KanbanBoard() {
         };
 
         const { error } = await supabase.from('Tasks').insert(newTask);
-        if (error) console.error('Error creating task:', error);
+        if (error) {
+            console.error('Error creating task:', error);
+            showActionError('태스크 생성에 실패했습니다: ' + error.message);
+        }
     };
 
     // --- Action Handlers ---
@@ -132,6 +143,7 @@ export function KanbanBoard() {
             });
         } catch (error) {
             console.error('Plan trigger failed', error);
+            showActionError('Plan 실행에 실패했습니다.');
             setProcessingTaskIds(prev => { const n = new Set(prev); n.delete(task.id); return n; });
         }
     };
@@ -146,6 +158,7 @@ export function KanbanBoard() {
             });
         } catch (error) {
             console.error('Execute trigger failed', error);
+            showActionError('Execute 실행에 실패했습니다.');
             setProcessingTaskIds(prev => { const n = new Set(prev); n.delete(task.id); return n; });
         }
     };
@@ -160,6 +173,7 @@ export function KanbanBoard() {
             });
         } catch (error) {
             console.error('Verify trigger failed', error);
+            showActionError('Verify 실행에 실패했습니다.');
             setProcessingTaskIds(prev => { const n = new Set(prev); n.delete(task.id); return n; });
         }
     };
@@ -179,6 +193,7 @@ export function KanbanBoard() {
             });
         } catch (error) {
             console.error('Retry trigger failed', error);
+            showActionError('Retry 실행에 실패했습니다.');
             setProcessingTaskIds(prev => { const n = new Set(prev); n.delete(task.id); return n; });
         }
     };
@@ -268,6 +283,19 @@ export function KanbanBoard() {
 
     return (
         <div className="flex flex-col h-full bg-background text-foreground">
+            {/* Action Error Toast */}
+            {actionError && (
+                <div className="fixed top-4 right-4 z-[100] max-w-sm animate-in slide-in-from-top-2 fade-in duration-300">
+                    <div className="flex items-center gap-2 p-3 border border-red-300 bg-red-50 dark:bg-red-950/90 dark:border-red-800 text-red-700 dark:text-red-400 text-sm shadow-lg">
+                        <AlertTriangle className="h-4 w-4 shrink-0" />
+                        <span className="flex-1">{actionError}</span>
+                        <button onClick={() => setActionError(null)} className="text-red-500 hover:text-red-700 shrink-0">
+                            <XCircle className="h-4 w-4" />
+                        </button>
+                    </div>
+                </div>
+            )}
+
             <div className="flex justify-between items-center p-4 border-b border-border">
                 <div className="flex items-center gap-4">
                     <h1 className="text-2xl font-bold tracking-tight">AI Agent Kanban</h1>
@@ -298,11 +326,28 @@ export function KanbanBoard() {
             />
 
             <div className="flex-1 overflow-x-auto p-4">
+                {isLoading ? (
+                    <div className="flex gap-4 h-full min-w-[1000px]">
+                        {COLUMNS.map((col) => (
+                            <div key={col.id} className="flex-1 min-w-[200px] flex flex-col bg-muted/20 border border-border/50">
+                                <div className="p-3 border-b border-border bg-muted/50 font-semibold text-sm">
+                                    {col.label}
+                                </div>
+                                <div className="p-2 flex-1 space-y-2">
+                                    {[1, 2].map(i => (
+                                        <div key={i} className="border border-border/30 p-3 space-y-2 animate-pulse">
+                                            <div className="h-4 bg-muted/60 rounded w-3/4" />
+                                            <div className="h-3 bg-muted/40 rounded w-full" />
+                                            <div className="h-3 bg-muted/40 rounded w-1/2" />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
                 <div className="flex gap-4 h-full min-w-[1000px]">
                     {COLUMNS.map((col) => {
-                        // Filter tasks for column (and effectively ensures only current project tasks are shown if we rely on state)
-                        // But wait, subscription logic might add tasks from other projects.
-                        // We should filter here too to be safe.
                         const colTasks = tasks.filter(task =>
                             task.status === col.id &&
                             (!selectedProjectId || task.project_id === selectedProjectId)
@@ -314,6 +359,11 @@ export function KanbanBoard() {
                                     {col.label} <span className="ml-2 text-muted-foreground text-xs">({colTasks.length})</span>
                                 </div>
                                 <div className="p-2 flex-1 space-y-2 overflow-y-auto">
+                                    {colTasks.length === 0 && (
+                                        <div className="flex items-center justify-center h-20 text-xs text-muted-foreground/50">
+                                            비어 있음
+                                        </div>
+                                    )}
                                     {colTasks.map(task => (
                                         <Card
                                             key={task.id}
@@ -334,6 +384,7 @@ export function KanbanBoard() {
                                                             onClick={(e) => handleDeleteTask(e, task)}
                                                             className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                                                             title="삭제"
+                                                            aria-label={`${task.title} 태스크 삭제`}
                                                         >
                                                             <Trash2 className="h-3 w-3" />
                                                         </button>
@@ -371,6 +422,7 @@ export function KanbanBoard() {
                         );
                     })}
                 </div>
+                )}
             </div>
         </div>
     );
