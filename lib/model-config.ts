@@ -1,18 +1,19 @@
 
 export const MODEL_CONFIG = {
     // Used for simple summaries, status updates, or quick classifications
-    FAST_MODEL: 'llama3.2:latest',
+    // Override with FAST_MODEL env var
+    FAST_MODEL: process.env.FAST_MODEL || 'llama3.2:latest',
 
     // Used for complex planning, reasoning, and argument generation
-    // 'gemma3' is often good for reasoning, or we can swap this if needed
-    SMART_MODEL: 'gemma3:latest',
+    // Override with SMART_MODEL env var
+    SMART_MODEL: process.env.SMART_MODEL || 'gemma3:latest',
 
     // Used for writing code
-    // 'gpt-oss' likely refers to a code-specialized model or a strong generalist
-    CODING_MODEL: 'gpt-oss:20b',
+    // Override with CODING_MODEL env var
+    CODING_MODEL: process.env.CODING_MODEL || 'gpt-oss:20b',
 
     // Default fallback
-    DEFAULT: 'llama3.2:latest'
+    DEFAULT: process.env.DEFAULT_MODEL || 'llama3.2:latest'
 } as const;
 
 export type ModelType = keyof typeof MODEL_CONFIG;
