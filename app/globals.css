@@ -45,13 +45,13 @@
   --secondary: #FFFFFF; /* Minimalist - mostly white/black */
   --secondary-foreground: #000000;
   
-  --muted: #FFFFFF; 
-  --muted-foreground: #000000;
+  --muted: #F5F5F5;
+  --muted-foreground: #737373;
   
-  --accent: #000000; /* High contrast hover */
-  --accent-foreground: #FFFFFF;
+  --accent: #F0F0F0;
+  --accent-foreground: #000000;
   
-  --destructive: #000000;
+  --destructive: #DC2626;
   --destructive-foreground: #FFFFFF;
 
   --border: #000000;
@@ -60,33 +60,33 @@
 }
 
 .dark {
-  --background: #000000;
-  --foreground: #FFFFFF;
+  --background: #0A0A0A;
+  --foreground: #FAFAFA;
   
-  --card: #000000;
-  --card-foreground: #FFFFFF;
+  --card: #111111;
+  --card-foreground: #FAFAFA;
   
-  --popover: #000000;
-  --popover-foreground: #FFFFFF;
+  --popover: #111111;
+  --popover-foreground: #FAFAFA;
   
-  --primary: #007AFF;
-  --primary-foreground: #FFFFFF;
+  --primary: #3B9EFF;
+  --primary-foreground: #000000;
   
-  --secondary: #000000;
-  --secondary-foreground: #FFFFFF;
+  --secondary: #1A1A1A;
+  --secondary-foreground: #FAFAFA;
   
-  --muted: #000000;
-  --muted-foreground: #FFFFFF;
+  --muted: #1A1A1A;
+  --muted-foreground: #A0A0A0;
   
-  --accent: #FFFFFF;
-  --accent-foreground: #000000;
+  --accent: #222222;
+  --accent-foreground: #FAFAFA;
   
-  --destructive: #FFFFFF;
-  --destructive-foreground: #000000;
+  --destructive: #FF4444;
+  --destructive-foreground: #FFFFFF;
 
-  --border: #FFFFFF;
-  --input: #FFFFFF;
-  --ring: #007AFF;
+  --border: #2A2A2A;
+  --input: #2A2A2A;
+  --ring: #3B9EFF;
 }
 
 @layer base {

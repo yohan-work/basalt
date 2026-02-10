@@ -11,6 +11,7 @@ import { CreateTaskModal } from './CreateTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
 import { ProjectSelector } from './ProjectSelector';
 import { StepProgress } from './StepProgress';
+import { ThemeToggle } from './ThemeToggle';
 
 interface Task {
     id: string;
@@ -302,6 +303,7 @@ export function KanbanBoard() {
                     <ProjectSelector selectedProjectId={selectedProjectId} onProjectSelect={setSelectedProjectId} />
                 </div>
                 <div className="flex items-center gap-2">
+                    <ThemeToggle />
                     <Link href="/analytics">
                         <Button variant="outline" className="rounded-none">
                             <BarChart3 className="mr-2 h-4 w-4" /> Analytics
