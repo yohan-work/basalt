@@ -191,7 +191,7 @@ Do not return markdown or placeholders.
         }
     }
 
-    public async execute() {
+    public async execute(startFromStep: number = 0) {
         try {
             const task = await this.getTask();
             if (!task || !task.metadata?.workflow) {
@@ -252,23 +252,28 @@ Do not return markdown or placeholders.
 
             // Initial Scan
             try {
-                const dirList = await skills.list_directory('.', projectPath);
-                this.contextManager.addLog('System', `Initial Directory Scan: ${JSON.stringify(dirList?.slice(0, 5))}...`);
+                const initialDirList = await skills.list_directory('.', projectPath);
+                this.contextManager.addLog('System', `Initial Directory Scan: ${JSON.stringify(initialDirList?.slice(0, 5))}...`);
             } catch (e) { }
 
             // Initialize progress tracking
             const totalSteps = workflow.steps.length;
+            const existingCompleted = task.metadata?.progress?.completedSteps || [];
             await this.updateProgress({
-                currentStep: 0,
+                currentStep: startFromStep,
                 totalSteps,
                 currentAction: '',
                 currentAgent: '',
-                completedSteps: [],
-                startedAt: new Date().toISOString(),
+                completedSteps: existingCompleted,
+                startedAt: startFromStep === 0 ? new Date().toISOString() : (task.metadata?.progress?.startedAt || new Date().toISOString()),
                 stepStatus: 'pending'
             });
 
-            for (let stepIndex = 0; stepIndex < workflow.steps.length; stepIndex++) {
+            if (startFromStep > 0) {
+                await this.log(mainAgentName, `Resuming execution from step ${startFromStep + 1} of ${totalSteps}.`);
+            }
+
+            for (let stepIndex = startFromStep; stepIndex < workflow.steps.length; stepIndex++) {
                 const step = workflow.steps[stepIndex];
                 const { agent, action } = step;
                 const agentRoleSlug = agent.toLowerCase().replace(/\s+/g, '-');
@@ -331,6 +336,9 @@ Do not return markdown or placeholders.
                             completedSteps: [...completedSteps, action],
                             stepStatus: 'completed'
                         });
+
+                        // Persist context state for retry recovery
+                        await this.contextManager.saveState();
                     } else {
                         await this.log(mainAgentName, `Runtime function for skill ${action} not found.`, { type: 'ERROR' });
                     }
@@ -466,15 +474,18 @@ Do not return markdown or placeholders.
 
             await this.log('System', `Retrying task from step ${failedStep !== undefined ? failedStep + 1 : 'beginning'}...`);
 
+            // Restore context from previous execution
+            await this.contextManager.restoreState();
+
             // If failed during verification, retry verification
             if (failedAction === 'verify') {
                 await this.verify();
                 return;
             }
 
-            // If failed during execution, we need to re-run execute
-            // For now, restart the entire execution (future: resume from failedStep)
-            await this.execute();
+            // Resume execution from the failed step instead of restarting
+            const resumeFrom = typeof failedStep === 'number' ? failedStep : 0;
+            await this.execute(resumeFrom);
         } catch (error: any) {
             await this.log('System', `Retry failed: ${error.message}`, { type: 'ERROR' });
         }
