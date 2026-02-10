@@ -19,7 +19,7 @@ export class TeamOrchestrator {
         this.teamState = initialTeamState || {
             name: 'Dev Team',
             leader: 'product-manager',
-            members: ['product-manager', 'software-engineer', 'qa-engineer'], // Default members
+            members: ['product-manager', 'software-engineer', 'qa'], // Default members
             messages: [],
             board: {
                 todo: [],
