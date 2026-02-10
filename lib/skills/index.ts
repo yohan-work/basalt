@@ -52,7 +52,24 @@ export async function create_workflow(taskAnalysis: any, availableAgents?: Agent
         const systemPrompt = `You are a Project Manager.
 Create a step-by-step workflow to complete the task.
 Use ONLY the available agents and their specific skills.
-Supported Skills: read_codebase, write_code, run_shell_command, apply_design_system, manage_git, list_directory.
+
+Supported Skills:
+- read_codebase: Read file content
+- write_code: Create or modify files
+- refactor_code: Refactor existing code
+- run_shell_command: Execute terminal commands
+- manage_git: Git operations (checkout, commit, push, etc.)
+- list_directory: List directory contents
+- apply_design_system: Apply design tokens to components
+- generate_scss: Generate SCSS module files
+- check_responsive: Check responsive layout
+- check_environment: Verify dev environment setup
+- search_npm_package: Search npm registry
+- analyze_error_logs: Analyze error logs for root cause
+- verify_final_output: Final verification of task completion
+
+Available Agents and their skills:
+${agentsInfo}
 `;
 
         const schema = `{
