@@ -118,7 +118,8 @@ AVAILABLE ACTIONS (JSON):
 2. create_task: { "type": "create_task", "payload": { "description": "...", "assignee": "optional_agent_name" } }
 3. claim_task: { "type": "claim_task", "payload": { "taskId": "..." } }
 4. submit_task: { "type": "submit_task", "payload": { "taskId": "...", "result": "..." } }
-5. call_skill: { "type": "call_skill", "payload": { "skill": "skill_name", "args": [...] } }
+5. review_task: { "type": "review_task", "payload": { "taskId": "..." } }
+6. call_skill: { "type": "call_skill", "payload": { "skill": "skill_name", "args": [...] } }
 
 RULES:
 - Be proactive. If there are tasks in TODO, claim them.
@@ -207,6 +208,24 @@ ${teamContext}
                         id: generateId(),
                         sender: 'system',
                         content: `Task ${task.description} completed by ${agentName}.`,
+                        timestamp: Date.now()
+                    });
+                }
+                break;
+
+            case 'review_task':
+                // Find task in in_progress and move to review
+                const reviewIndex = this.teamState.board.in_progress.findIndex(t => t.id === action.payload.taskId);
+                if (reviewIndex !== -1) {
+                    const task = this.teamState.board.in_progress.splice(reviewIndex, 1)[0];
+                    task.status = 'review';
+                    task.updated_at = Date.now();
+                    this.teamState.board.review.push(task);
+
+                    this.teamState.messages.push({
+                        id: generateId(),
+                        sender: 'system',
+                        content: `Task "${task.description}" moved to review by ${agentName}.`,
                         timestamp: Date.now()
                     });
                 }
