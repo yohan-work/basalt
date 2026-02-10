@@ -8,8 +8,8 @@ description: checks if the final result matches the initial requirements.
 This skill performs a final check to ensure the work done matches the user's request.
 
 ## Inputs
--   `outputRef`: Reference to the final artifact or state (e.g., file path or URL).
--   `originalRequirements`: The initial user request.
+-   `taskDescription`: The original task description to verify against.
+-   `projectPath`: (optional) The project root path. Defaults to `process.cwd()`.
 
 ## Outputs
 -   A JSON object containing:
@@ -17,6 +17,7 @@ This skill performs a final check to ensure the work done matches the user's req
     -   `notes`: Explanation of the verification result.
 
 ## Instructions
-1.  Compare the actual output against the requirements.
-2.  If mostly correct but with minor issues, mark as verified=false and provide notes.
-3.  If critical requirements are missing, clearly state what is missing.
+1.  List the project's top-level files to check if expected artifacts exist.
+2.  Compare the current file structure against the task requirements.
+3.  If mostly correct but with minor issues, mark as verified=true and add notes.
+4.  If critical requirements are missing, mark as verified=false and clearly state what is missing.
