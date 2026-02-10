@@ -99,18 +99,68 @@ export class ContextManager {
     }
 
     /**
-     * Sync state to Supabase metadata for persistence across restarts (optional)
+     * Sync state to Supabase metadata for persistence across restarts.
+     * Merges with existing metadata to avoid overwriting other fields (workflow, progress, etc.)
      */
     public async saveState() {
         try {
-            await supabase.from('Tasks').update({
-                metadata: {
-                    logs: this.logs,
-                    files: Array.from(this.fileCache.entries())
-                }
-            }).eq('id', this.taskId);
+            const { data: current } = await supabase
+                .from('Tasks')
+                .select('metadata')
+                .eq('id', this.taskId)
+                .single();
+
+            const contextState = {
+                contextLogs: this.logs,
+                contextFiles: Array.from(this.fileCache.entries())
+            };
+
+            const newMetadata = {
+                ...(current?.metadata || {}),
+                ...contextState
+            };
+
+            await supabase.from('Tasks').update({ metadata: newMetadata }).eq('id', this.taskId);
         } catch (e) {
             console.error('Failed to save context state:', e);
+        }
+    }
+
+    /**
+     * Restore state from Supabase metadata.
+     * Used when retrying a failed task to recover file cache and logs from previous execution.
+     */
+    public async restoreState() {
+        try {
+            const { data } = await supabase
+                .from('Tasks')
+                .select('metadata')
+                .eq('id', this.taskId)
+                .single();
+
+            if (!data?.metadata) return;
+
+            // Restore logs
+            if (Array.isArray(data.metadata.contextLogs)) {
+                this.logs = data.metadata.contextLogs;
+                console.log(`Restored ${this.logs.length} context logs.`);
+            }
+
+            // Restore file cache: stored as [key, FileContext] entries
+            if (Array.isArray(data.metadata.contextFiles)) {
+                for (const [key, fileCtx] of data.metadata.contextFiles) {
+                    if (key && fileCtx?.path && fileCtx?.content) {
+                        this.fileCache.set(key, {
+                            path: fileCtx.path,
+                            content: fileCtx.content,
+                            lastAccessed: fileCtx.lastAccessed || Date.now()
+                        });
+                    }
+                }
+                console.log(`Restored ${this.fileCache.size} cached files.`);
+            }
+        } catch (e) {
+            console.error('Failed to restore context state:', e);
         }
     }
 
