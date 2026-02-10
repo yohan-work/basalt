@@ -57,7 +57,7 @@ Supported Skills: read_codebase, write_code, run_shell_command, apply_design_sys
 
         const schema = `{
     "steps": [
-        { "agent": "agent_name", "action": "skill_name", "reason": "why this step" }
+        { "agent": "agent_name", "action": "skill_name", "description": "what to do in this step" }
     ]
 }`;
 
