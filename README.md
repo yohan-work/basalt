@@ -37,7 +37,8 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - 태스크 상태 관리 (pending → planning → working → testing → review → done)
 - 워크플로우 실행 (step별로 에이전트와 스킬 매칭)
 - 컨텍스트 관리 (이전 step에서 읽은 파일 내용 등을 다음 step에 전달)
-- 실패 시 에러 정보 저장 및 재시도 지원
+- 실패 시 에러 정보 저장 및 실패한 step부터 재시도 지원
+- 매 step 완료 시 컨텍스트를 Supabase에 영속화하여 재시도 시 복원
 
 ### TeamOrchestrator
 
@@ -48,22 +49,27 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - 팀 채팅 채널을 통한 에이전트 간 커뮤니케이션
 - 에이전트별 독립 컨텍스트 매니저 운영
 - 상태를 Supabase에 영속화하여 중단 후 재개 가능
-- 액션 기반 통신 (메시지 전송, 태스크 생성/인수/제출, 스킬 호출)
+- 액션 기반 통신 (메시지 전송, 태스크 생성/인수/리뷰/제출, 스킬 호출)
 
 ### LLM
 
-로컬 Ollama 서버(`127.0.0.1:11434`)와 통신합니다. 두 가지 용도로 씁니다:
+Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 
 1. **인자 생성** — 스킬을 호출할 때 필요한 실제 값들 (파일 경로, 코드 내용 등)을 LLM이 만들어줍니다
 2. **코드 생성** — `write_code` 같은 스킬에서 직접 코드를 생성할 때
 
+안정성을 위해 다음 기능이 내장되어 있습니다:
+- **Exponential backoff 재시도** (최대 3회, 1s → 2s → 4s)
+- **AbortController 기반 타임아웃** (코드 생성 120초, JSON 생성 60초)
+- **환경변수 기반 설정** (`OLLAMA_BASE_URL`, 모델 오버라이드)
+
 용도별로 다른 모델을 사용합니다 (`model-config.ts`):
 
-| 용도 | 모델 |
-|------|------|
-| 빠른 응답 (FAST) | `llama3.2:latest` |
-| 분석/추론 (SMART) | `gemma3:latest` |
-| 코드 생성 (CODING) | `gpt-oss:20b` |
+| 용도 | 기본 모델 | 환경변수 오버라이드 |
+|------|----------|-------------------|
+| 빠른 응답 (FAST) | `llama3.2:latest` | `FAST_MODEL` |
+| 분석/추론 (SMART) | `gemma3:latest` | `SMART_MODEL` |
+| 코드 생성 (CODING) | `gpt-oss:20b` | `CODING_MODEL` |
 
 ### Agents
 
@@ -120,7 +126,7 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 | POST | `/api/agent/plan` | 태스크 분석 및 워크플로우 생성 |
 | POST | `/api/agent/execute` | 워크플로우 순차 실행 |
 | POST | `/api/agent/verify` | 결과 검증 및 Git PR 생성 |
-| POST | `/api/agent/retry` | 실패한 태스크 재시도 (비동기) |
+| POST | `/api/agent/retry` | 실패한 태스크 재시도 (실패 step부터 재개) |
 | POST | `/api/agent/skills` | 스킬 동적 실행 (`skillName`, `args`) |
 | POST | `/api/system/dialog` | macOS 폴더 선택 다이얼로그 |
 | POST | `/api/team/execute` | 팀 협업 오케스트레이션 (최대 5분) |
@@ -133,15 +139,16 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 
 | 컴포넌트 | 하는 일 |
 |----------|--------|
-| `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독 |
-| `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR) |
-| `TaskDetailsModal` | 태스크 상세 모달. 워크플로우, 에이전트 상태, 파일 활동, 로그를 한눈에 |
-| `CreateTaskModal` | 태스크 생성 폼 (제목, 설명, 우선순위) |
+| `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독. 스켈레톤 로딩, 에러 토스트, 빈 상태 표시 |
+| `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR). `taskId` 기반 필터링 지원 |
+| `TaskDetailsModal` | 태스크 상세 모달 (Radix Dialog 기반). 워크플로우, 에이전트 상태, 파일 활동, 로그를 한눈에 |
+| `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 제목, 설명, 우선순위. Cmd+Enter 단축키, 폼 자동 초기화 |
 | `ProjectSelector` | 프로젝트 선택/생성. 폴더 브라우저 연동 |
 | `WorkflowFlowchart` | React Flow 기반 워크플로우 시각화. 에이전트별 색상, 상태 표시 |
 | `AgentStatusDashboard` | 에이전트 실시간 상태 대시보드 (idle/active/completed) |
 | `FileActivityTree` | 파일 읽기/쓰기 활동을 트리 구조로 표시. 실시간 업데이트 |
-| `StepProgress` | 워크플로우 진행률 표시 (compact/detailed 모드) |
+| `StepProgress` | 워크플로우 진행률 표시 (compact/detailed 모드). `ProgressInfo` 타입 공유 |
+| `ThemeToggle` | 다크/라이트 모드 전환 토글 버튼 |
 
 **Analytics 컴포넌트:**
 
@@ -169,9 +176,9 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - **Charts**: Recharts
 - **Flowchart**: @xyflow/react (React Flow)
 - **Database**: Supabase
-- **LLM**: Ollama (로컬)
-- **Monitoring**: Sentry
+- **LLM**: Ollama (로컬, 환경변수로 설정 가능)
 - **Utilities**: gray-matter (마크다운 파싱)
+- **Theming**: 다크/라이트 모드 (시스템 감지 + 수동 토글, FOUC 방지)
 
 ---
 
@@ -202,8 +209,20 @@ http://localhost:3000 접속
 `.env.local`:
 
 ```env
+# --- 필수 ---
 NEXT_PUBLIC_SUPABASE_URL=<Supabase URL>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<Supabase anon key>
+
+# --- 선택 (Ollama) ---
+OLLAMA_BASE_URL=http://127.0.0.1:11434    # Ollama 서버 주소 (기본값)
+
+# --- 선택 (모델 오버라이드) ---
+FAST_MODEL=llama3.2:latest                 # 빠른 응답용
+SMART_MODEL=gemma3:latest                  # 분석/추론용
+CODING_MODEL=gpt-oss:20b                   # 코드 생성용
+
+# --- 선택 (개발) ---
+MOCK_LLM=false                             # true로 설정 시 LLM 모킹
 ```
 
 ---
@@ -226,9 +245,14 @@ basalt/
 │   │   │   └── dialog/route.ts   # macOS 폴더 선택
 │   │   └── team/
 │   │       └── execute/route.ts  # 팀 협업 실행
-│   ├── globals.css               # Tailwind CSS 4 테마
-│   ├── layout.tsx                # 루트 레이아웃
-│   └── page.tsx                  # 메인 (칸반 보드 + 로그 뷰어)
+│   ├── error.tsx                 # 페이지 에러 바운더리
+│   ├── global-error.tsx          # 앱 전체 에러 바운더리
+│   ├── globals.css               # Tailwind CSS 4 테마 (라이트/다크)
+│   ├── layout.tsx                # 루트 레이아웃 (메타데이터, 테마 스크립트)
+│   ├── loading.tsx               # 메인 페이지 로딩 스켈레톤
+│   ├── not-found.tsx             # 404 페이지
+│   ├── page.tsx                  # 메인 (칸반 보드 + 로그 뷰어)
+│   └── theme-script.tsx          # 다크모드 FOUC 방지 인라인 스크립트
 ├── components/
 │   ├── analytics/
 │   │   ├── team/
@@ -241,25 +265,26 @@ basalt/
 │   │   └── StatCard.tsx              # 통계 카드
 │   ├── ui/                    # shadcn/ui 컴포넌트 (13개)
 │   ├── AgentStatusDashboard.tsx  # 에이전트 상태 대시보드
-│   ├── CreateTaskModal.tsx       # 태스크 생성 모달
+│   ├── CreateTaskModal.tsx       # 태스크 생성 모달 (Radix Dialog)
 │   ├── FileActivityTree.tsx      # 파일 활동 트리
 │   ├── KanbanBoard.tsx           # 메인 칸반 보드
-│   ├── LogViewer.tsx             # 실행 로그 뷰어
+│   ├── LogViewer.tsx             # 실행 로그 뷰어 (task_id 필터링)
 │   ├── ProjectSelector.tsx       # 프로젝트 선택/생성
 │   ├── StepProgress.tsx          # 워크플로우 진행률
-│   ├── TaskDetailsModal.tsx      # 태스크 상세 모달
+│   ├── TaskDetailsModal.tsx      # 태스크 상세 모달 (Radix Dialog)
+│   ├── ThemeToggle.tsx           # 다크/라이트 모드 토글
 │   └── WorkflowFlowchart.tsx     # 워크플로우 시각화
 ├── lib/
-│   ├── agents/                # 에이전트 정의 (AGENT.md × 10)
+│   ├── agents/                # 에이전트 정의 (AGENT.md × 9)
 │   │   ├── Orchestrator.ts    # 순차 실행 오케스트레이터
 │   │   └── TeamOrchestrator.ts # 팀 협업 오케스트레이터
-│   ├── skills/                # 스킬 정의 (SKILL.md × 19)
+│   ├── skills/                # 스킬 정의 (SKILL.md × 20)
 │   │   └── index.ts           # 스킬 런타임 구현
 │   ├── agent-loader.ts        # 에이전트/스킬 로더
 │   ├── analytics.ts           # 분석 데이터 조회
-│   ├── context-manager.ts     # 실행 컨텍스트 관리
-│   ├── llm.ts                 # Ollama 통신
-│   ├── model-config.ts        # LLM 모델 설정
+│   ├── context-manager.ts     # 실행 컨텍스트 관리 (저장/복원)
+│   ├── llm.ts                 # LLM 통신 (재시도, 타임아웃)
+│   ├── model-config.ts        # LLM 모델 설정 (환경변수 오버라이드)
 │   ├── supabase.ts            # Supabase 클라이언트
 │   ├── team-types.ts          # 팀 협업 타입 정의
 │   └── utils.ts               # 유틸리티 (cn)
