@@ -140,13 +140,28 @@ export async function write_code(filePath: string, content: string, baseDir: str
     try {
         const fullPath = path.resolve(baseDir, filePath);
         const dir = path.dirname(fullPath);
+
+        // Capture before content if file exists (for diff viewer)
+        let before: string | null = null;
+        if (fs.existsSync(fullPath)) {
+            before = fs.readFileSync(fullPath, 'utf-8');
+        }
+
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
         fs.writeFileSync(fullPath, content, 'utf-8');
-        return `Successfully wrote to ${filePath}`;
+
+        return {
+            success: true,
+            message: `Successfully wrote to ${filePath}`,
+            filePath,
+            before,
+            after: content,
+            isNew: before === null
+        };
     } catch (error: any) {
-        return `Error writing file: ${error.message}`;
+        return { success: false, message: `Error writing file: ${error.message}` };
     }
 }
 

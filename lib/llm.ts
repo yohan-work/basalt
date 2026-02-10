@@ -1,5 +1,6 @@
 
 import { MODEL_CONFIG } from './model-config';
+import { StreamEmitter } from './stream-emitter';
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 
@@ -178,4 +179,188 @@ ${schemaDescription}
         const data = await response.json();
         return JSON.parse(data.response);
     });
+}
+
+// ============================================================
+// Streaming variants — used when a StreamEmitter is available
+// ============================================================
+
+/**
+ * Read an NDJSON stream from Ollama (stream: true) and accumulate tokens.
+ * Each line is a JSON object with a `response` field containing the token.
+ */
+async function readOllamaStream(
+    response: Response,
+    emitter: StreamEmitter | null,
+    context: string
+): Promise<string> {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body to stream');
+
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete lines (NDJSON: one JSON object per line)
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+                const chunk = JSON.parse(line);
+                const token = chunk.response || '';
+                fullText += token;
+
+                if (emitter && token) {
+                    emitter.emit({ type: 'llm_token', token, context });
+                }
+            } catch {
+                // Malformed JSON line; skip
+            }
+        }
+    }
+
+    // Process remaining buffer
+    if (buffer.trim()) {
+        try {
+            const chunk = JSON.parse(buffer);
+            const token = chunk.response || '';
+            fullText += token;
+            if (emitter && token) {
+                emitter.emit({ type: 'llm_token', token, context });
+            }
+        } catch {
+            // Ignore
+        }
+    }
+
+    return fullText;
+}
+
+/**
+ * Generate code with streaming — emits tokens via StreamEmitter.
+ * Falls back to non-streaming generateCode if no emitter provided.
+ */
+export async function generateCodeStream(
+    prompt: string,
+    context: string,
+    emitter: StreamEmitter | null,
+    model: string = MODEL_CONFIG.CODING_MODEL
+): Promise<LLMResponse> {
+    if (!emitter) {
+        return generateCode(prompt, context, model);
+    }
+
+    const fullPrompt = `
+You are an expert AI software engineer.
+Context: ${context}
+Task: ${prompt}
+
+Return the response in the following JSON format ONLY, without any markdown formatting or explanation:
+{
+    "explanation": "Brief explanation of what you did",
+    "files": [
+        { "path": "path/to/file.ext", "content": "file content here" }
+    ]
+}
+`;
+
+    try {
+        const response = await fetchWithTimeout(
+            `${OLLAMA_BASE_URL}/api/generate`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model,
+                    prompt: fullPrompt,
+                    stream: true,
+                    format: 'json'
+                })
+            },
+            TIMEOUT_MS.CODE
+        );
+
+        if (!response.ok) {
+            throw new Error(`Ollama API Error: ${response.statusText}`);
+        }
+
+        const fullText = await readOllamaStream(response, emitter, 'code_generation');
+        emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'code_generation' });
+
+        const parsed = JSON.parse(fullText);
+        return {
+            content: parsed.explanation,
+            files: parsed.files || []
+        };
+
+    } catch (error: any) {
+        console.error('LLM Stream Generation Failed:', error);
+        emitter.emit({ type: 'error', message: `LLM stream failed: ${error.message}` });
+        return {
+            content: `Failed to generate code via AI: ${error.message}`,
+            files: [],
+            error: true
+        };
+    }
+}
+
+/**
+ * Generate JSON with streaming — emits tokens via StreamEmitter.
+ * Falls back to non-streaming generateJSON if no emitter provided.
+ */
+export async function generateJSONStream(
+    systemPrompt: string,
+    userPrompt: string,
+    schemaDescription: string,
+    emitter: StreamEmitter | null,
+    model: string = MODEL_CONFIG.SMART_MODEL
+): Promise<any> {
+    if (!emitter) {
+        return generateJSON(systemPrompt, userPrompt, schemaDescription, model);
+    }
+
+    if (process.env.MOCK_LLM === 'true') {
+        return generateJSON(systemPrompt, userPrompt, schemaDescription, model);
+    }
+
+    const fullPrompt = `
+${systemPrompt}
+
+Goal: ${userPrompt}
+
+Return the response in the following JSON format ONLY, without any markdown formatting or explanation:
+${schemaDescription}
+`;
+
+    const response = await fetchWithTimeout(
+        `${OLLAMA_BASE_URL}/api/generate`,
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model,
+                prompt: fullPrompt,
+                stream: true,
+                format: 'json'
+            })
+        },
+        TIMEOUT_MS.JSON
+    );
+
+    if (!response.ok) {
+        throw new Error(`Ollama API Error: ${response.statusText}`);
+    }
+
+    const fullText = await readOllamaStream(response, emitter, 'json_generation');
+    emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'json_generation' });
+
+    return JSON.parse(fullText);
 }

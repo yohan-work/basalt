@@ -4,6 +4,7 @@ import * as skills from '@/lib/skills';
 import * as llm from '@/lib/llm';
 import { AgentLoader, AgentDefinition } from '../agent-loader';
 import { ContextManager } from '../context-manager';
+import { StreamEmitter } from '../stream-emitter';
 
 interface AgentTask {
     id: string; // Supabase UUID
@@ -36,11 +37,13 @@ export class Orchestrator {
     private taskId: string;
     private mainAgentDef: AgentDefinition;
     private contextManager: ContextManager;
+    private emitter: StreamEmitter | null;
 
-    constructor(taskId: string) {
+    constructor(taskId: string, emitter?: StreamEmitter) {
         this.taskId = taskId;
         this.mainAgentDef = AgentLoader.loadAgent('main-agent');
         this.contextManager = new ContextManager(taskId);
+        this.emitter = emitter || null;
     }
 
     private async log(agentName: string, message: string, metadata: any = {}) {
@@ -112,27 +115,33 @@ export class Orchestrator {
             const mainAgentName = this.mainAgentDef.name;
             await this.log(mainAgentName, `Initialized Planning Phase.`);
             await this.updateStatus('planning');
+            this.emitter?.emit({ type: 'phase_start', phase: 'planning', taskId: this.taskId });
 
             // Load all available agents to determine who can do the task
             const availableAgents = AgentLoader.listAgents();
             await this.log(mainAgentName, `Loaded ${availableAgents.length} potential agents.`);
 
             // Analyze
+            this.emitter?.emit({ type: 'skill_execute', skill: 'analyze_task' });
             const analysis = await skills.analyze_task(taskDescription, availableAgents);
             await this.log(mainAgentName, 'Task Analysis Completed', analysis);
+            this.emitter?.emit({ type: 'skill_result', skill: 'analyze_task', summary: analysis.summary || 'Analysis complete' });
 
             // Create Workflow
+            this.emitter?.emit({ type: 'skill_execute', skill: 'create_workflow' });
             const workflow = await skills.create_workflow(analysis, availableAgents);
             await this.log(mainAgentName, 'Workflow Created', workflow);
+            this.emitter?.emit({ type: 'skill_result', skill: 'create_workflow', summary: `${workflow.steps?.length || 0} steps created` });
 
             // Save Plan to Metadata
             await this.updateMetadata({ analysis, workflow });
 
             // Wait for user confirmation
             await this.log(mainAgentName, 'Plan created. Waiting for user approval.');
+            this.emitter?.emit({ type: 'done', status: 'planning_complete' });
         } catch (error: any) {
             await this.log('System', `Planning Phase Failed: ${error.message}`, { type: 'ERROR' });
-            // Consider adding a 'failed' status or just logging
+            this.emitter?.emit({ type: 'error', message: error.message });
         }
     }
 
@@ -179,10 +188,11 @@ Do not return markdown or placeholders.
 `;
 
         try {
-            const response = await llm.generateJSON(
+            const response = await llm.generateJSONStream(
                 systemPrompt,
                 "Generate valid arguments for this skill based on the task.",
-                '{ "arguments": [] }'
+                '{ "arguments": [] }',
+                this.emitter
             );
             return response.arguments || [];
         } catch (e) {
@@ -212,6 +222,7 @@ Do not return markdown or placeholders.
             const workflow = task.metadata.workflow;
             await this.updateStatus('working');
             const mainAgentName = this.mainAgentDef.name;
+            this.emitter?.emit({ type: 'phase_start', phase: 'execution', taskId: this.taskId });
 
             // Create a new branch for this task BEFORE making any changes
             const branchName = `feature/task-${this.taskId.slice(0, 8)}`;
@@ -289,6 +300,14 @@ Do not return markdown or placeholders.
                         currentAgent: stepAgentDef.name,
                         stepStatus: 'running'
                     });
+                    this.emitter?.emit({
+                        type: 'step_start',
+                        step: stepIndex,
+                        total: totalSteps,
+                        action,
+                        agent: stepAgentDef.name
+                    });
+                    this.emitter?.markStepStart();
 
                     if (skillFunc) {
                         // THOUGHT: Agent is thinking about arguments
@@ -307,6 +326,7 @@ Do not return markdown or placeholders.
 
                         // ACTION: Agent is about to execute
                         await this.log(stepAgentDef.name, `Executing ${action}`, { args, type: 'ACTION' });
+                        this.emitter?.emit({ type: 'skill_execute', skill: action, args: args.length > 0 ? args[0] : undefined });
 
                         // --- EXECUTE ---
                         const result = await skillFunc(...args);
@@ -324,18 +344,47 @@ Do not return markdown or placeholders.
                             this.contextManager.addFile(filePath, result.content);
                         }
 
+                        // Capture file changes for diff viewer
+                        if (action === 'write_code' && result?.filePath) {
+                            const { data: metaForChanges } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+                            const existingChanges = metaForChanges?.metadata?.fileChanges || [];
+                            existingChanges.push({
+                                filePath: result.filePath,
+                                before: result.before,
+                                after: result.after,
+                                isNew: result.isNew,
+                                agent: stepAgentDef.name,
+                                stepIndex
+                            });
+                            await this.updateMetadata({ fileChanges: existingChanges });
+                        }
+
                         this.contextManager.addLog(stepAgentDef.name, `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`);
 
                         // RESULT: Execution finished
                         await this.log(stepAgentDef.name, `Executed ${action}`, { result, type: 'RESULT' });
+                        const resultSummary = typeof result === 'string' ? result.slice(0, 100) : (result?.message || JSON.stringify(result).slice(0, 100));
+                        this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
 
                         // Update progress: step completed
+                        const stepDuration = this.emitter?.markStepEnd() || 0;
                         const { data: currentMeta } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
                         const completedSteps = currentMeta?.metadata?.progress?.completedSteps || [];
                         await this.updateProgress({
                             completedSteps: [...completedSteps, action],
                             stepStatus: 'completed'
                         });
+
+                        // Emit step_complete with ETA
+                        const eta = this.emitter?.calculateETA(stepIndex, totalSteps) || 0;
+                        this.emitter?.emit({
+                            type: 'step_complete',
+                            step: stepIndex,
+                            total: totalSteps,
+                            duration: stepDuration,
+                            eta
+                        });
+                        this.emitter?.emitProgress(stepIndex, totalSteps);
 
                         // Persist context state for retry recovery
                         await this.contextManager.saveState();
@@ -346,6 +395,7 @@ Do not return markdown or placeholders.
                 } catch (err: any) {
                     await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`, { type: 'ERROR' });
                     this.contextManager.addLog('System', `Error executing ${action}: ${err.message}`);
+                    this.emitter?.emit({ type: 'error', message: err.message, step: stepIndex });
 
                     // Update progress: step failed
                     await this.updateProgress({
@@ -365,12 +415,14 @@ Do not return markdown or placeholders.
                     await this.updateMetadata(errorMetadata);
                     await this.updateStatus('failed');
                     await this.log('System', `Task marked as failed. Can be retried from step ${stepIndex + 1}.`, { type: 'ERROR' });
+                    this.emitter?.emit({ type: 'done', status: 'failed' });
                     return; // Exit instead of throwing
                 }
             }
 
             await this.updateStatus('testing');
             await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
+            this.emitter?.emit({ type: 'done', status: 'execution_complete' });
         } catch (error: any) {
             await this.log('System', `Execution Phase Failed: ${error.message}`, { type: 'ERROR' });
             await this.updateStatus('failed');
@@ -379,6 +431,8 @@ Do not return markdown or placeholders.
                 failedAt: new Date().toISOString(),
                 retryCount: ((await this.getTask())?.metadata?.retryCount || 0) + 1
             });
+            this.emitter?.emit({ type: 'error', message: error.message });
+            this.emitter?.emit({ type: 'done', status: 'failed' });
         }
     }
 
@@ -387,6 +441,7 @@ Do not return markdown or placeholders.
         try {
             const mainAgentName = this.mainAgentDef.name;
             await this.updateStatus('testing');
+            this.emitter?.emit({ type: 'phase_start', phase: 'verification', taskId: this.taskId });
 
             // Fetch Project Path
             let projectPath = process.cwd();
@@ -399,12 +454,15 @@ Do not return markdown or placeholders.
                 }
             }
 
+            this.emitter?.emit({ type: 'skill_execute', skill: 'verify_final_output' });
             const verification = await skills.verify_final_output(task?.description || 'No description', projectPath);
             await this.log(mainAgentName, 'Final Verification', verification);
             await this.updateMetadata({ verification });
+            this.emitter?.emit({ type: 'skill_result', skill: 'verify_final_output', summary: verification.verified ? 'Verified' : 'Failed' });
 
             if (verification.verified) {
                 await this.log(mainAgentName, 'Verification Successful. Starting Git Automation...');
+                this.emitter?.emit({ type: 'skill_execute', skill: 'manage_git' });
 
                 // Get branch name from metadata (created during execute phase)
                 const branchName = task?.metadata?.branchName || `feature/task-${this.taskId.slice(0, 8)}`;
@@ -423,7 +481,7 @@ Do not return markdown or placeholders.
                 };
 
                 try {
-                    const generated = await llm.generateJSON(systemPrompt, "Generate git details", "{}");
+                    const generated = await llm.generateJSONStream(systemPrompt, "Generate git details", "{}", this.emitter);
                     if (generated.commitMessage) {
                         gitDetails = { ...gitDetails, ...generated };
                     }
@@ -440,6 +498,7 @@ Do not return markdown or placeholders.
                     await skills.manage_git('create_pr', `--fill --title "${gitDetails.prTitle}" --body "${gitDetails.prBody}"`, projectPath);
 
                     await this.log(mainAgentName, `Git Automation Completed (Commit, Push, PR on branch ${branchName}).`);
+                    this.emitter?.emit({ type: 'skill_result', skill: 'manage_git', summary: `PR created on ${branchName}` });
 
                 } catch (gitError: any) {
                     await this.log(mainAgentName, `Git Automation Warning: ${gitError.message}`);
@@ -447,6 +506,9 @@ Do not return markdown or placeholders.
 
                 await this.updateStatus('review');
                 await this.log(mainAgentName, 'Task moved to Review');
+                this.emitter?.emit({ type: 'done', status: 'review' });
+            } else {
+                this.emitter?.emit({ type: 'done', status: 'verification_failed' });
             }
         } catch (error: any) {
             await this.log('System', `Verification Phase Failed: ${error.message}`, { type: 'ERROR' });
@@ -457,6 +519,8 @@ Do not return markdown or placeholders.
                 failedAt: new Date().toISOString(),
                 retryCount: ((await this.getTask())?.metadata?.retryCount || 0) + 1
             });
+            this.emitter?.emit({ type: 'error', message: error.message });
+            this.emitter?.emit({ type: 'done', status: 'failed' });
         }
     }
 

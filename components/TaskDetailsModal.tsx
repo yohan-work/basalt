@@ -3,13 +3,16 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2 } from 'lucide-react';
+import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { StepProgress, type ProgressInfo } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
 import { AgentStatusDashboard } from './AgentStatusDashboard';
 import { FileActivityTree } from './FileActivityTree';
+import { CodeDiffViewer, type FileChange } from './CodeDiffViewer';
+import { LiveProgressPanel } from './LiveProgressPanel';
 import { supabase } from '@/lib/supabase';
+import type { EventStreamState } from '@/lib/hooks/useEventStream';
 import {
     Dialog,
     DialogContent,
@@ -26,10 +29,11 @@ interface TaskDetailsModalProps {
     } | null;
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    stream?: EventStreamState & { start: (taskId: string, action: string) => void; stop: () => void; isActive: boolean };
 }
 
-export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalProps) {
-    const [view, setView] = useState<'details' | 'logs'>('details');
+export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetailsModalProps) {
+    const [view, setView] = useState<'details' | 'logs' | 'changes' | 'live'>('details');
     const [isRetrying, setIsRetrying] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
@@ -41,7 +45,10 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
     const workflow = metadata.workflow as { steps: Array<{ action: string; agent: string }> } | undefined;
     const verification = metadata.verification as { verified: boolean; notes: string } | undefined;
     const progress = metadata.progress as ProgressInfo | undefined;
+    const fileChanges = metadata.fileChanges as FileChange[] | undefined;
     const isFailed = task.status === 'failed';
+    const hasChanges = fileChanges && fileChanges.length > 0;
+    const isStreaming = stream?.isActive;
 
     const handleRetry = async () => {
         setIsRetrying(true);
@@ -114,6 +121,26 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                             >
                                 <FileText className="w-3 h-3 inline mr-1" /> Details
                             </button>
+                            {(isStreaming || (stream && stream.status !== 'idle')) && (
+                                <button
+                                    onClick={() => setView('live')}
+                                    className={`px-3 py-1 text-xs rounded-sm font-medium transition-all ${view === 'live' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                                    aria-pressed={view === 'live'}
+                                >
+                                    <Radio className={`w-3 h-3 inline mr-1 ${isStreaming ? 'text-red-500' : ''}`} /> Live
+                                    {isStreaming && <span className="ml-1 inline-block w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />}
+                                </button>
+                            )}
+                            {hasChanges && (
+                                <button
+                                    onClick={() => setView('changes')}
+                                    className={`px-3 py-1 text-xs rounded-sm font-medium transition-all ${view === 'changes' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                                    aria-pressed={view === 'changes'}
+                                >
+                                    <GitCompare className="w-3 h-3 inline mr-1" /> Changes
+                                    <span className="ml-1 text-[10px] opacity-60">{fileChanges!.length}</span>
+                                </button>
+                            )}
                             <button
                                 onClick={() => setView('logs')}
                                 className={`px-3 py-1 text-xs rounded-sm font-medium transition-all ${view === 'logs' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
@@ -135,7 +162,15 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
 
                 {/* Body (Scrollable) */}
                 <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-                    {view === 'details' ? (
+                    {view === 'live' && stream ? (
+                        <div className="flex-1 overflow-y-auto p-6">
+                            <LiveProgressPanel stream={stream} />
+                        </div>
+                    ) : view === 'changes' && hasChanges ? (
+                        <div className="flex-1 overflow-hidden">
+                            <CodeDiffViewer fileChanges={fileChanges!} />
+                        </div>
+                    ) : view === 'details' ? (
                         <div className="flex-1 overflow-y-auto p-6 space-y-6">
                             {/* Description */}
                             <div className="space-y-2">

@@ -12,6 +12,7 @@ import { TaskDetailsModal } from './TaskDetailsModal';
 import { ProjectSelector } from './ProjectSelector';
 import { StepProgress } from './StepProgress';
 import { ThemeToggle } from './ThemeToggle';
+import { useEventStream } from '@/lib/hooks/useEventStream';
 
 interface Task {
     id: string;
@@ -55,6 +56,11 @@ export function KanbanBoard() {
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [actionError, setActionError] = useState<string | null>(null);
+
+    // SSE stream for real-time progress
+    const stream = useEventStream({
+        onError: (msg) => showActionError(`Stream error: ${msg}`),
+    });
 
     // Realtime 구독 — 마운트 시 1회만 생성, selectedTask 변경과 무관
     useEffect(() => {
@@ -136,51 +142,28 @@ export function KanbanBoard() {
         }
     };
 
-    // --- Action Handlers ---
+    // --- Action Handlers (SSE-based) ---
 
-    const handleConfirmPlan = async (e: React.MouseEvent, task: Task) => {
-        e.stopPropagation(); // Prevent opening details modal
-        setProcessingTaskIds(prev => new Set(prev).add(task.id));
-        try {
-            await fetch('/api/agent/plan', {
-                method: 'POST',
-                body: JSON.stringify({ taskId: task.id, description: task.description })
-            });
-        } catch (error) {
-            console.error('Plan trigger failed', error);
-            showActionError('Plan 실행에 실패했습니다.');
-            setProcessingTaskIds(prev => { const n = new Set(prev); n.delete(task.id); return n; });
-        }
-    };
-
-    const handleStartDev = async (e: React.MouseEvent, task: Task) => {
+    const startStreamAction = (e: React.MouseEvent, task: Task, action: string) => {
         e.stopPropagation();
         setProcessingTaskIds(prev => new Set(prev).add(task.id));
-        try {
-            await fetch('/api/agent/execute', {
-                method: 'POST',
-                body: JSON.stringify({ taskId: task.id })
-            });
-        } catch (error) {
-            console.error('Execute trigger failed', error);
-            showActionError('Execute 실행에 실패했습니다.');
-            setProcessingTaskIds(prev => { const n = new Set(prev); n.delete(task.id); return n; });
-        }
+        // Open task details modal to show live progress
+        setSelectedTask(task);
+        setIsDetailsOpen(true);
+        // Start SSE stream
+        stream.start(task.id, action);
     };
 
-    const handleRunTests = async (e: React.MouseEvent, task: Task) => {
-        e.stopPropagation();
-        setProcessingTaskIds(prev => new Set(prev).add(task.id));
-        try {
-            await fetch('/api/agent/verify', {
-                method: 'POST',
-                body: JSON.stringify({ taskId: task.id })
-            });
-        } catch (error) {
-            console.error('Verify trigger failed', error);
-            showActionError('Verify 실행에 실패했습니다.');
-            setProcessingTaskIds(prev => { const n = new Set(prev); n.delete(task.id); return n; });
-        }
+    const handleConfirmPlan = (e: React.MouseEvent, task: Task) => {
+        startStreamAction(e, task, 'plan');
+    };
+
+    const handleStartDev = (e: React.MouseEvent, task: Task) => {
+        startStreamAction(e, task, 'execute');
+    };
+
+    const handleRunTests = (e: React.MouseEvent, task: Task) => {
+        startStreamAction(e, task, 'verify');
     };
 
     const handleCardClick = (task: Task) => {
@@ -188,19 +171,8 @@ export function KanbanBoard() {
         setIsDetailsOpen(true);
     };
 
-    const handleRetry = async (e: React.MouseEvent, task: Task) => {
-        e.stopPropagation();
-        setProcessingTaskIds(prev => new Set(prev).add(task.id));
-        try {
-            await fetch('/api/agent/retry', {
-                method: 'POST',
-                body: JSON.stringify({ taskId: task.id })
-            });
-        } catch (error) {
-            console.error('Retry trigger failed', error);
-            showActionError('Retry 실행에 실패했습니다.');
-            setProcessingTaskIds(prev => { const n = new Set(prev); n.delete(task.id); return n; });
-        }
+    const handleRetry = (e: React.MouseEvent, task: Task) => {
+        startStreamAction(e, task, 'retry');
     };
 
     const handleDeleteTask = async (e: React.MouseEvent, task: Task) => {
@@ -329,6 +301,7 @@ export function KanbanBoard() {
                 task={selectedTask}
                 open={isDetailsOpen}
                 onOpenChange={setIsDetailsOpen}
+                stream={stream}
             />
 
             <div className="flex-1 overflow-x-auto p-4">
