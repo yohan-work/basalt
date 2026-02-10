@@ -3,7 +3,7 @@
 import { Badge } from '@/components/ui/badge';
 import { Loader2, CheckCircle2, Circle, XCircle } from 'lucide-react';
 
-interface ProgressInfo {
+export interface ProgressInfo {
     currentStep: number;
     totalSteps: number;
     currentAction: string;

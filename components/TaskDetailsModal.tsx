@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2 } from 'lucide-react';
 import { LogViewer } from './LogViewer';
-import { StepProgress } from './StepProgress';
+import { StepProgress, type ProgressInfo } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
 import { AgentStatusDashboard } from './AgentStatusDashboard';
 import { FileActivityTree } from './FileActivityTree';
@@ -37,10 +37,10 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
     if (!task) return null;
 
     const metadata = (task.metadata || {}) as Record<string, unknown>;
-    const analysis = metadata.analysis as Record<string, unknown> | undefined;
+    const analysis = metadata.analysis as { complexity?: string; required_agents?: string[]; summary?: string } | undefined;
     const workflow = metadata.workflow as { steps: Array<{ action: string; agent: string }> } | undefined;
     const verification = metadata.verification as { verified: boolean; notes: string } | undefined;
-    const progress = metadata.progress as Record<string, unknown> | undefined;
+    const progress = metadata.progress as ProgressInfo | undefined;
     const isFailed = task.status === 'failed';
 
     const handleRetry = async () => {
@@ -146,7 +146,7 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                             </div>
 
                             {/* Error Information Section (If Failed) */}
-                            {isFailed && metadata.lastError && (
+                            {isFailed && !!metadata.lastError && (
                                 <div className="space-y-3">
                                     <h3 className="text-sm font-medium text-red-600 flex items-center gap-2">
                                         <span className="bg-red-100 text-red-700 p-1 rounded-sm"><AlertTriangle className="w-3 h-3" /></span>
@@ -160,13 +160,13 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                                             </p>
                                         </div>
                                         <div className="grid grid-cols-2 gap-4 text-xs">
-                                            {metadata.failedAction && (
+                                            {!!metadata.failedAction && (
                                                 <div>
                                                     <span className="font-semibold text-red-700 dark:text-red-400">Failed Action:</span>
                                                     <span className="ml-1 font-mono">{String(metadata.failedAction)}</span>
                                                 </div>
                                             )}
-                                            {metadata.failedAgent && (
+                                            {!!metadata.failedAgent && (
                                                 <div>
                                                     <span className="font-semibold text-red-700 dark:text-red-400">Failed Agent:</span>
                                                     <span className="ml-1 font-mono">{String(metadata.failedAgent)}</span>
@@ -178,7 +178,7 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                                                     <span className="ml-1">{Number(metadata.failedStep) + 1}</span>
                                                 </div>
                                             )}
-                                            {metadata.failedAt && (
+                                            {!!metadata.failedAt && (
                                                 <div>
                                                     <span className="font-semibold text-red-700 dark:text-red-400">Failed At:</span>
                                                     <span className="ml-1">{new Date(String(metadata.failedAt)).toLocaleString()}</span>
@@ -199,14 +199,14 @@ export function TaskDetailsModal({ task, open, onOpenChange }: TaskDetailsModalP
                                     <div className="p-4 border rounded-md bg-card space-y-2">
                                         <div className="grid grid-cols-2 gap-4 text-xs">
                                             <div>
-                                                <span className="font-semibold text-muted-foreground">Complexity:</span> {String(analysis.complexity)}
+                                                <span className="font-semibold text-muted-foreground">Complexity:</span> {analysis.complexity}
                                             </div>
                                             <div>
-                                                <span className="font-semibold text-muted-foreground">Required Agents:</span> {(analysis.required_agents as string[] || []).join(', ')}
+                                                <span className="font-semibold text-muted-foreground">Required Agents:</span> {(analysis.required_agents || []).join(', ')}
                                             </div>
                                         </div>
                                         <div className="text-xs text-muted-foreground mt-2 border-t pt-2">
-                                            {String(analysis.summary)}
+                                            {analysis.summary}
                                         </div>
                                     </div>
                                 </div>

@@ -7,13 +7,20 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Loader2 } from 'lucide-react';
 
+interface LogMetadata {
+    type?: string;
+    args?: unknown;
+    result?: unknown;
+    [key: string]: unknown;
+}
+
 interface LogEntry {
     id: string;
     task_id?: string;
     agent_role: string;
     message: string;
     created_at: string;
-    metadata?: Record<string, unknown>;
+    metadata?: LogMetadata;
 }
 
 export function LogViewer({ taskId }: { taskId?: string }) {
@@ -143,18 +150,18 @@ export function LogViewer({ taskId }: { taskId?: string }) {
                                 {/* Metadata/Args/Result Rendering */}
                                 {log.metadata && (
                                     <div className="mt-1">
-                                        {log.metadata.args && (
+                                        {log.metadata.args != null && (
                                             <div className="bg-black/10 overflow-hidden text-xs rounded-sm p-2 mb-1">
                                                 <span className="opacity-50 block mb-1">Input Arguments:</span>
                                                 <pre className="overflow-x-auto">{JSON.stringify(log.metadata.args, null, 2)}</pre>
                                             </div>
                                         )}
-                                        {log.metadata.result && (
+                                        {log.metadata.result != null && (
                                             <div className="bg-green-500/10 border-l-2 border-green-500 text-xs rounded-sm p-2">
                                                 <span className="text-green-600 block mb-1 font-bold">Output:</span>
                                                 <pre className="overflow-x-auto text-green-700 dark:text-green-400">
                                                     {typeof log.metadata.result === 'string'
-                                                        ? log.metadata.result.slice(0, 300) + (log.metadata.result.length > 300 ? '...' : '')
+                                                        ? (log.metadata.result as string).slice(0, 300) + ((log.metadata.result as string).length > 300 ? '...' : '')
                                                         : JSON.stringify(log.metadata.result, null, 2)}
                                                 </pre>
                                             </div>

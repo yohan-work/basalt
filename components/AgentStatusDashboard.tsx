@@ -3,15 +3,7 @@
 import { useMemo } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Loader2 } from 'lucide-react';
-
-interface ProgressInfo {
-    currentStep: number;
-    totalSteps: number;
-    currentAction: string;
-    currentAgent: string;
-    completedSteps: string[];
-    stepStatus: 'pending' | 'running' | 'completed' | 'failed';
-}
+import type { ProgressInfo } from './StepProgress';
 
 interface WorkflowStep {
     agent: string;

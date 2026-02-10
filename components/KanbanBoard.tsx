@@ -56,8 +56,10 @@ export function KanbanBoard() {
     const [isLoading, setIsLoading] = useState(true);
     const [actionError, setActionError] = useState<string | null>(null);
 
-    // Realtime 구독 — selectedTask와 분리하여 불필요한 재구독 방지
+    // Realtime 구독 — 마운트 시 1회만 생성, selectedTask 변경과 무관
     useEffect(() => {
+        fetchTasks();
+
         const channel = supabase
             .channel('tasks')
             .on(
@@ -86,14 +88,16 @@ export function KanbanBoard() {
         return () => {
             supabase.removeChannel(channel);
         };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // 프로젝트 변경 시 태스크 재조회 (스켈레톤 없이)
     useEffect(() => {
-        fetchTasks();
+        fetchTasks(false);
     }, [selectedProjectId]);
 
-    const fetchTasks = async () => {
-        setIsLoading(true);
+    const fetchTasks = async (showSkeleton = true) => {
+        if (showSkeleton) setIsLoading(true);
         try {
             let query = supabase.from('Tasks').select('*').order('created_at');
             if (selectedProjectId) {

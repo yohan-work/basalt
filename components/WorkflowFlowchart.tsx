@@ -12,18 +12,11 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
+import type { ProgressInfo } from './StepProgress';
+
 interface WorkflowStep {
     agent: string;
     action: string;
-}
-
-interface ProgressInfo {
-    currentStep: number;
-    totalSteps: number;
-    currentAction: string;
-    currentAgent: string;
-    completedSteps: string[];
-    stepStatus: 'pending' | 'running' | 'completed' | 'failed';
 }
 
 interface WorkflowFlowchartProps {
