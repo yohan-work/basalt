@@ -37,7 +37,7 @@ const AGENT_COLORS: Record<string, { bg: string; border: string; text: string }>
 };
 
 const getAgentColor = (agent: string) => {
-    const slug = agent.toLowerCase().replace(/\s+/g, '-');
+    const slug = agent.toLowerCase().replace(/[\s_]+/g, '-');
     return AGENT_COLORS[slug] || AGENT_COLORS['default'];
 };
 

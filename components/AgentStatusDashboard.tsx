@@ -44,7 +44,7 @@ export function AgentStatusDashboard({ workflow, progress }: AgentStatusDashboar
 
         // 워크플로우 step들을 순회하며 상태 결정
         workflow.steps.forEach((step, index) => {
-            const agentSlug = step.agent.toLowerCase().replace(/\s+/g, '-');
+            const agentSlug = step.agent.toLowerCase().replace(/[\s_]+/g, '-');
 
             if (!statuses[agentSlug]) {
                 statuses[agentSlug] = { status: 'idle', completedActions: [] };
@@ -74,7 +74,7 @@ export function AgentStatusDashboard({ workflow, progress }: AgentStatusDashboar
 
         const usedAgentIds = new Set<string>();
         workflow.steps.forEach(step => {
-            const agentSlug = step.agent.toLowerCase().replace(/\s+/g, '-');
+            const agentSlug = step.agent.toLowerCase().replace(/[\s_]+/g, '-');
             usedAgentIds.add(agentSlug);
         });
 

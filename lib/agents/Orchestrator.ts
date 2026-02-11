@@ -287,7 +287,7 @@ Do not return markdown or placeholders.
             for (let stepIndex = startFromStep; stepIndex < workflow.steps.length; stepIndex++) {
                 const step = workflow.steps[stepIndex];
                 const { agent, action } = step;
-                const agentRoleSlug = agent.toLowerCase().replace(/\s+/g, '-');
+                const agentRoleSlug = agent.toLowerCase().replace(/[\s_]+/g, '-');
 
                 try {
                     const stepAgentDef = AgentLoader.loadAgent(agentRoleSlug);
