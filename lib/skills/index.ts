@@ -22,9 +22,10 @@ ${agentsList}
 
         const schema = `{
     "complexity": "low" | "medium" | "high",
-    "required_agents": ["agent_name1", "agent_name2"],
+    "required_agents": ["agent-role-slug"],
     "summary": "Brief analysis of the task"
-}`;
+}
+IMPORTANT: Use the exact agent role slugs from the Available Agents list above (e.g. "software-engineer", "product-manager", "qa"). Do NOT use underscores or other formats.`;
 
         const analysis = await llm.generateJSON(systemPrompt, taskDescription, schema);
         return analysis;
@@ -74,9 +75,10 @@ ${agentsInfo}
 
         const schema = `{
     "steps": [
-        { "agent": "agent_name", "action": "skill_name", "description": "what to do in this step" }
+        { "agent": "agent-role-slug", "action": "skill_name", "description": "what to do in this step" }
     ]
-}`;
+}
+IMPORTANT: Use the exact agent role slugs from the Available Agents list above (e.g. "software-engineer", "product-manager", "qa"). Do NOT use underscores or other formats.`;
 
         const workflow = await llm.generateJSON(systemPrompt, `Task Analysis: ${JSON.stringify(taskAnalysis)}`, schema);
 
