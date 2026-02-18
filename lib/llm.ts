@@ -1,5 +1,5 @@
 
-import { MODEL_CONFIG } from './model-config';
+import { MODEL_CONFIG, validateModels } from './model-config';
 import { StreamEmitter } from './stream-emitter';
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
@@ -70,6 +70,7 @@ async function withRetry<T>(
 }
 
 export async function generateCode(prompt: string, context: string, model: string = MODEL_CONFIG.CODING_MODEL): Promise<LLMResponse> {
+    validateModels();
     const fullPrompt = `
 You are an expert AI software engineer.
 Context: ${context}
@@ -130,6 +131,8 @@ export async function generateJSON(
     schemaDescription: string,
     model: string = MODEL_CONFIG.SMART_MODEL
 ): Promise<any> {
+    validateModels();
+
     const fullPrompt = `
 ${systemPrompt}
 
