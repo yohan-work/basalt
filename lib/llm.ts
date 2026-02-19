@@ -69,11 +69,28 @@ async function withRetry<T>(
     throw lastError || new Error('All LLM retry attempts exhausted');
 }
 
+const CODE_GENERATION_SYSTEM_RULES = `
+You are an expert AI software engineer specializing in Next.js, React, and TypeScript.
+
+MANDATORY CODING RULES:
+- Use shadcn/ui components from @/components/ui/ for ALL UI elements (Button, Input, Label, Card, Dialog, Select, etc.)
+- Use Tailwind CSS for layout and spacing (flex, grid, gap, p, m utilities)
+- Use design tokens for colors: bg-background, text-foreground, text-muted-foreground, border-border, bg-primary, text-primary
+- Generate COMPLETE, working TypeScript code with all necessary imports
+- For React components, use proper TypeScript types and export as default
+- Follow the project structure: app/ for pages/routes, components/ for reusable components, lib/ for utilities
+- For form components: use Card as container, Label+Input for fields, Button for submit
+- Ensure all files are self-contained with correct relative import paths
+`.trim();
+
 export async function generateCode(prompt: string, context: string, model: string = MODEL_CONFIG.CODING_MODEL): Promise<LLMResponse> {
     validateModels();
     const fullPrompt = `
-You are an expert AI software engineer.
-Context: ${context}
+${CODE_GENERATION_SYSTEM_RULES}
+
+Context (existing project files and recent activity):
+${context}
+
 Task: ${prompt}
 
 Return the response in the following JSON format ONLY, without any markdown formatting or explanation:
@@ -262,8 +279,11 @@ export async function generateCodeStream(
     }
 
     const fullPrompt = `
-You are an expert AI software engineer.
-Context: ${context}
+${CODE_GENERATION_SYSTEM_RULES}
+
+Context (existing project files and recent activity):
+${context}
+
 Task: ${prompt}
 
 Return the response in the following JSON format ONLY, without any markdown formatting or explanation:
