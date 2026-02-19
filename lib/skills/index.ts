@@ -75,10 +75,15 @@ ${agentsInfo}
 
         const schema = `{
     "steps": [
-        { "agent": "agent-role-slug", "action": "skill_name", "description": "what to do in this step" }
+        { "agent": "software-engineer", "action": "read_codebase", "description": "Read app/page.tsx to understand current structure before making changes" },
+        { "agent": "software-engineer", "action": "write_code", "description": "Create components/LoginForm.tsx with email and password fields using shadcn/ui Card, Input, Label, and Button components. Include form validation and Tailwind CSS styling." },
+        { "agent": "main-agent", "action": "verify_final_output", "description": "Verify the login form was created correctly and meets requirements" }
     ]
 }
-IMPORTANT: Use the exact agent role slugs from the Available Agents list above (e.g. "software-engineer", "product-manager", "qa"). Do NOT use underscores or other formats.`;
+IMPORTANT:
+- Use the exact agent role slugs (e.g. "software-engineer", "product-manager", "qa"). Do NOT use underscores.
+- Each "description" MUST be SPECIFIC and ACTIONABLE — include the exact file path, what to create/modify, and key implementation details.
+- Do NOT write vague descriptions like "implement the feature" or "create the component". Be explicit.`;
 
         const workflow = await llm.generateJSON(systemPrompt, `Task Analysis: ${JSON.stringify(taskAnalysis)}`, schema);
 
