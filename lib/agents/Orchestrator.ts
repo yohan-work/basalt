@@ -5,6 +5,7 @@ import * as llm from '@/lib/llm';
 import { AgentLoader, AgentDefinition } from '../agent-loader';
 import { ContextManager } from '../context-manager';
 import { StreamEmitter } from '../stream-emitter';
+import { MODEL_CONFIG } from '../model-config';
 
 interface AgentTask {
     id: string; // Supabase UUID
@@ -146,18 +147,30 @@ export class Orchestrator {
     }
 
     // --- Phase 2: Execution ---
+
+    // Skills that only need a file path or simple string — FAST model is sufficient
+    private static readonly FAST_ARG_SKILLS = [
+        'read_codebase', 'list_directory', 'check_environment', 'manage_git',
+        'lint_code', 'typecheck', 'check_responsive'
+    ];
+
     private async generateSkillArguments(
         skillName: string,
         taskDescription: string,
         projectPath: string,
-        techStack: string
-        // contextData removed, using contextManager
+        techStack: string,
+        stepDescription?: string
     ): Promise<any[]> {
         const skillDef = AgentLoader.loadSkill(skillName);
         const inputsDef = skillDef.inputs ? `\nInputs Definition:\n${skillDef.inputs}` : '';
 
         // Get Optimized Context
-        const dynamicContext = this.contextManager.getOptimizedContext(6000);
+        const dynamicContext = this.contextManager.getOptimizedContext(10000);
+
+        // Route to FAST model for skills that just need a path/simple arg
+        const model = Orchestrator.FAST_ARG_SKILLS.includes(skillName)
+            ? MODEL_CONFIG.FAST_MODEL
+            : MODEL_CONFIG.SMART_MODEL;
 
         const systemPrompt = `
 You are an intelligent agent orchestrator.
@@ -167,23 +180,22 @@ Skill Name: ${skillName}
 Skill Instructions: ${skillDef.instructions}
 ${inputsDef}
 
-Context:
-- Task: ${taskDescription}
-- Project Path: ${projectPath}
-- Tech Stack: ${techStack}
+Current Step Goal: ${stepDescription || taskDescription}
+Overall Task: ${taskDescription}
+Project Path: ${projectPath}
+Tech Stack: ${techStack}
 
 ${dynamicContext}
 
 IMPORTANT RULES:
 1. Generate ACTUAL values, NOT placeholder names like "filePath", "content", "args" etc.
 2. For file paths, use real paths like "components/MyComponent.tsx", "app/page.tsx", "lib/utils.ts"
-3. For code content, generate the COMPLETE working code that fulfills the task.
-4. Consider the Tech Stack when choosing file extensions (.tsx for React/Next.js, .ts for TypeScript, etc.)
-5. If creating a new component/page, ensure it has proper imports and exports.
+3. Consider the Tech Stack when choosing file extensions (.tsx for React/Next.js, .ts for TypeScript, etc.)
+4. Focus on the "Current Step Goal" to determine exactly what this step should do.
 
 Return ONLY a JSON object with a key "arguments" which is an array of actual values to pass to the function.
-Example for write_code: { "arguments": ["components/Button.tsx", "import React from 'react';\\n\\nexport function Button() { return <button>Click</button>; }"] }
 Example for read_codebase: { "arguments": ["package.json"] }
+Example for manage_git: { "arguments": ["checkout", "-b feature/my-branch"] }
 Do not return markdown or placeholders.
 `;
 
@@ -192,7 +204,8 @@ Do not return markdown or placeholders.
                 systemPrompt,
                 "Generate valid arguments for this skill based on the task.",
                 '{ "arguments": [] }',
-                this.emitter
+                this.emitter,
+                model
             );
             return response.arguments || [];
         } catch (e) {
@@ -313,11 +326,57 @@ Do not return markdown or placeholders.
                         // THOUGHT: Agent is thinking about arguments
                         await this.log(mainAgentName, `Generative Logic: Determining arguments for ${action}...`, { type: 'THOUGHT' });
 
+                        // --- SPECIAL HANDLING: write_code uses CODING model directly ---
+                        if (action === 'write_code') {
+                            const codePrompt = step.description
+                                ? `${step.description}\n\nOverall task: ${task.description}`
+                                : task.description;
+                            const contextData = this.contextManager.getOptimizedContext(10000);
+
+                            await this.log(stepAgentDef.name, `Generating code with CODING model for: ${step.description || task.description}`, { type: 'ACTION' });
+                            this.emitter?.emit({ type: 'skill_execute', skill: action, args: step.description });
+
+                            const codeResult = await llm.generateCodeStream(codePrompt, contextData, this.emitter);
+
+                            if (!codeResult.error && codeResult.files.length > 0) {
+                                const { data: metaForChanges } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+                                const existingChanges = metaForChanges?.metadata?.fileChanges || [];
+
+                                for (const file of codeResult.files) {
+                                    const writeResult = await skillFunc(file.path, file.content, projectPath);
+                                    if (writeResult?.filePath) {
+                                        existingChanges.push({
+                                            filePath: writeResult.filePath,
+                                            before: writeResult.before,
+                                            after: writeResult.after,
+                                            isNew: writeResult.isNew,
+                                            agent: stepAgentDef.name,
+                                            stepIndex
+                                        });
+                                    }
+                                    this.contextManager.addFile(file.path, file.content);
+                                    this.contextManager.addLog(stepAgentDef.name, `Wrote ${file.path}`);
+                                    await this.log(stepAgentDef.name, `Wrote file: ${file.path}`, { type: 'RESULT' });
+                                }
+
+                                await this.updateMetadata({ fileChanges: existingChanges });
+                                const resultSummary = `Wrote ${codeResult.files.length} file(s): ${codeResult.files.map(f => f.path).join(', ')}`;
+                                this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
+                            } else {
+                                const errMsg = codeResult.error ? codeResult.content : 'No files generated by CODING model';
+                                await this.log(stepAgentDef.name, `write_code failed: ${errMsg}`, { type: 'ERROR' });
+                                this.emitter?.emit({ type: 'skill_result', skill: action, summary: `Failed: ${errMsg}` });
+                            }
+                        } else {
+                        // --- NORMAL HANDLING: generate arguments then execute skill ---
+
                         // Generate Arguments with Context Manager
-                        let args = await this.generateSkillArguments(action, task.description, projectPath, techStack);
+                        let args = await this.generateSkillArguments(
+                            action, task.description, projectPath, techStack, step.description
+                        );
 
                         // Safety Injection (Project Path)
-                        const filesystemSkills = ['read_codebase', 'write_code', 'run_shell_command', 'manage_git', 'list_directory'];
+                        const filesystemSkills = ['read_codebase', 'run_shell_command', 'manage_git', 'list_directory'];
                         if (filesystemSkills.includes(action)) {
                             if (args.length === 0 || args[args.length - 1] !== projectPath) {
                                 args.push(projectPath);
@@ -344,27 +403,13 @@ Do not return markdown or placeholders.
                             this.contextManager.addFile(filePath, result.content);
                         }
 
-                        // Capture file changes for diff viewer
-                        if (action === 'write_code' && result?.filePath) {
-                            const { data: metaForChanges } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
-                            const existingChanges = metaForChanges?.metadata?.fileChanges || [];
-                            existingChanges.push({
-                                filePath: result.filePath,
-                                before: result.before,
-                                after: result.after,
-                                isNew: result.isNew,
-                                agent: stepAgentDef.name,
-                                stepIndex
-                            });
-                            await this.updateMetadata({ fileChanges: existingChanges });
-                        }
-
                         this.contextManager.addLog(stepAgentDef.name, `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`);
 
                         // RESULT: Execution finished
                         await this.log(stepAgentDef.name, `Executed ${action}`, { result, type: 'RESULT' });
                         const resultSummary = typeof result === 'string' ? result.slice(0, 100) : (result?.message || JSON.stringify(result).slice(0, 100));
                         this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
+                        } // end normal handling
 
                         // Update progress: step completed
                         const stepDuration = this.emitter?.markStepEnd() || 0;
