@@ -10,7 +10,7 @@ export const MODEL_CONFIG = {
 
     // Used for writing code
     // Override with CODING_MODEL env var
-    CODING_MODEL: process.env.CODING_MODEL || 'gpt-oss:20b',
+    CODING_MODEL: process.env.CODING_MODEL || 'qwen2.5-coder:7b',
 
     // Default fallback
     DEFAULT: process.env.DEFAULT_MODEL || 'llama3.2:latest'
