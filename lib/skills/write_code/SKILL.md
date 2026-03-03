@@ -22,12 +22,12 @@ Writes string content to a specified file path.
 5.  Do NOT create `.txt` or `.md` files unless explicitly asked for documentation.
 6.  For UI components in Next.js/React, ensure you import React and necessary libraries.
 
-## UI Component Styling Rules (MANDATORY)
+## UI Component Guidelines (MANDATORY)
 
-When creating UI components (pages, forms, modals, cards, etc.), you MUST follow these rules:
+When creating UI components (pages, forms, modals, cards, etc.), you MUST follow these guidelines while remaining flexible to the specific requirements:
 
-### 1. Use shadcn/ui Components
-Always import and use existing UI components from `@/components/ui/`:
+### 1. Component Usage Reference (shadcn/ui)
+Use these components from `@/components/ui/` as building blocks. **Do NOT just copy-paste the structure; adapt it to the task's specific layout requirements.**
 
 | Element | shadcn/ui Component | Import Path |
 |---------|---------------------|-------------|
@@ -38,47 +38,37 @@ Always import and use existing UI components from `@/components/ui/`:
 | Dialog | `Dialog`, `DialogTrigger`, `DialogContent` | `@/components/ui/dialog` |
 | Select | `Select`, `SelectTrigger`, `SelectContent`, `SelectItem` | `@/components/ui/select` |
 
-### 2. Use Tailwind CSS Utilities for Layout
-Apply Tailwind classes for layout and spacing:
-- Container: `min-h-screen flex items-center justify-center`
-- Card width: `w-full max-w-md` or `max-w-lg`
-- Spacing: `space-y-4`, `gap-4`, `p-6`
-- Flex: `flex flex-col`, `flex items-center`
+### 2. Layout Flexibility
+- **Follow the exact layout requested.** If the user asks for a grid, vertical stack, or specific section ordering, implement exactly that.
+- Use Tailwind CSS freely for layout: `grid`, `flex`, `space-y-X`, `gap-X`, `w-full`, etc.
+- **NEVER** stick to a fixed template if the task description implies a different structure.
 
-### 3. Use Design Tokens (CSS Variables)
-Always use project's design tokens for colors:
-- Background: `bg-background`, `bg-card`
-- Text: `text-foreground`, `text-muted-foreground`
-- Border: `border-border`, `border-input`
-- Primary: `bg-primary`, `text-primary`
+### 3. Component Reference Example
+*This is a reference for how to use shadcn/ui components, NOT a template to be used every time.*
 
-### 4. Example: Form Page Structure
 ```tsx
+// Using shadcn/ui building blocks to create a custom structure
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
 
-export default function ExampleFormPage() {
+// Example: A generic container using background and flex/grid
+export default function FlexibleComponent() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Form Title</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="field1">Field Label</Label>
-            <Input id="field1" placeholder="Enter value..." />
-          </div>
-        </CardContent>
-        <CardFooter>
-          <Button className="w-full">Submit</Button>
-        </CardFooter>
-      </Card>
+    <div className="min-h-screen bg-background p-4 md:p-8">
+       {/* Use Card or other components as needed by the requirement */}
+       <Card className="max-w-2xl mx-auto">
+         <CardHeader>
+           <CardTitle>Dynamic Title</CardTitle>
+         </CardHeader>
+         <CardContent>
+            {/* The internal structure should vary based on the prompt! */}
+         </CardContent>
+       </Card>
     </div>
   );
 }
 ```
 
-**NEVER use plain HTML elements (`<input>`, `<button>`, `<div>` without styling) for UI components.**
+**CRITICAL**: You are an expert engineer. Judge the best structure for the specific request. **NEVER use plain HTML elements (`<input>`, `<button>`, `<div>` without styling) for UI components.**
