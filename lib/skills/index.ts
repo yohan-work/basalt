@@ -104,6 +104,11 @@ IMPORTANT:
 
         const workflow = await llm.generateJSONStream(systemPrompt, `Task Analysis: ${JSON.stringify(taskAnalysis)}`, schema, emitter);
 
+        // Ensure steps exists
+        if (!workflow.steps || !Array.isArray(workflow.steps)) {
+            workflow.steps = [];
+        }
+
         // Ensure verify step exists
         if (!workflow.steps.find((s: any) => s.action === 'verify_final_output')) {
             workflow.steps.push({ agent: 'main-agent', action: 'verify_final_output' });
