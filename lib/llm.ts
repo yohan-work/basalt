@@ -1,16 +1,18 @@
 
 import { MODEL_CONFIG, validateModels } from './model-config';
 import { StreamEmitter } from './stream-emitter';
+import http from 'http';
+import { URL } from 'url';
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 
 const TIMEOUT_MS = {
-    CODE: 120_000,  // 120s for code generation (longer prompts)
-    JSON: 60_000,   // 60s for JSON generation
+    CODE: 600_000,  // 600s for code generation
+    JSON: 90_000,   // 90s for JSON generation
 } as const;
 
 const MAX_RETRIES = 3;
-const BASE_DELAY_MS = 1000; // 1s → 2s → 4s exponential backoff
+const BASE_DELAY_MS = 500;
 
 export interface LLMResponse {
     content: string;
@@ -19,21 +21,140 @@ export interface LLMResponse {
 }
 
 /**
- * Fetch with timeout using AbortController
+ * Custom HTTP requester to bypass fetch timeout limitations (UND_ERR_HEADERS_TIMEOUT)
  */
-async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs: number): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-        const response = await fetch(url, {
-            ...options,
-            signal: controller.signal,
+async function ollamaRequest(
+    urlStr: string,
+    body: any,
+    timeout: number,
+    onResponse: (res: http.IncomingMessage) => Promise<void>
+): Promise<void> {
+    const url = new URL(urlStr);
+    const bodyStr = JSON.stringify(body);
+    console.log(`[LLM] Starting request to ${url.hostname}:${url.port}${url.pathname} (Model: ${body.model}, Body: ${Math.round(bodyStr.length / 1024)}KB, Timeout: ${timeout}ms)`);
+    return new Promise((resolve, reject) => {
+        const req = http.request({
+            hostname: url.hostname,
+            port: url.port,
+            path: url.pathname,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            timeout: timeout
+        }, (res) => {
+            console.log(`[LLM] Response status: ${res.statusCode} ${res.statusMessage}`);
+            if (res.statusCode && res.statusCode >= 400) {
+                reject(new Error(`Ollama API Error: ${res.statusCode} ${res.statusMessage}`));
+                return;
+            }
+            onResponse(res).then(resolve).catch(reject);
         });
-        return response;
-    } finally {
-        clearTimeout(timer);
-    }
+
+        req.on('error', reject);
+        req.on('timeout', () => {
+            req.destroy();
+            const err = new Error('LLM request timed out (Headers/Body timeout)');
+            err.name = 'AbortError';
+            reject(err);
+        });
+
+        req.write(JSON.stringify(body));
+        req.end();
+    });
+}
+
+/**
+ * Custom HTTP requester for streaming with heartbeat support
+ */
+async function ollamaStreamRequest(
+    urlStr: string,
+    body: any,
+    timeout: number,
+    onChunk: (chunk: any) => void,
+    onHeartbeat?: () => void
+): Promise<void> {
+    const url = new URL(urlStr);
+    const bodyStr = JSON.stringify(body);
+    console.log(`[LLM] Starting STREAM request to ${url.hostname}:${url.port}${url.pathname} (Model: ${body.model}, Body: ${Math.round(bodyStr.length / 1024)}KB, Timeout: ${timeout}ms)`);
+    return new Promise((resolve, reject) => {
+        let lastHeartbeat = Date.now();
+        let hbInterval: NodeJS.Timeout | null = null;
+
+        if (onHeartbeat) {
+            hbInterval = setInterval(() => {
+                if (Date.now() - lastHeartbeat > 15_000) {
+                    onHeartbeat();
+                    lastHeartbeat = Date.now();
+                }
+            }, 5_000);
+        }
+
+        const cleanup = () => {
+            if (hbInterval) clearInterval(hbInterval);
+        };
+
+        const req = http.request({
+            hostname: url.hostname,
+            port: url.port,
+            path: url.pathname,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            timeout: timeout
+        }, (res) => {
+            console.log(`[LLM] Stream response status: ${res.statusCode}`);
+            if (res.statusCode && res.statusCode >= 400) {
+                cleanup();
+                reject(new Error(`Ollama API Error: ${res.statusCode}`));
+                return;
+            }
+
+            let buffer = '';
+            let chunkCount = 0;
+            res.on('data', (chunk) => {
+                if (chunkCount === 0) console.log(`[LLM] Stream: First chunk received.`);
+                chunkCount++;
+
+                // Active streaming updates heartbeat timestamp
+                lastHeartbeat = Date.now();
+
+                buffer += chunk.toString();
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+                for (const line of lines) {
+                    if (line.trim()) {
+                        try {
+                            onChunk(JSON.parse(line));
+                        } catch (e) {
+                            // JSON parse error on partial line
+                        }
+                    }
+                }
+            });
+
+            res.on('end', () => {
+                if (buffer.trim()) {
+                    try { onChunk(JSON.parse(buffer)); } catch (e) { }
+                }
+                cleanup();
+                resolve();
+            });
+        });
+
+        req.on('error', (err) => {
+            cleanup();
+            reject(err);
+        });
+
+        req.on('timeout', () => {
+            req.destroy();
+            cleanup();
+            const err = new Error('AbortError');
+            err.name = 'AbortError';
+            reject(err);
+        });
+
+        req.write(bodyStr);
+        req.end();
+    });
 }
 
 /**
@@ -52,12 +173,10 @@ async function withRetry<T>(
         } catch (error: any) {
             lastError = error;
 
-            // Don't retry on abort (timeout) — it's intentional
             if (error.name === 'AbortError') {
-                throw new Error(`LLM request timed out after attempt ${attempt + 1}`);
+                throw new Error(`LLM request timed out after attempt ${attempt + 1}. Consider reducing context.`);
             }
 
-            // Don't retry on the last attempt
             if (attempt < maxRetries - 1) {
                 const delay = baseDelay * Math.pow(2, attempt);
                 console.warn(`LLM attempt ${attempt + 1} failed, retrying in ${delay}ms...`, error.message);
@@ -72,64 +191,94 @@ async function withRetry<T>(
 const CODE_GENERATION_SYSTEM_RULES = `
 You are an expert AI software engineer specializing in Next.js, React, and TypeScript.
 
+GENERAL PRINCIPLE:
+- **BE FLEXIBLE**: Follow the exact layout and structure requested in the task. If a specific layout (grid, vertical, etc.) or section ordering is requested, implement it precisely.
+- Do NOT stick to a fixed template. Adapt your component choices to the specific requirements.
+
 MANDATORY CODING RULES:
-- Use shadcn/ui components from @/components/ui/ for ALL UI elements (Button, Input, Label, Card, Dialog, Select, etc.)
-- Use Tailwind CSS for layout and spacing (flex, grid, gap, p, m utilities)
-- Use design tokens for colors: bg-background, text-foreground, text-muted-foreground, border-border, bg-primary, text-primary
-- Generate COMPLETE, working TypeScript code with all necessary imports
-- For React components, use proper TypeScript types and export as default
-- Follow the project structure: app/ for pages/routes, components/ for reusable components, lib/ for utilities
-- For form components: use Card as container, Label+Input for fields, Button for submit
-- Ensure all files are self-contained with correct relative import paths
+- Use shadcn/ui components from @/components/ui/ as high-quality building blocks (Button, Input, Label, Card, etc.).
+- Use Tailwind CSS for all layout and spacing (flex, grid, gap, p, m utilities).
+- Use design tokens for colors: bg-background, text-foreground, text-muted-foreground, border-border, bg-primary, text-primary.
+- Generate COMPLETE, working TypeScript code with all necessary imports.
+- For React components, use proper TypeScript types and export as default.
+- MANDATORY: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/page.tsx", NOT "/app/page.tsx").
+- Respect the existing project structure (app/ vs pages/).
+- Ensure all files are self-contained with correct relative import paths.
 `.trim();
 
-export async function generateCode(prompt: string, context: string, model: string = MODEL_CONFIG.CODING_MODEL): Promise<LLMResponse> {
+/**
+ * Extract files from raw LLM text using markdown blocks
+ * Supports both JSON and raw text formats.
+ */
+export function extractFilesFromRaw(text: string): Array<{ path: string; content: string }> {
+    const files: Array<{ path: string; content: string }> = [];
+
+    // Attempt 1: Raw Markdown format (File: path\n```...\ncontent\n```)
+    const fileRegex = /File:\s*([^\n\r]+)[\r\n]+```[a-z]*[\r\n]+([\s\S]*?)[\r\n]+```/gi;
+    let match;
+    while ((match = fileRegex.exec(text)) !== null) {
+        files.push({
+            path: match[1].trim(),
+            content: match[2]
+        });
+    }
+
+    // Attempt 2: If no files found, check if it's a raw JSON response (fallback)
+    if (files.length === 0) {
+        try {
+            const parsed = JSON.parse(cleanJSON(text));
+            if (parsed.files) return parsed.files;
+        } catch (e) { }
+    }
+
+    return files;
+}
+
+export async function generateCode(
+    prompt: string,
+    context: string,
+    model: string = MODEL_CONFIG.CODING_MODEL,
+    techStack: string = 'nextjs'
+): Promise<LLMResponse> {
     validateModels();
+
     const fullPrompt = `
 ${CODE_GENERATION_SYSTEM_RULES}
 
-Context (existing project files and recent activity):
+### FORMAT RULE:
+Provide your response as a brief explanation followed by the files. 
+For EACH file, use the following exact format:
+File: path/to/file.ext
+\`\`\`language
+file content
+\`\`\`
+
+Context:
 ${context}
 
 Task: ${prompt}
-
-Return the response in the following JSON format ONLY, without any markdown formatting or explanation:
-{
-    "explanation": "Brief explanation of what you did",
-    "files": [
-        { "path": "path/to/file.ext", "content": "file content here" }
-    ]
-}
 `;
 
     try {
-        const parsed = await withRetry(async () => {
-            const response = await fetchWithTimeout(
+        let fullText = '';
+        await withRetry(async () => {
+            await ollamaRequest(
                 `${OLLAMA_BASE_URL}/api/generate`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: model,
-                        prompt: fullPrompt,
-                        stream: false,
-                        format: 'json'
-                    })
-                },
-                TIMEOUT_MS.CODE
+                { model, prompt: fullPrompt, stream: false },
+                TIMEOUT_MS.CODE,
+                async (res) => {
+                    const chunks: any[] = [];
+                    for await (const chunk of res) chunks.push(chunk);
+                    const data = JSON.parse(Buffer.concat(chunks).toString());
+                    fullText = data.response;
+                }
             );
-
-            if (!response.ok) {
-                throw new Error(`Ollama API Error: ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            return JSON.parse(data.response);
         });
 
+        const files = extractFilesFromRaw(fullText);
         return {
-            content: parsed.explanation,
-            files: parsed.files || []
+            content: fullText.split('File:')[0].trim(),
+            files
         };
 
     } catch (error: any) {
@@ -150,240 +299,136 @@ export async function generateJSON(
 ): Promise<any> {
     validateModels();
 
-    const fullPrompt = `
-${systemPrompt}
-
-Goal: ${userPrompt}
-
-Return the response in the following JSON format ONLY, without any markdown formatting or explanation:
-${schemaDescription}
-`;
-
-    if (process.env.MOCK_LLM === 'true') {
-        console.log('[MockLLM] Generating JSON for prompt:', userPrompt);
-        // Simple mock logic for Team Orchestrator
-        if (systemPrompt.includes('COLLABORATION PROTOCOL')) {
-            return {
-                thought: "I will check the board and send a message.",
-                actions: [
-                    {
-                        type: "send_message",
-                        payload: { content: "Hello team, I am ready to work." }
-                    }
-                ]
-            };
-        }
-        return JSON.parse(schemaDescription || '{}');
-    }
+    const fullPrompt = `${systemPrompt}\n\nGoal: ${userPrompt}\n\nReturn the response in the following JSON format ONLY:\n${schemaDescription}`;
 
     return withRetry(async () => {
-        const response = await fetchWithTimeout(
+        let fullText = '';
+        await ollamaRequest(
             `${OLLAMA_BASE_URL}/api/generate`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: model,
-                    prompt: fullPrompt,
-                    stream: false,
-                    format: 'json'
-                })
-            },
-            TIMEOUT_MS.JSON
+            { model, prompt: fullPrompt, stream: false, format: 'json' },
+            TIMEOUT_MS.JSON,
+            async (res) => {
+                const chunks: any[] = [];
+                for await (const chunk of res) chunks.push(chunk);
+                const data = JSON.parse(Buffer.concat(chunks).toString());
+                fullText = data.response;
+            }
         );
-
-        if (!response.ok) {
-            throw new Error(`Ollama API Error: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        return JSON.parse(data.response);
+        return JSON.parse(cleanJSON(fullText));
     });
 }
 
-// ============================================================
-// Streaming variants — used when a StreamEmitter is available
-// ============================================================
-
-/**
- * Read an NDJSON stream from Ollama (stream: true) and accumulate tokens.
- * Each line is a JSON object with a `response` field containing the token.
- */
-async function readOllamaStream(
-    response: Response,
-    emitter: StreamEmitter | null,
-    context: string
-): Promise<string> {
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response body to stream');
-
-    const decoder = new TextDecoder();
-    let fullText = '';
-    let buffer = '';
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-
-        // Process complete lines (NDJSON: one JSON object per line)
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep incomplete line in buffer
-
-        for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-                const chunk = JSON.parse(line);
-                const token = chunk.response || '';
-                fullText += token;
-
-                if (emitter && token) {
-                    emitter.emit({ type: 'llm_token', token, context });
-                }
-            } catch {
-                // Malformed JSON line; skip
-            }
-        }
+export function cleanJSON(text: string): string {
+    if (!text) return '{}';
+    let cleaned = text.trim();
+    if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```(json)?\s*/i, '').replace(/\s*```$/i, '');
     }
-
-    // Process remaining buffer
-    if (buffer.trim()) {
-        try {
-            const chunk = JSON.parse(buffer);
-            const token = chunk.response || '';
-            fullText += token;
-            if (emitter && token) {
-                emitter.emit({ type: 'llm_token', token, context });
-            }
-        } catch {
-            // Ignore
-        }
+    // Remove potential leading/trailing non-JSON text
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+        cleaned = cleaned.substring(start, end + 1);
     }
-
-    return fullText;
+    return cleaned.trim();
 }
 
-/**
- * Generate code with streaming — emits tokens via StreamEmitter.
- * Falls back to non-streaming generateCode if no emitter provided.
- */
 export async function generateCodeStream(
     prompt: string,
     context: string,
     emitter: StreamEmitter | null,
-    model: string = MODEL_CONFIG.CODING_MODEL
+    model: string = MODEL_CONFIG.CODING_MODEL,
+    techStack: string = 'nextjs',
+    onHeartbeat?: () => void
 ): Promise<LLMResponse> {
     if (!emitter) {
-        return generateCode(prompt, context, model);
+        return generateCode(prompt, context, model, techStack);
     }
+
+    validateModels();
 
     const fullPrompt = `
 ${CODE_GENERATION_SYSTEM_RULES}
 
-Context (existing project files and recent activity):
+### FORMAT RULE:
+Provide your response as a brief explanation followed by the files. 
+For EACH file, use the following exact format:
+File: path/to/file.ext
+\`\`\`language
+file content
+\`\`\`
+
+Context:
 ${context}
 
 Task: ${prompt}
-
-Return the response in the following JSON format ONLY, without any markdown formatting or explanation:
-{
-    "explanation": "Brief explanation of what you did",
-    "files": [
-        { "path": "path/to/file.ext", "content": "file content here" }
-    ]
-}
 `;
 
     try {
-        const response = await fetchWithTimeout(
-            `${OLLAMA_BASE_URL}/api/generate`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model,
-                    prompt: fullPrompt,
-                    stream: true,
-                    format: 'json'
-                })
-            },
-            TIMEOUT_MS.CODE
-        );
+        let fullText = '';
+        await withRetry(async () => {
+            await ollamaStreamRequest(
+                `${OLLAMA_BASE_URL}/api/generate`,
+                { model, prompt: fullPrompt }, // NO format: 'json' here for speed
+                TIMEOUT_MS.CODE,
+                (chunk) => {
+                    const token = chunk.response || '';
+                    fullText += token;
+                    if (token) emitter.emit({ type: 'llm_token', token, context: 'code_generation' });
+                },
+                onHeartbeat
+            );
+        });
 
-        if (!response.ok) {
-            throw new Error(`Ollama API Error: ${response.statusText}`);
-        }
-
-        const fullText = await readOllamaStream(response, emitter, 'code_generation');
         emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'code_generation' });
 
-        const parsed = JSON.parse(fullText);
+        const files = extractFilesFromRaw(fullText);
         return {
-            content: parsed.explanation,
-            files: parsed.files || []
+            content: fullText.split('File:')[0].trim(),
+            files
         };
-
     } catch (error: any) {
-        console.error('LLM Stream Generation Failed:', error);
-        emitter.emit({ type: 'error', message: `LLM stream failed: ${error.message}` });
-        return {
-            content: `Failed to generate code via AI: ${error.message}`,
-            files: [],
-            error: true
-        };
+        emitter.emit({ type: 'error', message: error.message });
+        return { content: error.message, files: [], error: true };
     }
 }
 
-/**
- * Generate JSON with streaming — emits tokens via StreamEmitter.
- * Falls back to non-streaming generateJSON if no emitter provided.
- */
 export async function generateJSONStream(
     systemPrompt: string,
     userPrompt: string,
     schemaDescription: string,
     emitter: StreamEmitter | null,
-    model: string = MODEL_CONFIG.SMART_MODEL
+    model: string = MODEL_CONFIG.SMART_MODEL,
+    onHeartbeat?: () => void
 ): Promise<any> {
     if (!emitter) {
         return generateJSON(systemPrompt, userPrompt, schemaDescription, model);
     }
 
-    if (process.env.MOCK_LLM === 'true') {
-        return generateJSON(systemPrompt, userPrompt, schemaDescription, model);
+    validateModels();
+
+    const fullPrompt = `${systemPrompt}\n\nGoal: ${userPrompt}\n\nReturn the response in the following JSON format ONLY:\n${schemaDescription}`;
+
+    try {
+        let fullText = '';
+        await withRetry(async () => {
+            await ollamaStreamRequest(
+                `${OLLAMA_BASE_URL}/api/generate`,
+                { model, prompt: fullPrompt, format: 'json' },
+                TIMEOUT_MS.JSON,
+                (chunk) => {
+                    const token = chunk.response || '';
+                    fullText += token;
+                    if (token) emitter.emit({ type: 'llm_token', token, context: 'json_generation' });
+                },
+                onHeartbeat
+            );
+        });
+
+        emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'json_generation' });
+        return JSON.parse(cleanJSON(fullText));
+    } catch (error: any) {
+        emitter.emit({ type: 'error', message: error.message });
+        throw error;
     }
-
-    const fullPrompt = `
-${systemPrompt}
-
-Goal: ${userPrompt}
-
-Return the response in the following JSON format ONLY, without any markdown formatting or explanation:
-${schemaDescription}
-`;
-
-    const response = await fetchWithTimeout(
-        `${OLLAMA_BASE_URL}/api/generate`,
-        {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model,
-                prompt: fullPrompt,
-                stream: true,
-                format: 'json'
-            })
-        },
-        TIMEOUT_MS.JSON
-    );
-
-    if (!response.ok) {
-        throw new Error(`Ollama API Error: ${response.statusText}`);
-    }
-
-    const fullText = await readOllamaStream(response, emitter, 'json_generation');
-    emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'json_generation' });
-
-    return JSON.parse(fullText);
 }

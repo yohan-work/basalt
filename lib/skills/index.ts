@@ -9,13 +9,22 @@ import * as llm from '../llm';
 const execAsync = promisify(exec);
 
 // --- Main Agent Skills ---
-export async function analyze_task(taskDescription: string, availableAgents?: AgentDefinition[]) {
+export async function analyze_task(
+    taskDescription: string,
+    availableAgents?: AgentDefinition[],
+    codebaseContext?: string,
+    emitter: any = null
+) {
     try {
-        const agents = availableAgents?.length ? availableAgents : AgentLoader.listAgents();
-        const agentsList = agents.map(a => `- ${a.name} (Role: ${a.role}, Skills: ${a.skills.join(', ')})`).join('\n');
+        const rawAgents = (availableAgents && availableAgents.length > 0) ? availableAgents : AgentLoader.listAgents();
+        const agents = Array.isArray(rawAgents) ? rawAgents : [];
+        const agentsList = agents.map(a => `- ${a.name} (Role: ${a.role}, Skills: ${a.skills?.join(', ') || ''})`).join('\n');
 
         const systemPrompt = `You are a Lead AI Architect.
 Your goal is to analyze a user request and determine which agents are required to fulfill it.
+
+${codebaseContext ? `Current Codebase Context:\n${codebaseContext}\n` : ''}
+
 Available Agents:
 ${agentsList}
 `;
@@ -27,7 +36,7 @@ ${agentsList}
 }
 IMPORTANT: Use the exact agent role slugs from the Available Agents list above (e.g. "software-engineer", "product-manager", "qa"). Do NOT use underscores or other formats.`;
 
-        const analysis = await llm.generateJSON(systemPrompt, taskDescription, schema);
+        const analysis = await llm.generateJSONStream(systemPrompt, taskDescription, schema, emitter);
         return analysis;
 
     } catch (e) {
@@ -41,7 +50,12 @@ IMPORTANT: Use the exact agent role slugs from the Available Agents list above (
     }
 }
 
-export async function create_workflow(taskAnalysis: any, availableAgents?: AgentDefinition[]) {
+export async function create_workflow(
+    taskAnalysis: any,
+    availableAgents?: AgentDefinition[],
+    codebaseContext?: string,
+    emitter: any = null
+) {
     try {
         const agents = availableAgents?.length ? availableAgents : AgentLoader.listAgents();
         const requiredAgents = taskAnalysis.required_agents || [];
@@ -53,6 +67,8 @@ export async function create_workflow(taskAnalysis: any, availableAgents?: Agent
         const systemPrompt = `You are a Project Manager.
 Create a step-by-step workflow to complete the task.
 Use ONLY the available agents and their specific skills.
+
+${codebaseContext ? `Current Codebase Context (Project Structure/Config):\n${codebaseContext}\n` : ''}
 
 Supported Skills:
 - read_codebase: Read file content
@@ -75,17 +91,18 @@ ${agentsInfo}
 
         const schema = `{
     "steps": [
-        { "agent": "software-engineer", "action": "read_codebase", "description": "Read app/page.tsx to understand current structure before making changes" },
-        { "agent": "software-engineer", "action": "write_code", "description": "Create components/LoginForm.tsx with email and password fields using shadcn/ui Card, Input, Label, and Button components. Include form validation and Tailwind CSS styling." },
-        { "agent": "main-agent", "action": "verify_final_output", "description": "Verify the login form was created correctly and meets requirements" }
+        { "agent": "software-engineer", "action": "read_codebase", "description": "Read package.json to identify project dependencies" },
+        { "agent": "software-engineer", "action": "write_code", "description": "Create app/auth/login/page.tsx with a responsive login form" },
+        { "agent": "main-agent", "action": "verify_final_output", "description": "Verify the login page implementation" }
     ]
 }
 IMPORTANT:
-- Use the exact agent role slugs (e.g. "software-engineer", "product-manager", "qa"). Do NOT use underscores.
-- Each "description" MUST be SPECIFIC and ACTIONABLE — include the exact file path, what to create/modify, and key implementation details.
-- Do NOT write vague descriptions like "implement the feature" or "create the component". Be explicit.`;
+- Use the exact agent role slugs (e.g. "software-engineer", "product-manager", "qa").
+- MANDATORY: Use the 'codebaseContext' provided above to determine actual file paths and folder structures.
+- For new pages, check if the project uses 'app/' (App Router) or 'pages/' (Page Router) and follow that pattern.
+- Each 'description' MUST be UNIQUE, SPECIFIC and ACTIONABLE for the designated agent.`;
 
-        const workflow = await llm.generateJSON(systemPrompt, `Task Analysis: ${JSON.stringify(taskAnalysis)}`, schema);
+        const workflow = await llm.generateJSONStream(systemPrompt, `Task Analysis: ${JSON.stringify(taskAnalysis)}`, schema, emitter);
 
         // Ensure verify step exists
         if (!workflow.steps.find((s: any) => s.action === 'verify_final_output')) {
@@ -133,10 +150,19 @@ If you can't be sure, lean towards true but add a note to check manually.
 }
 
 // --- Software Engineer Skills ---
-export async function read_codebase(filePath: string, baseDir: string = process.cwd()) {
+export async function read_codebase(filePath: string, projectPath: string = process.cwd()) {
     try {
-        const fullPath = path.resolve(baseDir, filePath);
-        const content = fs.readFileSync(fullPath, 'utf-8');
+        // Secure handle: if path starts with '/', treat it as relative to projectPath to avoid OS root access
+        let relativePath = filePath;
+        if (path.isAbsolute(filePath)) {
+            relativePath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+        }
+        const fullPath = path.resolve(projectPath, relativePath);
+
+        if (!fs.existsSync(fullPath)) {
+            return `File "${filePath}" does not exist in project. (Path: ${relativePath})`;
+        }
+        const content = fs.readFileSync(fullPath, 'utf8');
         return content;
     } catch (error: any) {
         return `Error reading file: ${error.message}`;
@@ -145,7 +171,9 @@ export async function read_codebase(filePath: string, baseDir: string = process.
 
 export async function write_code(filePath: string, content: string, baseDir: string = process.cwd()) {
     try {
-        const fullPath = path.resolve(baseDir, filePath);
+        // Ensure relative path by stripping leading slash
+        const relativePath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+        const fullPath = path.resolve(baseDir, relativePath);
         const dir = path.dirname(fullPath);
 
         // Capture before content if file exists (for diff viewer)
