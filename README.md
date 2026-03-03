@@ -234,76 +234,72 @@ MOCK_LLM=false                             # true로 설정 시 LLM 모킹
 
 ---
 
-## 프로젝트 구조
+### 프로젝트 구조 및 주요 파일 분석
 
 ```
 basalt/
-├── app/                          # Next.js App Router
-│   ├── analytics/
-│   │   └── page.tsx              # 분석 대시보드 페이지
-│   ├── api/
-│   │   ├── agent/
-│   │   │   ├── execute/route.ts  # 워크플로우 실행
-│   │   │   ├── plan/route.ts     # 태스크 분석 및 계획
-│   │   │   ├── retry/route.ts    # 실패 재시도
-│   │   │   ├── skills/route.ts   # 스킬 동적 실행
-│   │   │   ├── stream/route.ts   # SSE 실시간 스트리밍
-│   │   │   └── verify/route.ts   # 결과 검증
-│   │   ├── system/
-│   │   │   └── dialog/route.ts   # macOS 폴더 선택
-│   │   └── team/
-│   │       └── execute/route.ts  # 팀 협업 실행
-│   ├── error.tsx                 # 페이지 에러 바운더리
-│   ├── global-error.tsx          # 앱 전체 에러 바운더리
-│   ├── globals.css               # Tailwind CSS 4 테마 (라이트/다크)
-│   ├── layout.tsx                # 루트 레이아웃 (메타데이터, 테마 스크립트)
-│   ├── loading.tsx               # 메인 페이지 로딩 스켈레톤
-│   ├── not-found.tsx             # 404 페이지
-│   ├── page.tsx                  # 메인 (칸반 보드 + 로그 뷰어)
-│   └── theme-script.tsx          # 다크모드 FOUC 방지 인라인 스크립트
-├── components/
-│   ├── analytics/
-│   │   ├── team/
-│   │   │   ├── ChatChannel.tsx       # 팀 채팅
-│   │   │   ├── KanbanBoard.tsx       # 팀 태스크 보드
-│   │   │   └── TeamActivityView.tsx  # 팀 활동 라이브 뷰
-│   │   ├── AgentActivityChart.tsx    # 에이전트 활동 차트
-│   │   ├── AnalyticsDashboard.tsx    # 분석 대시보드
-│   │   ├── ErrorRankingTable.tsx     # 에러 랭킹
-│   │   └── StatCard.tsx              # 통계 카드
-│   ├── ui/                    # shadcn/ui 컴포넌트 (13개)
-│   ├── AgentStatusDashboard.tsx  # 에이전트 상태 대시보드
-│   ├── CodeDiffViewer.tsx        # 코드 변경 diff 뷰어
-│   ├── CreateTaskModal.tsx       # 태스크 생성 모달 (템플릿 지원)
-│   ├── FileActivityTree.tsx      # 파일 활동 트리
-│   ├── KanbanBoard.tsx           # 메인 칸반 보드 (SSE 연동)
-│   ├── LiveProgressPanel.tsx     # 실시간 진행 패널 (SSE)
-│   ├── LogViewer.tsx             # 실행 로그 뷰어 (task_id 필터링)
-│   ├── ProjectSelector.tsx       # 프로젝트 선택/생성
-│   ├── StepProgress.tsx          # 워크플로우 진행률
-│   ├── TaskDetailsModal.tsx      # 태스크 상세 모달 (4탭: Details/Live/Changes/Logs)
-│   ├── ThemeToggle.tsx           # 다크/라이트 모드 토글
-│   └── WorkflowFlowchart.tsx     # 워크플로우 시각화
-├── lib/
-│   ├── agents/                # 에이전트 정의 (AGENT.md × 9)
-│   │   ├── Orchestrator.ts    # 순차 실행 오케스트레이터
-│   │   └── TeamOrchestrator.ts # 팀 협업 오케스트레이터
-│   ├── skills/                # 스킬 정의 (SKILL.md × 20)
-│   │   └── index.ts           # 스킬 런타임 구현
-│   ├── hooks/
-│   │   └── useEventStream.ts  # SSE 스트림 소비 React 훅
-│   ├── agent-loader.ts        # 에이전트/스킬 로더
-│   ├── analytics.ts           # 분석 데이터 조회
-│   ├── context-manager.ts     # 실행 컨텍스트 관리 (저장/복원)
-│   ├── llm.ts                 # LLM 통신 (재시도, 타임아웃, 스트리밍)
-│   ├── model-config.ts        # LLM 모델 설정 (환경변수 오버라이드)
-│   ├── stream-emitter.ts      # SSE 이벤트 발신기 (ETA 계산)
-│   ├── supabase.ts            # Supabase 클라이언트
-│   ├── task-templates.ts      # 태스크 템플릿 프리셋 (8종)
-│   ├── team-types.ts          # 팀 협업 타입 정의
-│   └── utils.ts               # 유틸리티 (cn)
-└── scripts/                   # 테스트/유틸리티 스크립트
+├── app/                          # Next.js App Router 기반의 웹 프론트엔드 및 API
+│   ├── analytics/                # 분석 대시보드 페이지 (에이전트 통계, 에러 랭킹 등)
+│   ├── api/                      # 서버측 API 엔드포인트
+│   │   ├── agent/                # 에이전트 제어 (plan, execute, verify, retry, skills, stream)
+│   │   ├── system/               # 시스템 유틸리티 (macOS 다이얼로그 등)
+│   │   └── team/                 # 팀 협업 오케스트레이션 API
+│   ├── globals.css               # Tailwind CSS 4 기반의 스타일 시스템 (다크모드 지원)
+│   ├── layout.tsx                # 루트 레이아웃 및 테마 관리
+│   └── page.tsx                  # 메인 대시보드 (칸반 보드 및 로그 뷰어 통합)
+├── components/                   # React UI 컴포넌트
+│   ├── analytics/                # 통계 및 분석용 시각화 컴포넌트
+│   │   ├── team/                 # 팀 활동 라이브 뷰 및 채팅 인터페이스
+│   │   └── AgentActivityChart.tsx # Recharts 기반 에이전트 활동 차트
+│   ├── ui/                       # shadcn/ui 기반 원자적 컴포넌트 (버튼, 카드, 다이얼로그 등)
+│   ├── AgentStatusDashboard.tsx  # 에이전트별 실시간 상태(IDLE, ACTIVE, DONE) 시각화
+│   ├── CodeDiffViewer.tsx        # 파일 변경 사항을 보여주는 고해상도 Diff 뷰어
+│   ├── CreateTaskModal.tsx       # 태스크 생성 및 8종 템플릿 지원 모달
+│   ├── FileActivityTree.tsx      # 에이전트의 파일 접근/수정 내역을 트리 구조로 표현
+│   ├── KanbanBoard.tsx           # 프로젝트의 핵심 인터페이스. Supabase 실시간 연동
+│   ├── LiveProgressPanel.tsx     # SSE 기반 실시간 진행률 및 LLM 토큰 스트리밍 패널
+│   ├── LogViewer.tsx             # 에이전트의 사고(Thought)와 실행(Action) 로그 뷰어
+│   ├── StepProgress.tsx          # 워크플로우 단계별 상세 진행 상태 표시
+│   ├── TaskDetailsModal.tsx      # 태스크의 모든 정보(분석, 계획, 로그, 변경사항) 통합 뷰어
+│   └── WorkflowFlowchart.tsx     # React Flow를 이용한 워크플로우 시각화
+├── lib/                          # 핵심 비즈니스 로직 및 에이전트 엔진
+│   ├── agents/                   # 에이전트 정의 및 오케스트레이터
+│   │   ├── Orchestrator.ts       # 단일 태스크의 생명주기 관리 (Plan -> Exec -> Verify)
+│   │   └── TeamOrchestrator.ts   # 멀티 에이전트 협업 및 라운드-로빈 실행 엔진
+│   ├── skills/                   # 에이전트가 실행하는 실무 기능 (Git, 코드 생성, 분석 등)
+│   │   └── index.ts              # 20여 종의 핵심 스킬 런타임 구현부
+│   ├── agent-loader.ts           # 마크다운 기반의 에이전트/스킬 설정 동적 로더
+│   ├── analytics.ts              # Supabase 연동 분석 데이터 집계 로직
+│   ├── context-manager.ts        # LLM을 위한 지능적 컨텍스트 최적화 및 저장/복원
+│   ├── extractor.ts              # LLM 응답에서 코드와 메타데이터를 추출하는 정규식 엔진
+│   ├── llm.ts                    # Ollama 연동 및 재시도, 스트리밍, 타임아웃 처리
+│   ├── profiler.ts               # 프로젝트 구조 및 스택 자동 분석 (할루시네이션 방지)
+│   ├── stream-emitter.ts         # SSE 이벤트 생성 및 ETA 예측 엔진
+│   └── supabase.ts               # Supabase 클라이언트 설정 및 실시간 구독 관리
+└── scripts/                      # 테스트 자동화 및 시뮬레이션 스크립트
 ```
+
+### 상세 기능 분석
+
+#### 1. 에이전트 오케스트레이션 (`lib/agents`)
+- **자동화된 워크플로우**: `Orchestrator`가 `main-agent`를 통해 요구사항을 분석하고 최적의 실행 계획을 수립합니다.
+- **상태 영속성**: 모든 작업 단계는 Supabase에 저장되어, 예기치 못한 중단 시에도 `context-manager`를 통해 마지막 작업 지점부터 재개(`retry`)할 수 있습니다.
+- **멀티 에이전트 팀 협업**: `TeamOrchestrator`는 여러 전문 에이전트가 채팅과 공유 보드를 통해 협업하는 환경을 제공합니다.
+
+#### 2. 지능적 컨텍스트 처리 (`lib/context-manager.ts`, `lib/profiler.ts`)
+- **컨텍스트 최적화**: LLM의 토큰 제한 내에서 가장 관련성 높은 파일 내용과 실행 이력을 우선적으로 포함하도록 동적으로 구성합니다.
+- **프로젝트 분석**: `Profiler`가 실제 프로젝트의 `package.json`, 컴포넌트 구조, 스타일 시스템을 스캔하여 LLM에게 사실 기반의 정보를 제공, 정확한 코드 생성을 유도합니다.
+
+#### 3. 실시간 인터페이스 및 모니터링 (`components/`)
+- **실시간 스트리밍**: SSE(Server-Sent Events)를 통해 에이전트의 사고 과정과 작업 진행률을 지연 없이 사용자에게 전달합니다.
+- **코드 변경 추적**: `write_code` 스킬 실행 시 변경 전/후를 캡처하여 `CodeDiffViewer`를 통해 실각화된 diff를 제공합니다.
+- **시각적 워크플로우**: `WorkflowFlowchart`를 통해 에이전트 간의 작업 흐름을 한눈에 파악할 수 있습니다.
+
+#### 4. 강력한 에이전트 스킬셋 (`lib/skills/`)
+- **Git 자동화**: 커밋 메시지 생성부터 브랜치 생성, 푸시, PR 생성까지 Git 전체 과정을 자동 처리합니다.
+- **코드 품질 관리**: `lint_code`, `typecheck` 스킬을 통해 생성된 코드의 기초적인 오류를 자동으로 검증합니다.
+- **프로젝트 스캔**: 기존 코드 패턴을 추출(`extract_patterns`)하고 유사 컴포넌트를 검색(`find_similar_components`)하여 일관성 있는 코드를 작성합니다.
+
 
 ---
 
