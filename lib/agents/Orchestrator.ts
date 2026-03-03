@@ -5,6 +5,7 @@ import * as llm from '@/lib/llm';
 import { AgentLoader, AgentDefinition } from '../agent-loader';
 import { ContextManager } from '../context-manager';
 import { StreamEmitter } from '../stream-emitter';
+import { ProjectProfiler } from '../profiler';
 import { MODEL_CONFIG } from '../model-config';
 
 interface AgentTask {
@@ -38,6 +39,7 @@ export class Orchestrator {
     private taskId: string;
     private mainAgentDef: AgentDefinition;
     private contextManager: ContextManager;
+    private profiler: ProjectProfiler;
     private emitter: StreamEmitter | null;
 
     // Simple in-memory lock to prevent concurrent executions of the same task
@@ -47,6 +49,7 @@ export class Orchestrator {
         this.taskId = taskId;
         this.mainAgentDef = AgentLoader.loadAgent('main-agent');
         this.contextManager = new ContextManager(taskId);
+        this.profiler = new ProjectProfiler(process.cwd()); // Default to current dir
         this.emitter = emitter || null;
     }
 
@@ -130,12 +133,15 @@ export class Orchestrator {
                 const { data: project } = await supabase.from('Projects').select('path').eq('id', (task as any).project_id).single();
                 if (project?.path) {
                     projectPath = project.path;
+                    this.profiler = new ProjectProfiler(projectPath);
                     await this.log(mainAgentName, `Scanning project at: ${projectPath}`, { type: 'System' });
 
                     try {
-                        const dirList = await skills.list_directory('.', projectPath);
+                        const profilerContext = await this.profiler.getContextString();
+                        codebaseContext = profilerContext;
+
+                        // Also Add package.json explicitly for more depth if needed
                         const pkgJson = await skills.read_codebase('package.json', projectPath);
-                        codebaseContext = `Project Path: ${projectPath}\nFiles: ${JSON.stringify(dirList.slice(0, 20))}\nPackage.json: ${pkgJson.slice(0, 1000)}`;
                         this.contextManager.addFile('package.json', pkgJson);
                     } catch (error: any) {
                         await this.log(mainAgentName, `Initial scan failed: ${error.message}`, { type: 'WARNING' });
@@ -209,6 +215,8 @@ Current Step Goal: ${stepDescription || taskDescription}
 Overall Task: ${taskDescription}
 Project Path: ${projectPath}
 Tech Stack: ${techStack}
+
+${await this.profiler.getContextString()}
 
 ${dynamicContext}
 
@@ -306,6 +314,7 @@ Example for write_code: { "arguments": ["app/page.tsx", "export default function
                 const { data: project } = await supabase.from('Projects').select('path').eq('id', (task as any).project_id).single();
                 if (project?.path) {
                     projectPath = project.path;
+                    this.profiler = new ProjectProfiler(projectPath);
                     this.log('System', `Using Project Path: ${projectPath}`);
                 }
             }
@@ -425,11 +434,19 @@ Example for write_code: { "arguments": ["app/page.tsx", "export default function
 
                             while (attempt < maxAttempts) {
                                 const contextData = this.contextManager.getOptimizedContext(contextSize);
+
+                                // Inject project-specific profiling context
+                                let augmentedContext = contextData;
+                                if (this.profiler) {
+                                    const profilerData = await this.profiler.getContextString();
+                                    augmentedContext = `${profilerData}\n\n${contextData}`;
+                                }
+
                                 await this.log(stepAgentDef.name, `Attempt ${attempt + 1}: Generating code starting... (Context: ${contextData.length} chars)`, { type: 'ACTION' });
 
                                 codeResult = await llm.generateCodeStream(
                                     codePrompt,
-                                    contextData,
+                                    augmentedContext,
                                     this.emitter,
                                     MODEL_CONFIG.CODING_MODEL,
                                     techStack,
