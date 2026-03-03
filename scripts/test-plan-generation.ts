@@ -1,10 +1,17 @@
-
-
 import path from 'path';
-import dotenv from 'dotenv';
+import fs from 'fs';
 
-// Load env vars first
-dotenv.config({ path: path.resolve(__dirname, '../.env.local') });
+// Simple manual env loading for .env.local if not already loaded
+const envPath = path.resolve(__dirname, '../.env.local');
+if (fs.existsSync(envPath)) {
+    const envConfig = fs.readFileSync(envPath, 'utf-8');
+    envConfig.split('\n').forEach(line => {
+        const [key, value] = line.split('=');
+        if (key && value && !process.env[key.trim()]) {
+            process.env[key.trim()] = value.trim().replace(/^["']|["']$/g, '');
+        }
+    });
+}
 
 import { AgentLoader } from '../lib/agent-loader';
 
