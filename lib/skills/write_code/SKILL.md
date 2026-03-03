@@ -21,6 +21,7 @@ Writes string content to a specified file path.
 4.  **IMPORTANT**: Always use the correct file extension based on the explicit `Tech Stack` provided in the context (e.g., use `.tsx` for React/Next.js components, `.ts` for logic, `.css`/`.scss` for styles).
 5.  Do NOT create `.txt` or `.md` files unless explicitly asked for documentation.
 6.  For UI components in Next.js/React, ensure you import React and necessary libraries.
+7.  **CRITICAL (Next.js App Router)**: If the project uses App Router (files in `app/`) and you use React Hooks (e.g., `useState`, `useEffect`, `useContext`) or event handlers (e.g., `onClick`), you **MUST** include `"use client"` at the very top of the file (Line 1).
 
 ## UI Component Guidelines (MANDATORY)
 
@@ -38,20 +39,25 @@ Use these components from `@/components/ui/` as building blocks. **Do NOT just c
 | Dialog | `Dialog`, `DialogTrigger`, `DialogContent` | `@/components/ui/dialog` |
 | Select | `Select`, `SelectTrigger`, `SelectContent`, `SelectItem` | `@/components/ui/select` |
 
-### 2. Layout Flexibility
+### 2. Layout & Styling Rules
 - **Follow the exact layout requested.** If the user asks for a grid, vertical stack, or specific section ordering, implement exactly that.
-- Use Tailwind CSS freely for layout: `grid`, `flex`, `space-y-X`, `gap-X`, `w-full`, etc.
+- **Styling**: Check the `[PROJECT CONTEXT]` for `Tailwind CSS`. Use Tailwind `grid`, `flex`, `gap-X` only if it is installed.
+- **Import Style**: Check `[PROJECT CONTEXT]` for `UI Component Import Style`.
+    - **MANDATORY**: If named imports are required, use `import { Component } from "@/components/ui/component"`.
+    - **MANDATORY**: If a barrel file (`components/ui/index.ts`) exists, use MUST use it: `import { Button, Card } from "@/components/ui"`.
+- **CRITICAL**: If Tailwind is NOT installed, **NEVER** use its classes. If `shadcn/ui` components are present but Tailwind is missing, they are likely broken; use standard HTML tags with premium inline styles instead.
 - **NEVER** stick to a fixed template if the task description implies a different structure.
 
 ### 3. Component Reference Example
 *This is a reference for how to use shadcn/ui components, NOT a template to be used every time.*
 
 ```tsx
-// Using shadcn/ui building blocks to create a custom structure
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card';
+// 1. Preferred if barrel import is available (check [PROJECT CONTEXT])
+import { Button, Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
+
+// 2. Fallback if no barrel file exists (check for NAMED vs DEFAULT style)
+// Named export style: import { Button } from "@/components/ui/button";
+// Default export style: import Button from "@/components/ui/button";
 
 // Example: A generic container using background and flex/grid
 export default function FlexibleComponent() {
@@ -71,4 +77,7 @@ export default function FlexibleComponent() {
 }
 ```
 
-**CRITICAL**: You are an expert engineer. Judge the best structure for the specific request. **NEVER use plain HTML elements (`<input>`, `<button>`, `<div>` without styling) for UI components.**
+**CRITICAL**: You are an expert engineer. Judge the best structure for the specific request.
+1. **NO HALLUCINATIONS**: ONLY use components that are explicitly listed in the reference table above or that you know exist in the actual codebase (e.g. check `components/ui` directory if unsure). NEVER invent components like `Heading`, `Text`, or `Typography` if they are not provided.
+2. **Standard HTML + Tailwind**: If a specialized component (like a Typography or List component) is missing, use standard semantic HTML tags (`h1`, `h2`, `p`, `ul`, `li`, etc.) combined with Tailwind CSS classes for styling.
+3. NEVER use plain HTML elements (`<input>`, `<button>`, `<div>` without styling) for UI components.
