@@ -87,7 +87,7 @@ export const TASK_TEMPLATES: TaskTemplate[] = [
         description: `새 페이지를 생성합니다.
 
 요구사항:
-- 경로: /[페이지 경로]
+- 페이지 생성 경로: /[페이지 경로]
 - 레이아웃: [레이아웃 설명]
 - 주요 섹션:
   1. [섹션 1]
