@@ -7,7 +7,7 @@ import { URL } from 'url';
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 
 const TIMEOUT_MS = {
-    CODE: 600_000,  // 600s for code generation
+    CODE: 180_000,  // 180s (3m) for code generation (Reduced from 600s)
     JSON: 90_000,   // 90s for JSON generation
 } as const;
 
@@ -213,14 +213,26 @@ MANDATORY CODING RULES:
 export function extractFilesFromRaw(text: string): Array<{ path: string; content: string }> {
     const files: Array<{ path: string; content: string }> = [];
 
-    // Attempt 1: Raw Markdown format (File: path\n```...\ncontent\n```)
-    const fileRegex = /File:\s*([^\n\r]+)[\r\n]+```[a-z]*[\r\n]+([\s\S]*?)[\r\n]+```/gi;
+    // Improved regex to handle various markdown prefixes before "File:" or similar labels
+    // It captures the line followed by a markdown code block.
+    const fileRegex = /(?:^|\n)(?:[#*`\s]*File[:\s]*|[#*`\s]*Path[:\s]*)*\s*([^\n\r]+)[\r\n]+```[a-z]*[\r\n]+([\s\S]*?)[\r\n]+```/gi;
     let match;
     while ((match = fileRegex.exec(text)) !== null) {
-        files.push({
-            path: match[1].trim(),
-            content: match[2]
-        });
+        let rawPath = match[1].trim();
+        // Clean up common markdown debris from the captured path (e.g., "### File: path" or "**File:** path")
+        const cleanPath = rawPath
+            .replace(/^[#*`\s]+/, '') // Remove leading #, *, `
+            .replace(/[#*`\s]+$/, '') // Remove trailing debris
+            .replace(/^File[:\s]*/i, '') // Remove redundant "File:" if it was captured in the group
+            .replace(/^\//, '') // Remove leading slash
+            .trim();
+
+        if (cleanPath) {
+            files.push({
+                path: cleanPath,
+                content: match[2]
+            });
+        }
     }
 
     // Attempt 2: If no files found, check if it's a raw JSON response (fallback)
@@ -247,7 +259,7 @@ ${CODE_GENERATION_SYSTEM_RULES}
 
 ### FORMAT RULE:
 Provide your response as a brief explanation followed by the files. 
-For EACH file, use the following exact format:
+For EACH file, you MUST use the following PRECISE format. DO NOT use markdown headers (###) or bolding (**) for the "File:" line:
 File: path/to/file.ext
 \`\`\`language
 file content
@@ -352,7 +364,7 @@ ${CODE_GENERATION_SYSTEM_RULES}
 
 ### FORMAT RULE:
 Provide your response as a brief explanation followed by the files. 
-For EACH file, use the following exact format:
+For EACH file, you MUST use the following PRECISE format. DO NOT use markdown headers (###) or bolding (**) for the "File:" line:
 File: path/to/file.ext
 \`\`\`language
 file content

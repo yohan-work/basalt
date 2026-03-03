@@ -419,12 +419,14 @@ Example for write_code: { "arguments": ["app/page.tsx", "export default function
                             this.emitter?.emit({ type: 'skill_execute', skill: action, args: step.description });
 
                             let codeResult;
-                            let contextSize = 4000; // Reduced from 8000 for faster prefill
+                            let contextSize = 3000; // Further reduced from 4000 for faster start
                             let attempt = 0;
+                            const maxAttempts = 3;
 
-                            while (attempt < 2) {
+                            while (attempt < maxAttempts) {
                                 const contextData = this.contextManager.getOptimizedContext(contextSize);
-                                console.log(`[Orchestrator] Generating code, attempt ${attempt + 1} (Context size: ${contextData.length} chars)`);
+                                await this.log(stepAgentDef.name, `Attempt ${attempt + 1}: Generating code starting... (Context: ${contextData.length} chars)`, { type: 'ACTION' });
+
                                 codeResult = await llm.generateCodeStream(
                                     codePrompt,
                                     contextData,
@@ -436,12 +438,12 @@ Example for write_code: { "arguments": ["app/page.tsx", "export default function
 
                                 if (!codeResult.error) break;
 
-                                // Adaptive retry for timeouts
-                                if (codeResult.content.includes('timed out') || codeResult.content.includes('AbortError')) {
+                                // Adaptive retry for timeouts or size issues
+                                if (codeResult.content.includes('timed out') || codeResult.content.includes('AbortError') || codeResult.content.includes('too large')) {
                                     attempt++;
-                                    if (attempt < 2) {
-                                        contextSize = Math.floor(contextSize / 2);
-                                        await this.log(stepAgentDef.name, `Timeout detected. Retrying with reduced context (${contextSize} chars)...`, { type: 'WARNING' });
+                                    if (attempt < maxAttempts) {
+                                        contextSize = Math.floor(contextSize / 1.5); // Less aggressive reduction than 2x
+                                        await this.log(stepAgentDef.name, `Generation issue detected. Retrying with reduced context (${contextSize} tokens)...`, { type: 'WARNING' });
                                         continue;
                                     }
                                 }
