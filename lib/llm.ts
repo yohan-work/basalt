@@ -1,6 +1,6 @@
-
 import { MODEL_CONFIG, validateModels } from './model-config';
 import { StreamEmitter } from './stream-emitter';
+import { FileExtractor } from './extractor';
 import http from 'http';
 import { URL } from 'url';
 
@@ -197,8 +197,10 @@ GENERAL PRINCIPLE:
 
 MANDATORY CODING RULES:
 - Use shadcn/ui components from @/components/ui/ as high-quality building blocks (Button, Input, Label, Card, etc.).
-- Use Tailwind CSS for all layout and spacing (flex, grid, gap, p, m utilities).
-- Use design tokens for colors: bg-background, text-foreground, text-muted-foreground, border-border, bg-primary, text-primary.
+- Use Tailwind CSS for layout and spacing ONLY IF "Tailwind CSS IS installed" is explicitly mentioned in the [PROJECT CONTEXT].
+- If Tailwind is NOT present, DO NOT use tailwind classes (e.g., no "flex", "grid", "gap-4", "p-4"). Use standard CSS or inline styles.
+- CRITICAL: If the [PROJECT CONTEXT] has a [WARNING] about shadcn/ui and missing Tailwind, DO NOT use those UI components if they rely on tailwind. Use standard HTML tags (div, button, h1) with appropriate inline styles for a premium look.
+- Use design tokens ONLY IF the project supports them.
 - Generate COMPLETE, working TypeScript code with all necessary imports.
 - For React components, use proper TypeScript types and export as default.
 - MANDATORY: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/page.tsx", NOT "/app/page.tsx").
@@ -207,43 +209,10 @@ MANDATORY CODING RULES:
 `.trim();
 
 /**
- * Extract files from raw LLM text using markdown blocks
- * Supports both JSON and raw text formats.
+ * Extract files from raw LLM text using FileExtractor
  */
 export function extractFilesFromRaw(text: string): Array<{ path: string; content: string }> {
-    const files: Array<{ path: string; content: string }> = [];
-
-    // Improved regex to handle various markdown prefixes before "File:" or similar labels
-    // It captures the line followed by a markdown code block.
-    const fileRegex = /(?:^|\n)(?:[#*`\s]*File[:\s]*|[#*`\s]*Path[:\s]*)*\s*([^\n\r]+)[\r\n]+```[a-z]*[\r\n]+([\s\S]*?)[\r\n]+```/gi;
-    let match;
-    while ((match = fileRegex.exec(text)) !== null) {
-        let rawPath = match[1].trim();
-        // Clean up common markdown debris from the captured path (e.g., "### File: path" or "**File:** path")
-        const cleanPath = rawPath
-            .replace(/^[#*`\s]+/, '') // Remove leading #, *, `
-            .replace(/[#*`\s]+$/, '') // Remove trailing debris
-            .replace(/^File[:\s]*/i, '') // Remove redundant "File:" if it was captured in the group
-            .replace(/^\//, '') // Remove leading slash
-            .trim();
-
-        if (cleanPath) {
-            files.push({
-                path: cleanPath,
-                content: match[2]
-            });
-        }
-    }
-
-    // Attempt 2: If no files found, check if it's a raw JSON response (fallback)
-    if (files.length === 0) {
-        try {
-            const parsed = JSON.parse(cleanJSON(text));
-            if (parsed.files) return parsed.files;
-        } catch (e) { }
-    }
-
-    return files;
+    return FileExtractor.extractAll(text);
 }
 
 export async function generateCode(
@@ -386,13 +355,13 @@ Task: ${prompt}
                 (chunk) => {
                     const token = chunk.response || '';
                     fullText += token;
-                    if (token) emitter.emit({ type: 'llm_token', token, context: 'code_generation' });
+                    if (token && emitter) emitter.emit({ type: 'llm_token', token, context: 'code_generation' });
                 },
                 onHeartbeat
             );
         });
 
-        emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'code_generation' });
+        if (emitter) emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'code_generation' });
 
         const files = extractFilesFromRaw(fullText);
         return {
@@ -400,7 +369,7 @@ Task: ${prompt}
             files
         };
     } catch (error: any) {
-        emitter.emit({ type: 'error', message: error.message });
+        if (emitter) emitter.emit({ type: 'error', message: error.message });
         return { content: error.message, files: [], error: true };
     }
 }
@@ -437,10 +406,10 @@ export async function generateJSONStream(
             );
         });
 
-        emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'json_generation' });
+        if (emitter) emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'json_generation' });
         return JSON.parse(cleanJSON(fullText));
     } catch (error: any) {
-        emitter.emit({ type: 'error', message: error.message });
+        if (emitter) emitter.emit({ type: 'error', message: error.message });
         throw error;
     }
 }
