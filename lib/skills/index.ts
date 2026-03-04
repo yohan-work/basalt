@@ -92,18 +92,29 @@ ${agentsInfo}
 
         const schema = `{
     "steps": [
-        { "agent": "software-engineer", "action": "read_codebase", "description": "Read package.json to identify project dependencies" },
-        { "agent": "software-engineer", "action": "write_code", "description": "Create app/auth/login/page.tsx with a responsive login form" },
-        { "agent": "main-agent", "action": "verify_final_output", "description": "Verify the login page implementation" }
+        { "agent": "software-engineer", "action": "read_codebase", "description": "Analyzing existing project structure" },
+        { "agent": "software-engineer", "action": "write_code", "description": "Implementing the requested feature/page at the appropriate path" },
+        { "agent": "main-agent", "action": "verify_final_output", "description": "Verifying implementation against requirements" }
     ]
 }
+OR
+{
+    "steps": [
+        { "agent": "product-manager", "action": "search_npm_package", "description": "Searching for libraries related to the task" },
+        { "agent": "software-engineer", "action": "write_code", "description": "Integrating the new library into the project" }
+    ]
+}
+`;
+        const instructions = `
 IMPORTANT:
 - Use the exact agent role slugs (e.g. "software-engineer", "product-manager", "qa").
 - MANDATORY: Use the 'codebaseContext' provided above to determine actual file paths and folder structures.
 - For new pages, check if the project uses 'app/' (App Router) or 'pages/' (Page Router) and follow that pattern.
 - Each 'description' MUST be UNIQUE, SPECIFIC and ACTIONABLE for the designated agent.`;
 
-        const workflow = await llm.generateJSONStream(systemPrompt, `Task Analysis: ${JSON.stringify(taskAnalysis)}`, schema, emitter);
+        const fullSchema = schema + instructions;
+
+        const workflow = await llm.generateJSONStream(systemPrompt, `Task Analysis: ${JSON.stringify(taskAnalysis)} `, fullSchema, emitter);
 
         // Ensure steps exists
         if (!workflow.steps || !Array.isArray(workflow.steps)) {
@@ -142,20 +153,20 @@ You are a Senior QA Engineer.
 Your goal is to verify if the user's task was successfully completed based on the current file structure and project context.
 
 Task Description: ${taskDescription}
-Current Project Files (Top Level):
+Current Project Files(Top Level):
 ${fileListStr.slice(0, 1000)}
 
-Instructions:
-1. Check if the expected files appear to be present.
-2. If the task involved creating a specific component or page, confirm it exists in the correct directory (app/ for App Router, pages/ for Page Router).
+        Instructions:
+        1. Check if the expected files appear to be present.
+2. If the task involved creating a specific component or page, confirm it exists in the correct directory(app / for App Router, pages / for Page Router).
 3. Provide a clear reasoning for your verification status.
 `;
 
         const schema = `{
-    "verified": boolean,
-    "notes": "string",
-    "suggestedFix": "string (optional, if verification fails)"
-}`;
+            "verified": boolean,
+                "notes": "string",
+                    "suggestedFix": "string (optional, if verification fails)"
+        } `;
 
         const verification = await llm.generateJSON(
             systemPrompt,
@@ -169,7 +180,7 @@ Instructions:
         console.warn('Verification LLM failed, defaulting to success with warning.');
         return {
             verified: true,
-            notes: `Verification logic failed but defaulting to true to avoid blocking. Error: ${e.message}`
+            notes: `Verification logic failed but defaulting to true to avoid blocking.Error: ${e.message} `
         };
     }
 }
@@ -190,7 +201,7 @@ export async function read_codebase(filePath: string, projectPath: string = proc
         const content = fs.readFileSync(fullPath, 'utf8');
         return content;
     } catch (error: any) {
-        return `Error reading file: ${error.message}`;
+        return `Error reading file: ${error.message} `;
     }
 }
 
@@ -214,14 +225,14 @@ export async function write_code(filePath: string, content: string, baseDir: str
 
         return {
             success: true,
-            message: `Successfully wrote to ${filePath}`,
+            message: `Successfully wrote to ${filePath} `,
             filePath,
             before,
             after: content,
             isNew: before === null
         };
     } catch (error: any) {
-        return { success: false, message: `Error writing file: ${error.message}` };
+        return { success: false, message: `Error writing file: ${error.message} ` };
     }
 }
 
@@ -236,7 +247,7 @@ Return the refactored code ONLY, with NO explanations.
 
         const result = await llm.generateCode(
             instructions,
-            `Code to refactor:\n\`\`\`\n${code}\n\`\`\``,
+            `Code to refactor: \n\`\`\`\n${code}\n\`\`\``,
             MODEL_CONFIG.CODING_MODEL
         );
 
