@@ -115,7 +115,7 @@ export class ProjectProfiler {
 
         const barrelInfo = data.hasIndexFile
             ? '\n- Barrel Imports: `components/ui/index.ts` exists. You CAN use `import { Button, Card } from "@/components/ui"`.'
-            : '';
+            : '\n- MANDATORY: NO barrel imports found in `@/components/ui`. You MUST import each component from its own file (e.g., `import { Button } from "@/components/ui/button"`). NEVER use `import { ... } from "@/components/ui"`.';
 
         const clientDirectiveInfo = data.structure === 'app-router'
             ? '\n- Next.js Client Components: If you use React hooks (useState, useEffect, etc.) in files under `app/`, you MUST add `"use client"` at the very top of the file.'
