@@ -279,7 +279,7 @@ Example for write_code: { "arguments": ["app/page.tsx", "export default function
             // --- Persistent Lock Check ---
             const currentLock = task.metadata?.lock;
             const now = Date.now();
-            const LOCK_TIMEOUT = 60_000; // 60 seconds (increased from 45s)
+            const LOCK_TIMEOUT = 60_000;
 
             if (task.status === 'working' && currentLock) {
                 const lockAge = now - currentLock.held_since;
@@ -356,7 +356,7 @@ Example for write_code: { "arguments": ["app/page.tsx", "export default function
 
                     if (pkgJson.includes('next')) techStack = 'nextjs';
                     else if (pkgJson.includes('react')) techStack = 'react';
-                    else techStack = 'node-generic';
+                    else techStack = 'react'; // Changed from 'node-generic' to 'react' as per instruction
                 } catch (e: any) { /* ignore */ }
             }
             await this.log(mainAgentName, `Detected Tech Stack: ${techStack}`);
@@ -414,161 +414,188 @@ Example for write_code: { "arguments": ["app/page.tsx", "export default function
                     });
                     this.emitter?.markStepStart();
 
-                    if (skillFunc) {
-                        // THOUGHT: Agent is thinking about arguments
-                        await this.log(mainAgentName, `Generative Logic: Determining arguments for ${action}...`, { type: 'THOUGHT' });
+                    // --- EXECUTION WITH RETRY/SELF-HEAL LOOP ---
+                    let stepSuccess = false;
+                    let executionError: any = null;
+                    const MAX_STEP_RETRIES = 1;
 
-                        // --- SPECIAL HANDLING: write_code uses CODING model directly ---
-                        if (action === 'write_code') {
-                            const codePrompt = step.description
-                                ? `${step.description}\n\nOverall task: ${task.description}`
-                                : task.description;
-
-                            await this.log(stepAgentDef.name, `Generating code with CODING model for: ${step.description || task.description}`, { type: 'ACTION' });
-                            this.emitter?.emit({ type: 'skill_execute', skill: action, args: step.description });
-
-                            let codeResult;
-                            let contextSize = 3000; // Further reduced from 4000 for faster start
-                            let attempt = 0;
-                            const maxAttempts = 3;
-
-                            while (attempt < maxAttempts) {
-                                const contextData = this.contextManager.getOptimizedContext(contextSize);
-
-                                // Inject project-specific profiling context
-                                let augmentedContext = contextData;
-                                if (this.profiler) {
-                                    const profilerData = await this.profiler.getContextString();
-                                    augmentedContext = `${profilerData}\n\n${contextData}`;
-                                }
-
-                                await this.log(stepAgentDef.name, `Attempt ${attempt + 1}: Generating code starting... (Context: ${contextData.length} chars)`, { type: 'ACTION' });
-
-                                codeResult = await llm.generateCodeStream(
-                                    codePrompt,
-                                    augmentedContext,
-                                    this.emitter,
-                                    MODEL_CONFIG.CODING_MODEL,
-                                    techStack,
-                                    () => this.refreshLock()
-                                );
-
-                                if (!codeResult.error) break;
-
-                                // Adaptive retry for timeouts or size issues
-                                if (codeResult.content.includes('timed out') || codeResult.content.includes('AbortError') || codeResult.content.includes('too large')) {
-                                    attempt++;
-                                    if (attempt < maxAttempts) {
-                                        contextSize = Math.floor(contextSize / 1.5); // Less aggressive reduction than 2x
-                                        await this.log(stepAgentDef.name, `Generation issue detected. Retrying with reduced context (${contextSize} tokens)...`, { type: 'WARNING' });
-                                        continue;
-                                    }
-                                }
-                                break;
+                    for (let stepAttempt = 0; stepAttempt <= MAX_STEP_RETRIES; stepAttempt++) {
+                        try {
+                            if (stepAttempt > 0) {
+                                await this.log(mainAgentName, `Self-Heal Attempt ${stepAttempt} for action: ${action}`, { type: 'WARNING' });
+                                // Add log to context about the failure
+                                this.contextManager.addLog('System', `Previous attempt for ${action} failed: ${executionError?.message}. Retrying with same goal.`);
                             }
 
-                            if (codeResult && !codeResult.error && codeResult.files.length > 0) {
-                                const { data: metaForChanges } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
-                                const existingChanges = metaForChanges?.metadata?.fileChanges || [];
+                            if (skillFunc) {
+                                // THOUGHT: Agent is thinking about arguments
+                                await this.log(mainAgentName, `Generative Logic: Determining arguments for ${action}...`, { type: 'THOUGHT' });
 
-                                for (const file of codeResult.files) {
-                                    const writeResult = await skillFunc(file.path, file.content, projectPath);
-                                    if (writeResult?.filePath) {
-                                        existingChanges.push({
-                                            filePath: writeResult.filePath,
-                                            before: writeResult.before,
-                                            after: writeResult.after,
-                                            isNew: writeResult.isNew,
-                                            agent: stepAgentDef.name,
-                                            stepIndex
-                                        });
+                                // --- SPECIAL HANDLING: write_code uses CODING model directly ---
+                                if (action === 'write_code') {
+                                    const codePrompt = step.description
+                                        ? `${step.description}\n\nOverall task: ${task.description}`
+                                        : task.description;
+
+                                    await this.log(stepAgentDef.name, `Generating code with CODING model for: ${step.description || task.description}`, { type: 'ACTION' });
+                                    this.emitter?.emit({ type: 'skill_execute', skill: action, args: step.description });
+
+                                    let codeResult;
+                                    let contextSize = 3000;
+                                    let attempt = 0;
+                                    const maxAttempts = 3;
+
+                                    while (attempt < maxAttempts) {
+                                        const contextData = this.contextManager.getOptimizedContext(contextSize);
+                                        let augmentedContext = contextData;
+                                        if (this.profiler) {
+                                            const profilerData = await this.profiler.getContextString();
+                                            augmentedContext = `${profilerData}\n\n${contextData}`;
+                                        }
+
+                                        codeResult = await llm.generateCodeStream(
+                                            codePrompt,
+                                            augmentedContext,
+                                            this.emitter,
+                                            MODEL_CONFIG.CODING_MODEL,
+                                            techStack,
+                                            () => this.refreshLock()
+                                        );
+
+                                        if (!codeResult.error) break;
+
+                                        if (codeResult.content.includes('timed out') || codeResult.content.includes('AbortError') || codeResult.content.includes('too large')) {
+                                            attempt++;
+                                            if (attempt < maxAttempts) {
+                                                contextSize = Math.floor(contextSize / 1.5);
+                                                continue;
+                                            }
+                                        }
+                                        break;
                                     }
-                                    this.contextManager.addFile(file.path, file.content);
-                                    this.contextManager.addLog(stepAgentDef.name, `Wrote ${file.path}`);
-                                    await this.log(stepAgentDef.name, `Wrote file: ${file.path}`, { type: 'RESULT' });
-                                }
 
-                                await this.updateMetadata({ fileChanges: existingChanges });
-                                const resultSummary = `Wrote ${codeResult.files.length} file(s): ${codeResult.files.map(f => f.path).join(', ')}`;
-                                this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
+                                    if (codeResult && !codeResult.error && codeResult.files.length > 0) {
+                                        const { data: metaForChanges } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+                                        const existingChanges = metaForChanges?.metadata?.fileChanges || [];
+
+                                        for (const file of codeResult.files) {
+                                            const writeResult = await skillFunc(file.path, file.content, projectPath);
+                                            if (writeResult?.filePath) {
+                                                existingChanges.push({
+                                                    filePath: writeResult.filePath,
+                                                    before: writeResult.before,
+                                                    after: writeResult.after,
+                                                    isNew: writeResult.isNew,
+                                                    agent: stepAgentDef.name,
+                                                    stepIndex
+                                                });
+                                            }
+                                            this.contextManager.addFile(file.path, file.content);
+                                            this.contextManager.addLog(stepAgentDef.name, `Wrote ${file.path}`);
+                                            await this.log(stepAgentDef.name, `Wrote file: ${file.path}`, { type: 'RESULT' });
+                                        }
+
+                                        await this.updateMetadata({ fileChanges: existingChanges });
+                                        const resultSummary = `Wrote ${codeResult.files.length} file(s): ${codeResult.files.map(f => f.path).join(', ')}`;
+                                        this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
+                                    } else {
+                                        const errMsg = codeResult?.error ? codeResult.content : 'No files generated by CODING model';
+                                        if (codeResult?.content) {
+                                            console.warn('[Orchestrator] Code generation failed to extract files. Raw content starts with:', codeResult.content.slice(0, 200));
+                                        }
+                                        throw new Error(`Code generation failed: ${errMsg}`);
+                                    }
+                                } else {
+                                    let args = await this.generateSkillArguments(
+                                        action, task.description, projectPath, techStack, step.description
+                                    );
+
+                                    const filesystemSkills = ['read_codebase', 'run_shell_command', 'manage_git', 'list_directory'];
+                                    if (filesystemSkills.includes(action)) {
+                                        if (args.length === 0 || args[args.length - 1] !== projectPath) {
+                                            args.push(projectPath);
+                                        }
+                                    }
+
+                                    await this.log(stepAgentDef.name, `Executing ${action}`, { args, type: 'ACTION' });
+                                    this.emitter?.emit({ type: 'skill_execute', skill: action, args: args.length > 0 ? args[0] : undefined });
+
+                                    // Special handling for skills that require the emitter (analyze_task, create_workflow)
+                                    const metaSkills = ['analyze_task', 'create_workflow'];
+                                    if (metaSkills.includes(action) && this.emitter) {
+                                        // analyze_task: (taskDesc, availableAgents, codebaseContext, emitter)
+                                        // Ensure we don't have too many args and append emitter at the right position (4th)
+                                        if (args.length > 3) args = args.slice(0, 3);
+                                        while (args.length < 3) args.push(undefined);
+                                        args.push(this.emitter);
+                                    }
+
+                                    const result = await skillFunc(...args);
+
+                                    if (action === 'read_codebase' && typeof result === 'string') {
+                                        const filePath = args[0];
+                                        this.contextManager.addFile(filePath, result);
+                                    }
+                                    else if (action === 'read_codebase' && typeof result === 'object' && result.content) {
+                                        const filePath = args[0];
+                                        this.contextManager.addFile(filePath, result.content);
+                                    }
+
+                                    this.contextManager.addLog(stepAgentDef.name, `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`);
+                                    await this.log(stepAgentDef.name, `Executed ${action}`, { result, type: 'RESULT' });
+                                    const resultSummary = typeof result === 'string' ? result.slice(0, 100) : (result?.message || JSON.stringify(result).slice(0, 100));
+                                    this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
+                                }
+                                stepSuccess = true;
+                                break; // Exit attempt loop on success
                             } else {
-                                const errMsg = codeResult?.error ? codeResult.content : 'No files generated by CODING model';
-                                await this.log(stepAgentDef.name, `write_code failed: ${errMsg}`, { type: 'ERROR' });
-                                this.emitter?.emit({ type: 'skill_result', skill: action, summary: `Failed: ${errMsg}` });
-                                throw new Error(`Code generation failed: ${errMsg}`);
+                                throw new Error(`Runtime function for skill ${action} not found.`);
                             }
-                        } else {
-                            // --- NORMAL HANDLING: generate arguments then execute skill ---
+                        } catch (err: any) {
+                            executionError = err;
+                            await this.log(mainAgentName, `Step ${stepIndex + 1} attempt ${stepAttempt + 1} failed: ${err.message}`, { type: 'WARNING' });
 
-                            // Generate Arguments with Context Manager
-                            let args = await this.generateSkillArguments(
-                                action, task.description, projectPath, techStack, step.description
-                            );
-
-                            // Safety Injection (Project Path)
-                            const filesystemSkills = ['read_codebase', 'run_shell_command', 'manage_git', 'list_directory'];
-                            if (filesystemSkills.includes(action)) {
-                                if (args.length === 0 || args[args.length - 1] !== projectPath) {
-                                    args.push(projectPath);
-                                }
+                            if (stepAttempt < MAX_STEP_RETRIES) {
+                                // Attempt self-analysis
+                                try {
+                                    const analysis = await skills.analyze_error_logs(err.message);
+                                    await this.log(mainAgentName, `Error Analysis: ${analysis.cause}. Recommendation: ${analysis.solution}`, { type: 'THOUGHT' });
+                                    this.contextManager.addLog('System', `Error Analysis: ${analysis.cause}. Suggestion: ${analysis.solution}`);
+                                } catch (analErr) { /* ignore analysis failure */ }
+                                continue;
                             }
-
-                            // ACTION: Agent is about to execute
-                            await this.log(stepAgentDef.name, `Executing ${action}`, { args, type: 'ACTION' });
-                            this.emitter?.emit({ type: 'skill_execute', skill: action, args: args.length > 0 ? args[0] : undefined });
-
-                            // --- EXECUTE ---
-                            const result = await skillFunc(...args);
-
-                            // --- CAPTURE CONTEXT ---
-                            // If read_codebase, store content
-                            if (action === 'read_codebase' && typeof result === 'string') {
-                                const filePath = args[0]; // Convention: first arg is file path
-                                this.contextManager.addFile(filePath, result);
-                                this.log('System', `Captured file content for ${filePath} into memory.`, { type: 'System' });
-                            }
-                            else if (action === 'read_codebase' && typeof result === 'object' && result.content) {
-                                // Some skills might return object
-                                const filePath = args[0];
-                                this.contextManager.addFile(filePath, result.content);
-                            }
-
-                            this.contextManager.addLog(stepAgentDef.name, `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`);
-
-                            // RESULT: Execution finished
-                            await this.log(stepAgentDef.name, `Executed ${action}`, { result, type: 'RESULT' });
-                            const resultSummary = typeof result === 'string' ? result.slice(0, 100) : (result?.message || JSON.stringify(result).slice(0, 100));
-                            this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
-                        } // end normal handling
-
-                        // Update progress: step completed
-                        const stepDuration = this.emitter?.markStepEnd() || 0;
-                        const { data: currentMeta } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
-                        const completedSteps = currentMeta?.metadata?.progress?.completedSteps || [];
-                        await this.updateProgress({
-                            completedSteps: [...completedSteps, action],
-                            stepStatus: 'completed'
-                        });
-
-                        // Emit step_complete with ETA
-                        const eta = this.emitter?.calculateETA(stepIndex, totalSteps) || 0;
-                        this.emitter?.emit({
-                            type: 'step_complete',
-                            step: stepIndex,
-                            total: totalSteps,
-                            duration: stepDuration,
-                            eta
-                        });
-                        this.emitter?.emitProgress(stepIndex, totalSteps);
-
-                        // Persist context state for retry recovery
-                        await this.contextManager.saveState();
-                    } else {
-                        await this.log(mainAgentName, `Runtime function for skill ${action} not found.`, { type: 'ERROR' });
+                        }
                     }
 
+                    if (!stepSuccess) {
+                        throw executionError || new Error(`Step execution failed after retries.`);
+                    }
+
+                    // Update progress: step completed
+                    const stepDuration = this.emitter?.markStepEnd() || 0;
+                    const { data: currentMeta } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+                    const completedSteps = currentMeta?.metadata?.progress?.completedSteps || [];
+                    await this.updateProgress({
+                        completedSteps: [...completedSteps, action],
+                        stepStatus: 'completed'
+                    });
+
+                    // Emit step_complete with ETA
+                    const eta = this.emitter?.calculateETA(stepIndex, totalSteps) || 0;
+                    this.emitter?.emit({
+                        type: 'step_complete',
+                        step: stepIndex,
+                        total: totalSteps,
+                        duration: stepDuration,
+                        eta
+                    });
+                    this.emitter?.emitProgress(stepIndex, totalSteps);
+
+                    // Persist context state for retry recovery
+                    await this.contextManager.saveState();
+
                 } catch (err: any) {
-                    await this.log(mainAgentName, `Failed to load or execute agent ${agentRoleSlug}: ${err.message}`, { type: 'ERROR' });
+                    await this.log(mainAgentName, `Fatal failure in agent ${agentRoleSlug} during ${action}: ${err.message}`, { type: 'ERROR' });
                     this.contextManager.addLog('System', `Error executing ${action}: ${err.message}`);
                     this.emitter?.emit({ type: 'error', message: err.message, step: stepIndex });
 
@@ -647,27 +674,34 @@ Example for write_code: { "arguments": ["app/page.tsx", "export default function
 
                 // Get branch name from metadata (created during execute phase)
                 const branchName = task?.metadata?.branchName || `feature/task-${this.taskId.slice(0, 8)}`;
+                const fileChanges = task?.metadata?.fileChanges || [];
 
-                // Dynamic Git Details Generation (commit message and PR details only)
+                // Dynamic Git Details Generation (commit message and PR details)
+                const fileSummary = fileChanges.map((f: any) => `- ${f.isNew ? '[NEW]' : '[MOD]'} ${f.filePath}`).join('\n');
+
                 const systemPrompt = `
-    You are a DevOps Engineer.
-    Based on the task description, generate a commit message and PR details.
-    Task: ${task?.description || 'Update'}
-    Return JSON: { "commitMessage": "feat: ...", "prTitle": "...", "prBody": "..." }
-    `;
+You are a Lead DevOps Engineer.
+Generate a concise and professional PR description based on the task and the actual file changes.
+Task: ${task?.description || 'Update'}
+File Changes:
+${fileSummary}
+
+Return JSON: { "commitMessage": "feat: ...", "prTitle": "...", "prBody": "..." }
+Use 'feat:', 'fix:', 'refactor:' conventions for commit messages.
+`;
                 let gitDetails = {
                     commitMessage: `feat: Task ${this.taskId.slice(0, 8)} implementation`,
                     prTitle: `feat: Task ${this.taskId.slice(0, 8)}`,
-                    prBody: `Automated PR for task ${this.taskId}`
+                    prBody: `Automated PR for task ${this.taskId}\n\n### Changes\n${fileSummary}`
                 };
 
                 try {
                     const generated = await llm.generateJSONStream(
                         systemPrompt,
-                        "Generate git details",
+                        "Generate professional git details based on changes",
                         "{}",
                         this.emitter,
-                        undefined,
+                        MODEL_CONFIG.FAST_MODEL,
                         () => this.refreshLock()
                     );
                     if (generated.commitMessage) {
