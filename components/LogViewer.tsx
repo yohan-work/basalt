@@ -96,7 +96,11 @@ export function LogViewer({ taskId }: { taskId?: string }) {
         const channel = supabase
             .channel(channelName)
             .on('postgres_changes', filter, (payload) => {
-                setLogs((prev) => [...prev, payload.new as LogEntry]);
+                setLogs((prev) => {
+                    const newLog = payload.new as LogEntry;
+                    if (prev.some(log => log.id === newLog.id)) return prev;
+                    return [...prev, newLog];
+                });
             })
             .subscribe();
 
@@ -131,9 +135,9 @@ export function LogViewer({ taskId }: { taskId?: string }) {
 
     const TYPE_STYLES: Record<LogTypeFilter, string> = {
         THOUGHT: 'border-muted-foreground/50 text-muted-foreground hover:border-muted-foreground',
-        ACTION:  'border-blue-400 text-blue-500 hover:bg-blue-500/10',
-        RESULT:  'border-green-500 text-green-600 hover:bg-green-500/10',
-        ERROR:   'border-red-400 text-red-500 hover:bg-red-500/10',
+        ACTION: 'border-blue-400 text-blue-500 hover:bg-blue-500/10',
+        RESULT: 'border-green-500 text-green-600 hover:bg-green-500/10',
+        ERROR: 'border-red-400 text-red-500 hover:bg-red-500/10',
     };
 
     return (
@@ -165,11 +169,10 @@ export function LogViewer({ taskId }: { taskId?: string }) {
                         <button
                             key={type}
                             onClick={() => toggleType(type)}
-                            className={`px-2 py-0.5 text-[10px] font-mono border rounded-sm transition-colors ${
-                                activeTypes.has(type)
+                            className={`px-2 py-0.5 text-[10px] font-mono border rounded-sm transition-colors ${activeTypes.has(type)
                                     ? TYPE_STYLES[type] + ' bg-current/10'
                                     : 'border-border text-muted-foreground hover:border-muted-foreground/70'
-                            } ${activeTypes.has(type) ? 'opacity-100' : 'opacity-60'}`}
+                                } ${activeTypes.has(type) ? 'opacity-100' : 'opacity-60'}`}
                         >
                             {type}
                         </button>
