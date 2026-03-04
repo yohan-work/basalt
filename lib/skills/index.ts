@@ -28,7 +28,11 @@ ${codebaseContext ? `Current Codebase Context:\n${codebaseContext}\n` : ''}
 
 Available Agents:
 ${agentsList}
+
+IMPORTANT: Provide all analysis summaries and reasoning in KOREAN.
+중요: 모든 분석 결과와 이유 등 사용자가 읽는 텍스트는 한국어로 작성하세요.
 `;
+
 
         const schema = `{
     "complexity": "low" | "medium" | "high",
@@ -110,7 +114,10 @@ IMPORTANT:
 - Use the exact agent role slugs (e.g. "software-engineer", "product-manager", "qa").
 - MANDATORY: Use the 'codebaseContext' provided above to determine actual file paths and folder structures.
 - For new pages, check if the project uses 'app/' (App Router) or 'pages/' (Page Router) and follow that pattern.
-- Each 'description' MUST be UNIQUE, SPECIFIC and ACTIONABLE for the designated agent.`;
+- Each 'description' MUST be UNIQUE, SPECIFIC and ACTIONABLE for the designated agent.
+- EVERY 'description' MUST BE WRITTEN IN KOREAN.
+- 모든 단계의 설명(description)은 반드시 한국어로 작성하십시오.`;
+
 
         const fullSchema = schema + instructions;
 
@@ -137,6 +144,63 @@ IMPORTANT:
                 { agent: 'main-agent', action: 'verify_final_output' }
             ]
         };
+    }
+}
+
+export async function consult_agents(
+    taskAnalysis: any,
+    availableAgents: AgentDefinition[],
+    codebaseContext: string,
+    emitter: any = null
+) {
+    try {
+        const requiredAgents = taskAnalysis.required_agents || [];
+        const agents = availableAgents.filter(a => requiredAgents.includes(a.role) || a.role === 'main-agent');
+        const agentsList = agents.map(a => `- ${a.name} (Role: ${a.role}, Expertise: ${a.skills.join(', ')})`).join('\n');
+
+        const systemPrompt = `You are a group of AI agents brainstorming a technical solution.
+Generate a realistic dialogue between the following agents about the task at hand.
+
+Available Agents in this discussion:
+${agentsList}
+
+Current Codebase Context:
+${codebaseContext}
+
+Task Analysis:
+${JSON.stringify(taskAnalysis)}
+
+Instructions:
+1. Generate 4-6 distinct thoughts/messages.
+2. Each message should be from one of the available agents.
+3. The discussion should focus on technical implementation details, potential pitfalls, and architectural decisions.
+4. The tone should be professional and collaborative.
+5. MANDATORY: All thoughts/messages MUST BE IN KOREAN.
+6. Provide the output as a JSON object with the following schema:
+   {
+     "thoughts": [
+       { "agent": "software-engineer", "thought": "메시지 내용...", "type": "idea" | "critique" | "agreement" },
+       ...
+     ]
+   }
+
+중요: 모든 대화 내용은 한국어로 작성하십시오.
+`;
+
+        const response = await llm.generateJSONStream(
+            systemPrompt,
+            "에이전트들이 작업에 대해 심도 있는 논의를 진행합니다.",
+            "{ \"thoughts\": [ { \"agent\": \"role\", \"thought\": \"...\", \"type\": \"idea\" } ] }",
+            emitter,
+            MODEL_CONFIG.SMART_MODEL
+        );
+
+        const thoughts = response.thoughts || [];
+        console.log(`[Consultation] Generated ${thoughts.length} thoughts`);
+        return thoughts;
+    } catch (e) {
+        console.error('Consultation failed:', e);
+        return [];
     }
 }
 

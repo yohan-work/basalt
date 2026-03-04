@@ -161,9 +161,30 @@ export class Orchestrator {
 
             // Create Workflow with context
             this.emitter?.emit({ type: 'skill_execute', skill: 'create_workflow' });
+
+            // Inject consultation process - Agent Discussion Simulation
+            await this.log(mainAgentName, "에이전트 그룹 논의 시작: 작업 범위를 확정하고 최적의 실행 계획을 수립합니다.", { type: 'THOUGHT' });
+            this.emitter?.emit({ type: 'skill_execute', skill: 'consult_agents' });
+
+            const discussion = await skills.consult_agents(analysis, availableAgents, codebaseContext, this.emitter);
+
+            // Log each individual thought from the discussion
+            console.log(`[Orchestrator] Saving ${discussion.length} discussion items to DB...`);
+            for (const item of discussion) {
+                if (!item.agent || !item.thought) continue;
+                console.log(`[Orchestrator] Logging thought from ${item.agent}: ${item.thought.substring(0, 30)}...`);
+                await this.log(item.agent, item.thought, { type: 'THOUGHT', thought_type: item.type || 'idea' });
+                // Small delay to make it feel more natural in the UI if needed
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+
+
             const workflow = await skills.create_workflow(analysis, availableAgents, codebaseContext, this.emitter);
-            await this.log(mainAgentName, 'Workflow Created', workflow);
-            this.emitter?.emit({ type: 'skill_result', skill: 'create_workflow', summary: `${workflow.steps?.length || 0} steps created` });
+
+            // Log the discussion wrap-up in Korean
+            await this.log(mainAgentName, '에이전트 간 협의가 완료되었습니다. 수립된 워크플로우를 저장합니다.', workflow);
+            this.emitter?.emit({ type: 'skill_result', skill: 'create_workflow', summary: `${workflow.steps?.length || 0}개 단계의 워크플로우가 생성되었습니다.` });
+
 
             // Save Plan to Metadata
             await this.updateMetadata({ analysis, workflow });
@@ -231,7 +252,11 @@ IMPORTANT RULES:
 Return ONLY a JSON object with a key "arguments" which is an array of actual values.
 Example for read_codebase: { "arguments": ["package.json"] }
 Example for write_code: { "arguments": ["app/page.tsx", "export default function..."] }
+
+IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST be in KOREAN.
+중요: 모든 분석 결과와 설명, 메시지는 한국어로 작성하세요.
 `;
+
 
         try {
             const response = await llm.generateJSONStream(

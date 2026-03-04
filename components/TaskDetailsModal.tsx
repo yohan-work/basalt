@@ -1,9 +1,8 @@
-
 'use client';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio } from 'lucide-react';
+import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { StepProgress, type ProgressInfo } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
@@ -11,6 +10,7 @@ import { AgentStatusDashboard } from './AgentStatusDashboard';
 import { FileActivityTree } from './FileActivityTree';
 import { CodeDiffViewer, type FileChange } from './CodeDiffViewer';
 import { LiveProgressPanel } from './LiveProgressPanel';
+import { AgentDiscussion } from './AgentDiscussion'; // Added import
 import { supabase } from '@/lib/supabase';
 import type { EventStreamState } from '@/lib/hooks/useEventStream';
 import {
@@ -33,7 +33,7 @@ interface TaskDetailsModalProps {
 }
 
 export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetailsModalProps) {
-    const [view, setView] = useState<'details' | 'logs' | 'changes' | 'live'>('details');
+    const [view, setView] = useState<'details' | 'logs' | 'changes' | 'live' | 'brainstorm'>('details'); // Updated state type
     const [isRetrying, setIsRetrying] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
@@ -49,6 +49,7 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
     const isFailed = task.status === 'failed';
     const hasChanges = fileChanges && fileChanges.length > 0;
     const isStreaming = stream?.isActive;
+    const hasBrainstorm = !!metadata.brainstorm; // Check if brainstorm data exists
 
     const handleRetry = async () => {
         setIsRetrying(true);
@@ -142,7 +143,15 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                 </button>
                             )}
                             <button
+                                onClick={() => setView('brainstorm')}
+                                className={`px-3 py-1 text-xs rounded-sm font-medium transition-all ${view === 'brainstorm' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                                aria-pressed={view === 'brainstorm'}
+                            >
+                                <Sparkles className={`w-3 h-3 inline mr-1 text-blue-500`} /> Brainstorm
+                            </button>
+                            <button
                                 onClick={() => setView('logs')}
+
                                 className={`px-3 py-1 text-xs rounded-sm font-medium transition-all ${view === 'logs' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                                 aria-pressed={view === 'logs'}
                             >
@@ -166,7 +175,25 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                         <div className="flex-1 overflow-y-auto p-6">
                             <LiveProgressPanel stream={stream} />
                         </div>
+                    ) : view === 'brainstorm' ? (
+                        <div className="flex-1 overflow-y-auto p-6">
+                            <AgentDiscussion
+                                taskId={task.id}
+                                isActive={task.status === 'planning' || task.status === 'working'}
+                            />
+
+                            <div className="mt-4 p-4 rounded-lg bg-blue-500/5 border border-blue-500/10">
+                                <h4 className="text-sm font-bold text-blue-400 mb-2 flex items-center gap-2">
+                                    <span className="w-1.5 h-4 bg-blue-500 rounded-full" />
+                                    논의 요약
+                                </h4>
+                                <p className="text-xs text-slate-400 leading-relaxed">
+                                    {metadata.analysis ? (metadata.analysis as any).summary : '에이전트들이 현재 요구사항을 분석하고 최적의 구현 방법을 논의 중입니다.'}
+                                </p>
+                            </div>
+                        </div>
                     ) : view === 'changes' && hasChanges ? (
+
                         <div className="flex-1 overflow-hidden">
                             <CodeDiffViewer fileChanges={fileChanges!} />
                         </div>
