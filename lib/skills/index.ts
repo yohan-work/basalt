@@ -323,6 +323,15 @@ Provide a clear explanation and a specific suggested fix.
 
 // --- Git & DevOps Manager Skills ---
 export async function manage_git(action: 'checkout' | 'commit' | 'merge' | 'add' | 'push' | 'status' | 'create_pr', args: string, cwd: string = process.cwd()) {
+    // Check if 'gh' CLI is available for PR creation
+    if (action === 'create_pr') {
+        try {
+            await execAsync('gh --version');
+        } catch (e) {
+            throw new Error('GitHub CLI (gh) is not installed. Please install it and authenticate using `gh auth login` to enable automated PR creation.');
+        }
+    }
+
     // Simplified git wrapper
     const commands: Record<string, string> = {
         checkout: `git checkout ${args}`,
@@ -334,15 +343,21 @@ export async function manage_git(action: 'checkout' | 'commit' | 'merge' | 'add'
         create_pr: `gh pr create ${args}`
     };
 
-    if (!commands[action]) return 'Invalid action';
+    if (!commands[action]) throw new Error(`Invalid git action: ${action}`);
 
     try {
-        const { stdout } = await execAsync(commands[action], { cwd });
+        const { stdout, stderr } = await execAsync(commands[action], { cwd });
+        if (stderr && !stdout && !commands[action].includes('status')) {
+            // Some git commands output to stderr even on success, but usually not all of it.
+            // However, execAsync might put actual errors here.
+        }
         return stdout;
     } catch (error: any) {
-        return error.message;
+        // Throw actual error instead of returning it as a string
+        throw new Error(`Git command failed (${commands[action]}): ${error.message}`);
     }
 }
+
 
 export async function check_environment() {
     return {

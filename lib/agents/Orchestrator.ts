@@ -713,9 +713,16 @@ Use 'feat:', 'fix:', 'refactor:' conventions for commit messages.
 
                 try {
                     // Branch was already created in execute(), just commit, push and create PR
+                    await this.log(mainAgentName, 'Staging changes...');
                     await skills.manage_git('add', '.', projectPath);
+
+                    await this.log(mainAgentName, `Committing: ${gitDetails.commitMessage}`);
                     await skills.manage_git('commit', gitDetails.commitMessage, projectPath);
+
+                    await this.log(mainAgentName, `Pushing to ${branchName}...`);
                     await skills.manage_git('push', `origin ${branchName}`, projectPath);
+
+                    await this.log(mainAgentName, 'Creating Pull Request...');
                     // Create PR from feature branch to main
                     await skills.manage_git('create_pr', `--fill --title "${gitDetails.prTitle}" --body "${gitDetails.prBody}"`, projectPath);
 
@@ -723,7 +730,22 @@ Use 'feat:', 'fix:', 'refactor:' conventions for commit messages.
                     this.emitter?.emit({ type: 'skill_result', skill: 'manage_git', summary: `PR created on ${branchName}` });
 
                 } catch (gitError: any) {
-                    await this.log(mainAgentName, `Git Automation Warning: ${gitError.message}`);
+                    const errorMsg = gitError.message || String(gitError);
+                    console.error('Git Automation Failed:', errorMsg);
+                    await this.log(mainAgentName, `Git Automation Failed: ${errorMsg}`, { type: 'ERROR' });
+                    // Even if git fails, we might want to stay in 'working' or 'testing' but for now 'failed' is clearer if the user expects a PR
+                    // Actually, let's keep it in 'testing' but mark as warning if we can, or just keep it 'working'.
+                    // The user said it moves to 'Review' but PR is not created.
+                    // We should only move to 'review' if PR is created successfully? 
+                    // Or move to 'review' and tell them to do it manually.
+
+                    if (errorMsg.includes('gh') || errorMsg.includes('GitHub CLI')) {
+                        await this.log('System', 'NOTE: PR creation skipped because GitHub CLI is not configured. Please handle the PR manually.', { type: 'ERROR' });
+                    }
+
+                    // Do NOT move to review if hit a hard git error?
+                    // Let's throw so it hits the main catch and stays in 'failed'
+                    throw gitError;
                 }
 
                 await this.updateStatus('review');
