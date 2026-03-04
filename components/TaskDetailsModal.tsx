@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { StepProgress, type ProgressInfo } from './StepProgress';
@@ -101,7 +102,7 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-4xl max-h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
+            <DialogContent className="sm:max-w-5xl h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b shrink-0 bg-muted/10">
                     <div className="flex items-center gap-4">
@@ -176,25 +177,28 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                             <LiveProgressPanel stream={stream} />
                         </div>
                     ) : view === 'brainstorm' ? (
-                        <div className="flex-1 overflow-y-auto p-6">
-                            <AgentDiscussion
-                                taskId={task.id}
-                                isActive={task.status === 'planning' || task.status === 'working'}
-                            />
+                        <div className="flex-1 overflow-hidden flex flex-col p-6">
+                            <div className="flex-1">
+                                <AgentDiscussion
+                                    taskId={task.id}
+                                    isActive={task.status === 'planning' || task.status === 'working'}
+                                />
+                            </div>
 
-                            <div className="mt-4 p-4 rounded-lg bg-blue-500/5 border border-blue-500/10">
-                                <h4 className="text-sm font-bold text-blue-400 mb-2 flex items-center gap-2">
-                                    <span className="w-1.5 h-4 bg-blue-500 rounded-full" />
+                            <div className="mt-4 p-4 bg-slate-50 border border-slate-100 shrink-0">
+                                <h4 className="text-sm font-bold text-[#3b9eff] mb-2 flex items-center gap-2">
+                                    <span className="w-1 h-3 bg-[#3b9eff]" />
                                     논의 요약
                                 </h4>
-                                <p className="text-xs text-slate-400 leading-relaxed">
-                                    {metadata.analysis ? (metadata.analysis as any).summary : '에이전트들이 현재 요구사항을 분석하고 최적의 구현 방법을 논의 중입니다.'}
-                                </p>
+                                <ScrollArea className="max-h-[100px]">
+                                    <p className="text-xs text-slate-500 leading-relaxed">
+                                        {metadata.analysis ? (metadata.analysis as any).summary : '에이전트들이 현재 요구사항을 분석하고 최적의 구현 방법을 논의 중입니다.'}
+                                    </p>
+                                </ScrollArea>
                             </div>
                         </div>
                     ) : view === 'changes' && hasChanges ? (
-
-                        <div className="flex-1 overflow-hidden">
+                        <div className="flex-1 overflow-hidden flex flex-col">
                             <CodeDiffViewer fileChanges={fileChanges!} />
                         </div>
                     ) : view === 'details' ? (

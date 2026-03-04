@@ -197,7 +197,7 @@ export function LogViewer({ taskId }: { taskId?: string }) {
                 </div>
             )}
 
-            <ScrollArea className="min-h-[200px] max-h-[600px] w-full rounded-none border border-border p-4 font-mono text-sm bg-black/5">
+            <div className="flex-1 w-full rounded-none border border-border p-4 font-mono text-sm bg-black/5 overflow-y-auto custom-scrollbar">
                 {isLoading && (
                     <div className="flex items-center justify-center py-8 text-muted-foreground">
                         <Loader2 className="h-5 w-5 animate-spin mr-2" />
@@ -312,7 +312,7 @@ export function LogViewer({ taskId }: { taskId?: string }) {
                     )
                 })}
                 <div ref={scrollRef} />
-            </ScrollArea>
+            </div>
         </div>
     );
 }

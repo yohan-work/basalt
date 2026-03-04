@@ -139,7 +139,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     }
 
     return (
-        <div className="flex flex-col gap-4 w-full h-[500px] animate-in fade-in duration-700 font-sans text-slate-800 bg-white">
+        <div className="flex flex-col gap-4 w-full h-full animate-in fade-in duration-700 font-sans text-slate-800 bg-white">
             {/* Header / Status Bar - Minimal Square Style */}
             <div className="bg-white border border-slate-100 rounded-none p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
@@ -177,8 +177,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                 {/* Left: Meeting Area - Pure White & Square */}
                 <div className="flex-[1.6] relative bg-white rounded-none border border-slate-100 overflow-hidden flex items-center justify-center p-4">
                     {/* The Boardroom Table Boundary - Rectangle */}
-                    <div className="absolute w-[85%] h-[75%] bg-white rounded-none border border-slate-100 flex items-center justify-center pointer-events-none">
-                        <span className="text-slate-50 text-6xl font-black tracking-[0.4em] select-none uppercase transition-opacity">Basalt</span>
+                    <div className="absolute w-[80%] h-[60%] bg-white rounded-none border border-slate-100 flex items-center justify-center pointer-events-none">
+                        <span className="text-slate-50 text-5xl font-black tracking-[0.4em] select-none uppercase transition-opacity">Basalt</span>
                     </div>
 
                     <div className="relative h-full w-full">
@@ -189,8 +189,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
                             // But keeping the circular math to keep them distributed smoothly at the "edges"
                             const angle = (idx / AGENTS.length) * Math.PI * 2 - Math.PI / 2;
-                            const rx = 190; // Slightly larger to put them 'on' the edge
-                            const ry = 120;
+                            const rx = 160; // Slightly larger to put them 'on' the edge
+                            const ry = 95;
                             const x = Math.cos(angle) * rx;
                             const y = Math.sin(angle) * ry;
 

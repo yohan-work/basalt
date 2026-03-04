@@ -141,17 +141,16 @@ export function CodeDiffViewer({ fileChanges }: CodeDiffViewerProps) {
                         )}
                     </div>
                 </div>
-                <ScrollArea className="flex-1">
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <div className="py-1">
                         {fileChanges.map((change, index) => (
                             <button
                                 key={`${change.filePath}-${index}`}
                                 onClick={() => setSelectedIndex(index)}
-                                className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition-colors ${
-                                    selectedIndex === index
+                                className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 transition-colors ${selectedIndex === index
                                         ? 'bg-primary/10 text-primary border-l-2 border-primary'
                                         : 'hover:bg-muted/50 border-l-2 border-transparent'
-                                }`}
+                                    }`}
                             >
                                 {change.isNew ? (
                                     <FilePlus className="h-3.5 w-3.5 text-green-500 shrink-0" />
@@ -168,7 +167,7 @@ export function CodeDiffViewer({ fileChanges }: CodeDiffViewerProps) {
                             </button>
                         ))}
                     </div>
-                </ScrollArea>
+                </div>
             </div>
 
             {/* Diff Viewer */}
@@ -186,7 +185,7 @@ export function CodeDiffViewer({ fileChanges }: CodeDiffViewerProps) {
                         by {selected.agent} &middot; step {selected.stepIndex + 1}
                     </span>
                 </div>
-                <ScrollArea className="flex-1">
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
                     <ReactDiffViewer
                         oldValue={selected.before || ''}
                         newValue={selected.after}
@@ -197,7 +196,7 @@ export function CodeDiffViewer({ fileChanges }: CodeDiffViewerProps) {
                         compareMethod={DiffMethod.WORDS}
                         styles={isDark ? darkStyles : lightStyles}
                     />
-                </ScrollArea>
+                </div>
             </div>
         </div>
     );
