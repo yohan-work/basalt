@@ -94,7 +94,7 @@ export function KanbanBoard() {
         return () => {
             supabase.removeChannel(channel);
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // 프로젝트 변경 시 태스크 재조회 (스켈레톤 없이)
@@ -238,7 +238,7 @@ export function KanbanBoard() {
             case 'testing':
                 return (
                     <Button size="sm" onClick={(e) => handleRunTests(e, task)} className="w-full text-xs h-7 bg-green-600 hover:bg-green-700">
-                        <CheckCircle className="mr-2 h-3 w-3" /> Verify & Git Push
+                        <CheckCircle className="mr-2 h-3 w-3" /> Verify & Request PR
                     </Button>
                 );
             case 'review':
@@ -325,82 +325,82 @@ export function KanbanBoard() {
                         ))}
                     </div>
                 ) : (
-                <div className="flex gap-4 h-full min-w-[1000px]">
-                    {COLUMNS.map((col) => {
-                        const colTasks = tasks.filter(task =>
-                            task.status === col.id &&
-                            (!selectedProjectId || task.project_id === selectedProjectId)
-                        );
+                    <div className="flex gap-4 h-full min-w-[1000px]">
+                        {COLUMNS.map((col) => {
+                            const colTasks = tasks.filter(task =>
+                                task.status === col.id &&
+                                (!selectedProjectId || task.project_id === selectedProjectId)
+                            );
 
-                        return (
-                            <div key={col.id} className="flex-1 min-w-[200px] flex flex-col bg-muted/20 border border-border/50">
-                                <div className="p-3 border-b border-border bg-muted/50 font-semibold text-sm">
-                                    {col.label} <span className="ml-2 text-muted-foreground text-xs">({colTasks.length})</span>
-                                </div>
-                                <div className="p-2 flex-1 space-y-2 overflow-y-auto">
-                                    {colTasks.length === 0 && (
-                                        <div className="flex items-center justify-center h-20 text-xs text-muted-foreground/50">
-                                            비어 있음
-                                        </div>
-                                    )}
-                                    {colTasks.map(task => (
-                                        <Card
-                                            key={task.id}
-                                            onClick={() => handleCardClick(task)}
-                                            className={`cursor-pointer rounded-sm shadow-sm transition-colors ${task.status === 'failed'
-                                                ? 'border-red-500 bg-red-50 dark:bg-red-950/20 hover:border-red-400'
-                                                : 'border-border hover:border-primary/50'
-                                                }`}
-                                        >
-                                            <CardHeader className="p-3 pb-1">
-                                                <div className="flex justify-between items-start gap-1">
-                                                    <CardTitle className="text-sm font-medium leading-tight flex-1">{task.title}</CardTitle>
-                                                    <div className="flex items-center gap-1 shrink-0">
-                                                        {task.status === 'failed' && (
-                                                            <XCircle className="h-4 w-4 text-red-500" />
-                                                        )}
-                                                        <button
-                                                            onClick={(e) => handleDeleteTask(e, task)}
-                                                            className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                                                            title="삭제"
-                                                            aria-label={`${task.title} 태스크 삭제`}
-                                                        >
-                                                            <Trash2 className="h-3 w-3" />
-                                                        </button>
+                            return (
+                                <div key={col.id} className="flex-1 min-w-[200px] flex flex-col bg-muted/20 border border-border/50">
+                                    <div className="p-3 border-b border-border bg-muted/50 font-semibold text-sm">
+                                        {col.label} <span className="ml-2 text-muted-foreground text-xs">({colTasks.length})</span>
+                                    </div>
+                                    <div className="p-2 flex-1 space-y-2 overflow-y-auto">
+                                        {colTasks.length === 0 && (
+                                            <div className="flex items-center justify-center h-20 text-xs text-muted-foreground/50">
+                                                비어 있음
+                                            </div>
+                                        )}
+                                        {colTasks.map(task => (
+                                            <Card
+                                                key={task.id}
+                                                onClick={() => handleCardClick(task)}
+                                                className={`cursor-pointer rounded-sm shadow-sm transition-colors ${task.status === 'failed'
+                                                    ? 'border-red-500 bg-red-50 dark:bg-red-950/20 hover:border-red-400'
+                                                    : 'border-border hover:border-primary/50'
+                                                    }`}
+                                            >
+                                                <CardHeader className="p-3 pb-1">
+                                                    <div className="flex justify-between items-start gap-1">
+                                                        <CardTitle className="text-sm font-medium leading-tight flex-1">{task.title}</CardTitle>
+                                                        <div className="flex items-center gap-1 shrink-0">
+                                                            {task.status === 'failed' && (
+                                                                <XCircle className="h-4 w-4 text-red-500" />
+                                                            )}
+                                                            <button
+                                                                onClick={(e) => handleDeleteTask(e, task)}
+                                                                className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                                                                title="삭제"
+                                                                aria-label={`${task.title} 태스크 삭제`}
+                                                            >
+                                                                <Trash2 className="h-3 w-3" />
+                                                            </button>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </CardHeader>
-                                            <CardContent className="p-3 pt-2 space-y-3">
-                                                <p className="text-xs text-muted-foreground line-clamp-3">{task.description}</p>
-                                                {task.status === 'failed' && task.metadata?.lastError && (
-                                                    <p className="text-xs text-red-600 dark:text-red-400 line-clamp-2 font-mono">
-                                                        ⚠️ {task.metadata.lastError}
-                                                    </p>
-                                                )}
-                                                {/* Progress for working tasks */}
-                                                {task.status === 'working' && task.metadata?.progress && (
-                                                    <StepProgress progress={task.metadata.progress} compact />
-                                                )}
-                                                <div className="flex justify-between items-center">
-                                                    <Badge
-                                                        variant={task.status === 'failed' ? 'destructive' : 'secondary'}
-                                                        className="text-[10px] px-1 py-0 h-5"
-                                                    >
-                                                        {task.status}
-                                                        {task.metadata?.retryCount ? ` (retry: ${task.metadata.retryCount})` : ''}
-                                                    </Badge>
-                                                </div>
-                                                <div className="pt-1">
-                                                    {renderActionButton(task)}
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    ))}
+                                                </CardHeader>
+                                                <CardContent className="p-3 pt-2 space-y-3">
+                                                    <p className="text-xs text-muted-foreground line-clamp-3">{task.description}</p>
+                                                    {task.status === 'failed' && task.metadata?.lastError && (
+                                                        <p className="text-xs text-red-600 dark:text-red-400 line-clamp-2 font-mono">
+                                                            ⚠️ {task.metadata.lastError}
+                                                        </p>
+                                                    )}
+                                                    {/* Progress for working tasks */}
+                                                    {task.status === 'working' && task.metadata?.progress && (
+                                                        <StepProgress progress={task.metadata.progress} compact />
+                                                    )}
+                                                    <div className="flex justify-between items-center">
+                                                        <Badge
+                                                            variant={task.status === 'failed' ? 'destructive' : 'secondary'}
+                                                            className="text-[10px] px-1 py-0 h-5"
+                                                        >
+                                                            {task.status}
+                                                            {task.metadata?.retryCount ? ` (retry: ${task.metadata.retryCount})` : ''}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="pt-1">
+                                                        {renderActionButton(task)}
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
-                        );
-                    })}
-                </div>
+                            );
+                        })}
+                    </div>
                 )}
             </div>
         </div>
