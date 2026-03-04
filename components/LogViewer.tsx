@@ -170,8 +170,8 @@ export function LogViewer({ taskId }: { taskId?: string }) {
                             key={type}
                             onClick={() => toggleType(type)}
                             className={`px-2 py-0.5 text-[10px] font-mono border rounded-sm transition-colors ${activeTypes.has(type)
-                                    ? TYPE_STYLES[type] + ' bg-current/10'
-                                    : 'border-border text-muted-foreground hover:border-muted-foreground/70'
+                                ? TYPE_STYLES[type] + ' bg-current/10'
+                                : 'border-border text-muted-foreground hover:border-muted-foreground/70'
                                 } ${activeTypes.has(type) ? 'opacity-100' : 'opacity-60'}`}
                         >
                             {type}
@@ -247,9 +247,35 @@ export function LogViewer({ taskId }: { taskId?: string }) {
                                         {log.message}
                                     </p>
                                 ) : type === 'ACTION' ? (
-                                    <p className="text-foreground font-medium">
-                                        {log.message}
-                                    </p>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-[13px] leading-relaxed text-foreground/90 break-words font-medium">
+                                            {log.message}
+                                        </p>
+                                        {log.metadata && Object.keys(log.metadata).length > 0 && (
+                                            <div className="mt-1">
+                                                {log.metadata.args != null && (
+                                                    <div className="bg-black/10 overflow-hidden text-xs rounded-sm p-2 mb-1">
+                                                        <span className="opacity-50 block mb-1">Input Arguments:</span>
+                                                        <pre className="overflow-x-auto">{JSON.stringify(log.metadata.args, null, 2)}</pre>
+                                                    </div>
+                                                )}
+                                                {log.metadata.result != null && (
+                                                    <div className="bg-green-500/10 border-l-2 border-green-500 text-xs rounded-sm p-2">
+                                                        <span className="text-green-600 block mb-1 font-bold">Output:</span>
+                                                        <pre className="overflow-x-auto text-green-700 dark:text-green-400">
+                                                            {typeof log.metadata.result === 'string'
+                                                                ? (log.metadata.result as string).slice(0, 300) + ((log.metadata.result as string).length > 300 ? '...' : '')
+                                                                : JSON.stringify(log.metadata.result, null, 2)}
+                                                        </pre>
+                                                    </div>
+                                                )}
+                                                {/* Show other metadata if not args/result/thought */}
+                                                {Object.keys(log.metadata || {}).filter(k => k !== 'args' && k !== 'result' && k !== 'type').length > 0 && (
+                                                    <pre className="text-[10px] text-muted-foreground">{JSON.stringify(log.metadata, null, 2)}</pre>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                 ) : (
                                     <p className="text-foreground">
                                         {log.message}
@@ -257,7 +283,7 @@ export function LogViewer({ taskId }: { taskId?: string }) {
                                 )}
 
                                 {/* Metadata/Args/Result Rendering */}
-                                {log.metadata && (
+                                {log.metadata && type !== 'ACTION' && ( // Only render metadata here if not ACTION type, as ACTION type handles its own metadata
                                     <div className="mt-1">
                                         {log.metadata.args != null && (
                                             <div className="bg-black/10 overflow-hidden text-xs rounded-sm p-2 mb-1">

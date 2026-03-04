@@ -322,12 +322,31 @@ export function cleanJSON(text: string): string {
     if (cleaned.startsWith('```')) {
         cleaned = cleaned.replace(/^```(json)?\s*/i, '').replace(/\s*```$/i, '');
     }
-    // Remove potential leading/trailing non-JSON text
-    const start = cleaned.indexOf('{');
-    const end = cleaned.lastIndexOf('}');
+
+    // Find first and last markers for either Object or Array
+    const firstBrace = cleaned.indexOf('{');
+    const firstBracket = cleaned.indexOf('[');
+    const lastBrace = cleaned.lastIndexOf('}');
+    const lastBracket = cleaned.lastIndexOf(']');
+
+    // Determine the start and end by taking the outermost valid JSON structure
+    let start = -1;
+    let end = -1;
+
+    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+        // Starts with a brace
+        start = firstBrace;
+        end = lastBrace;
+    } else if (firstBracket !== -1) {
+        // Starts with a bracket
+        start = firstBracket;
+        end = lastBracket;
+    }
+
     if (start !== -1 && end !== -1 && end > start) {
         cleaned = cleaned.substring(start, end + 1);
     }
+
     return cleaned.trim();
 }
 
