@@ -196,10 +196,10 @@ GENERAL PRINCIPLE:
 - Do NOT stick to a fixed template. Adapt your component choices to the specific requirements.
 
 MANDATORY CODING RULES:
-- Use shadcn/ui components from @/components/ui/ as high-quality building blocks (Button, Input, Label, Card, etc.).
+- Use shadcn/ui components from @/components/ui/ ONLY IF they are explicitly listed as available in the [PROJECT CONTEXT] (Button, Input, etc.).
 - Use Tailwind CSS for layout and spacing ONLY IF "Tailwind CSS IS installed" is explicitly mentioned in the [PROJECT CONTEXT].
 - If Tailwind is NOT present, DO NOT use tailwind classes (e.g., no "flex", "grid", "gap-4", "p-4"). Use standard CSS or inline styles.
-- CRITICAL: If the [PROJECT CONTEXT] has a [WARNING] about shadcn/ui and missing Tailwind, DO NOT use those UI components if they rely on tailwind. Use standard HTML tags (div, button, h1) with appropriate inline styles for a premium look.
+- CRITICAL: If the [PROJECT CONTEXT] says "None found" for UI components OR has a [WARNING] about missing Tailwind, DO NOT use shadcn/ui components. Use standard HTML tags (div, button, h1) with appropriate inline styles for a premium look.
 - Use design tokens ONLY IF the project supports them.
 - Generate COMPLETE, working TypeScript code with all necessary imports.
 - For React components, use proper TypeScript types and export as default.
