@@ -10,8 +10,12 @@ export class FileExtractor {
     static extractFromMarkdown(text: string): Array<{ path: string; content: string }> {
         const files: Array<{ path: string; content: string }> = [];
 
-        // Robust regex to handle varied markdown markers and spacing around "File:" or "Path:"
-        const fileRegex = /(?:^|\n)(?:[#*`\s]*File[:\s]*|[#*`\s]*Path[:\s]*)*\s*([^\n\r]+)[\r\n]+```[a-z]*[\r\n]+([\s\S]*?)[\r\n]+```/gi;
+        // Robust regex to handle:
+        // 1. Varied prefixes (File:, Path:, or none)
+        // 2. Optional markdown formatting around the path
+        // 3. Optional whitespace before/after triple backticks
+        // 4. Different languages in the code block
+        const fileRegex = /(?:^|\n)(?:[#*`\s]*File[:\s]*|[#*`\s]*Path[:\s]*)*\s*([^\n\r]+)[\r\n]+\s*```[a-z0-9]*[\r\n]+([\s\S]*?)[\r\n]+\s*```/gi;
 
         let match;
         while ((match = fileRegex.exec(text)) !== null) {
@@ -21,7 +25,7 @@ export class FileExtractor {
             if (cleanPath) {
                 files.push({
                     path: cleanPath,
-                    content: match[2]
+                    content: match[2].trim()
                 });
             }
         }

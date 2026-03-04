@@ -208,6 +208,20 @@ MANDATORY CODING RULES:
 - Ensure all files are self-contained with correct relative import paths.
 `.trim();
 
+const FILE_FORMAT_INSTRUCTIONS = `
+### FORMAT RULE:
+For EACH file you create or modify, you MUST use the following PRECISE format.
+1. The path MUST be on a line starting with "File: "
+2. The code block MUST follow immediately after the file path line.
+3. DO NOT use markdown headers (###) or bolding (**) for the "File:" line.
+
+Example:
+File: path/to/file.ext
+\`\`\`language
+// file content
+\`\`\`
+`.trim();
+
 /**
  * Extract files from raw LLM text using FileExtractor
  */
@@ -226,13 +240,7 @@ export async function generateCode(
     const fullPrompt = `
 ${CODE_GENERATION_SYSTEM_RULES}
 
-### FORMAT RULE:
-Provide your response as a brief explanation followed by the files. 
-For EACH file, you MUST use the following PRECISE format. DO NOT use markdown headers (###) or bolding (**) for the "File:" line:
-File: path/to/file.ext
-\`\`\`language
-file content
-\`\`\`
+${FILE_FORMAT_INSTRUCTIONS}
 
 Context:
 ${context}
@@ -331,13 +339,7 @@ export async function generateCodeStream(
     const fullPrompt = `
 ${CODE_GENERATION_SYSTEM_RULES}
 
-### FORMAT RULE:
-Provide your response as a brief explanation followed by the files. 
-For EACH file, you MUST use the following PRECISE format. DO NOT use markdown headers (###) or bolding (**) for the "File:" line:
-File: path/to/file.ext
-\`\`\`language
-file content
-\`\`\`
+${FILE_FORMAT_INSTRUCTIONS}
 
 Context:
 ${context}
@@ -361,7 +363,9 @@ Task: ${prompt}
             );
         });
 
-        if (emitter) emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'code_generation' });
+        if (emitter && typeof (emitter as any).emit === 'function') {
+            (emitter as any).emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'code_generation' });
+        }
 
         const files = extractFilesFromRaw(fullText);
         return {
@@ -369,7 +373,9 @@ Task: ${prompt}
             files
         };
     } catch (error: any) {
-        if (emitter) emitter.emit({ type: 'error', message: error.message });
+        if (emitter && typeof (emitter as any).emit === 'function') {
+            (emitter as any).emit({ type: 'error', message: error.message });
+        }
         return { content: error.message, files: [], error: true };
     }
 }
@@ -406,10 +412,14 @@ export async function generateJSONStream(
             );
         });
 
-        if (emitter) emitter.emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'json_generation' });
+        if (emitter && typeof (emitter as any).emit === 'function') {
+            (emitter as any).emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'json_generation' });
+        }
         return JSON.parse(cleanJSON(fullText));
     } catch (error: any) {
-        if (emitter) emitter.emit({ type: 'error', message: error.message });
+        if (emitter && typeof (emitter as any).emit === 'function') {
+            (emitter as any).emit({ type: 'error', message: error.message });
+        }
         throw error;
     }
 }

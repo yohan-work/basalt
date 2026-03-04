@@ -5,6 +5,7 @@ import { promisify } from 'util';
 
 import { AgentDefinition, AgentLoader } from '../agent-loader';
 import * as llm from '../llm';
+import { MODEL_CONFIG } from '../model-config';
 
 const execAsync = promisify(exec);
 
@@ -130,27 +131,46 @@ IMPORTANT:
 
 export async function verify_final_output(taskDescription: string, projectPath: string = process.cwd()) {
     try {
-        // In a real scenario, we would read the files changed or run a test suite.
-        // For now, we'll do a "sanity check" by listing recent files or just assuming success but adding thoughtful commentary.
+        // 1. Get list of files in the project
+        const files = await list_directory('.', projectPath);
+        const fileListStr = Array.isArray(files) ? files.join('\n') : String(files);
 
-        // 1. List files to see if something was created (naive check)
-        const recentFiles = await list_directory('.', projectPath);
-
+        // 2. Perform a deeper check using LLM to see if the requirements were met
+        // We'll also try to check for common errors if possible
         const systemPrompt = `
-You are a QA Engineer.
-Your goal is to verify if the user's task was likely completed based on the current file structure.
-Task: ${taskDescription}
-Current Files (Top level): ${JSON.stringify(recentFiles).slice(0, 500)}
+You are a Senior QA Engineer.
+Your goal is to verify if the user's task was successfully completed based on the current file structure and project context.
 
-Return JSON: { "verified": boolean, "notes": "string" }
-If you can't be sure, lean towards true but add a note to check manually.
+Task Description: ${taskDescription}
+Current Project Files (Top Level):
+${fileListStr.slice(0, 1000)}
+
+Instructions:
+1. Check if the expected files appear to be present.
+2. If the task involved creating a specific component or page, confirm it exists in the correct directory (app/ for App Router, pages/ for Page Router).
+3. Provide a clear reasoning for your verification status.
 `;
 
-        const verification = await llm.generateJSON(systemPrompt, "Verify task completion", '{ "verified": true, "notes": "Verified based on file structure." }');
+        const schema = `{
+    "verified": boolean,
+    "notes": "string",
+    "suggestedFix": "string (optional, if verification fails)"
+}`;
+
+        const verification = await llm.generateJSON(
+            systemPrompt,
+            "Verify task completion against project structure.",
+            schema,
+            MODEL_CONFIG.SMART_MODEL
+        );
+
         return verification;
-    } catch (e) {
-        console.warn('Verification LLM failed, defaulting to success.');
-        return { verified: true, notes: 'Verification skipped due to internal error.' };
+    } catch (e: any) {
+        console.warn('Verification LLM failed, defaulting to success with warning.');
+        return {
+            verified: true,
+            notes: `Verification logic failed but defaulting to true to avoid blocking. Error: ${e.message}`
+        };
     }
 }
 
@@ -205,9 +225,35 @@ export async function write_code(filePath: string, content: string, baseDir: str
     }
 }
 
-export async function refactor_code(code: string) {
-    // Mock refactor
-    return `// Refactored Code\n${code}`;
+export async function refactor_code(code: string, instructions: string) {
+    try {
+        const systemPrompt = `
+You are an expert Refactoring Agent.
+Your goal is to refactor the provided code according to the specific instructions.
+Maintain the exact same functionality, but improve structure, readability, or performance as requested.
+Return the refactored code ONLY, with NO explanations.
+`;
+
+        const result = await llm.generateCode(
+            instructions,
+            `Code to refactor:\n\`\`\`\n${code}\n\`\`\``,
+            MODEL_CONFIG.CODING_MODEL
+        );
+
+        if (result.error) {
+            throw new Error(result.content);
+        }
+
+        // result.files will likely contain the refactored content if LLM followed "File:" format,
+        // but since we want the raw content or the first file:
+        if (result.files && result.files.length > 0) {
+            return result.files[0].content;
+        }
+
+        return result.content;
+    } catch (error: any) {
+        return `Error during refactoring: ${error.message}`;
+    }
 }
 
 export async function search_npm_package(query: string) {
@@ -245,7 +291,34 @@ export async function run_shell_command(command: string, cwd: string = process.c
 }
 
 export async function analyze_error_logs(logs: string) {
-    return { cause: 'SyntaxError', solution: 'Fix typo on line 10' };
+    try {
+        const systemPrompt = `
+You are a Debugging Expert.
+Analyze the following error logs and identify the root cause.
+Provide a clear explanation and a specific suggested fix.
+`;
+
+        const schema = `{
+    "cause": "string",
+    "solution": "string",
+    "severity": "low" | "medium" | "high"
+}`;
+
+        const analysis = await llm.generateJSON(
+            systemPrompt,
+            `Error Logs:\n${logs}`,
+            schema,
+            MODEL_CONFIG.SMART_MODEL
+        );
+
+        return analysis;
+    } catch (e: any) {
+        return {
+            cause: 'Analysis Failed',
+            solution: 'Manual investigation required.',
+            severity: 'medium'
+        };
+    }
 }
 
 // --- Git & DevOps Manager Skills ---

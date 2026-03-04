@@ -68,31 +68,51 @@ export class ContextManager {
     public getOptimizedContext(maxChars: number = 8000): string {
         let context = '';
 
-        // 1. Add File Context (Most important for coding)
-        // Sort files by last accessed desc
-        const sortedFiles = Array.from(this.fileCache.values())
-            .sort((a, b) => b.lastAccessed - a.lastAccessed);
+        const allFiles = Array.from(this.fileCache.values());
+        const sortedFiles = [...allFiles].sort((a, b) => b.lastAccessed - a.lastAccessed);
 
+        // 1. Add File List Summary
+        context += "### Available Files in Context Cache:\n";
+        for (const file of sortedFiles) {
+            context += `- ${file.path} (Last accessed: ${new Date(file.lastAccessed).toLocaleTimeString()})\n`;
+        }
+        context += "\n";
+
+        // 2. Add File Content (Prioritize recent)
         context += "### Loaded Files Content:\n";
         let currentChars = context.length;
+        const FILE_BUDGET = maxChars * 0.75; // 75% for files
 
         for (const file of sortedFiles) {
-            const fileBlock = `\n--- File: ${file.path} ---\n${file.content}\n`;
-            // Simple heuristic check
-            if (currentChars + fileBlock.length < maxChars * 0.7) { // Reserve 30% for logs/instructions
-                context += fileBlock;
-                currentChars += fileBlock.length;
-            } else {
-                context += `\n--- File: ${file.path} (Content truncated) ---\n`;
+            const fileHeader = `\n--- File: ${file.path} ---\n`;
+            if (currentChars + fileHeader.length + 100 > FILE_BUDGET) {
+                context += `\n--- File: ${file.path} (Omitted/Too many files) ---\n`;
+                continue;
             }
+
+            let fileContent = file.content;
+            const remainingBudget = FILE_BUDGET - (currentChars + fileHeader.length);
+
+            if (fileContent.length > remainingBudget) {
+                fileContent = fileContent.slice(0, remainingBudget) + "\n... (Content truncated due to context limits)";
+            }
+
+            const fileBlock = fileHeader + fileContent + "\n";
+            context += fileBlock;
+            currentChars += fileBlock.length;
+
+            if (currentChars >= FILE_BUDGET) break;
         }
 
-        // 2. Add Execution Logs
-        context += "\n### Execution History:\n";
-        // Take last 10 logs
-        const recentLogs = this.logs.slice(-10);
-        for (const log of recentLogs) {
-            context += `[${log.agent}] ${log.message}\n`;
+        // 3. Add Execution Logs (Must have some logs)
+        context += "\n### Recent Execution History:\n";
+        const recentLogs = this.logs.slice(-15);
+        if (recentLogs.length === 0) {
+            context += "(No logs recorded yet)\n";
+        } else {
+            for (const log of recentLogs) {
+                context += `[${log.agent}] ${log.message}\n`;
+            }
         }
 
         return context;
