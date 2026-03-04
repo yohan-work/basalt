@@ -177,7 +177,7 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                             <LiveProgressPanel stream={stream} />
                         </div>
                     ) : view === 'brainstorm' ? (
-                        <div className="flex-1 overflow-hidden flex flex-col p-6">
+                        <div className="flex-1 overflow-hidden flex flex-col p-4 bg-[#020617]">
                             <div className="flex-1">
                                 <AgentDiscussion
                                     taskId={task.id}
@@ -185,13 +185,13 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                 />
                             </div>
 
-                            <div className="mt-4 p-4 bg-slate-50 border border-slate-100 shrink-0">
-                                <h4 className="text-sm font-bold text-[#3b9eff] mb-2 flex items-center gap-2">
-                                    <span className="w-1 h-3 bg-[#3b9eff]" />
-                                    논의 요약
+                            <div className="mt-3 p-3 bg-[#0f172a] border border-slate-800 shrink-0">
+                                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                                    <div className="w-0.5 h-2.5 bg-[#3b9eff]" />
+                                    Analysis Summary
                                 </h4>
-                                <ScrollArea className="max-h-[100px]">
-                                    <p className="text-xs text-slate-500 leading-relaxed">
+                                <ScrollArea className="max-h-[80px]">
+                                    <p className="text-[11px] text-slate-400 leading-relaxed font-medium">
                                         {metadata.analysis ? (metadata.analysis as any).summary : '에이전트들이 현재 요구사항을 분석하고 최적의 구현 방법을 논의 중입니다.'}
                                     </p>
                                 </ScrollArea>

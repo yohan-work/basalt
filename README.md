@@ -150,7 +150,8 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 |----------|--------|
 | `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독. SSE 기반 액션 스트리밍. 스켈레톤 로딩, 에러 토스트, 빈 상태 표시 |
 | `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR). `taskId` 기반 필터링 및 ID 기반 중복 제거 지원 |
-| `TaskDetailsModal` | 태스크 상세 모달 (Radix Dialog 기반). Details, Live, Changes, Logs 4개 탭. 워크플로우, 에이전트 상태, 파일 활동, 코드 diff, 실시간 진행을 한눈에 |
+| `AgentDiscussion` | **Boardroom AI**. 에이전트들의 논의 과정을 시각화한 원형 보드룸 인터페이스. 실시간 발언 애니메이션 및 채팅 스타일의 논의 스트림 제공 |
+| `TaskDetailsModal` | 태스크 상세 모달. Details, Changes, Brainstorm, Live Logs 4개 탭 통합. 85vh 고정 높이 레이아웃으로 모든 뷰의 스크롤 안정성 확보 |
 | `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 8종 템플릿 선택 지원. 제목, 설명, 우선순위. Cmd+Enter 단축키, 폼 자동 초기화 |
 | `CodeDiffViewer` | 파일 변경 diff 뷰어. 사이드바 파일 목록 + split/unified diff. 신규/수정 파일 구분. 다크모드 지원 |
 | `LiveProgressPanel` | SSE 기반 실시간 진행 패널. 프로그레스 바, ETA 카운트다운, LLM 토큰 스트리밍, 완료 step 타이밍 |
@@ -297,7 +298,9 @@ basalt/
 
 #### 3. 실시간 인터페이스 및 모니터링 (`components/`)
 - **실시간 스트리밍**: SSE(Server-Sent Events)를 통해 에이전트의 사고 과정과 작업 진행률을 지연 없이 사용자에게 전달합니다.
-- **코드 변경 추적**: `write_code` 스킬 실행 시 변경 전/후를 캡처하여 `CodeDiffViewer`를 통해 실각화된 diff를 제공합니다.
+- **Boardroom AI (Brainstorming)**: 에이전트들이 작업 전 논의하는 과정을 시각적으로 표현합니다. 순차적 발언 애니메이션과 콤팩트한 다크 모드 UI를 통해 논의 맥락을 직관적으로 파악할 수 있습니다.
+- **코드 변경 추적**: `write_code` 스킬 실행 시 변경 전/후를 캡처하여 `CodeDiffViewer`를 통해 시각화된 diff를 제공합니다.
+- **고해상도 레이아웃**: 모든 상세 뷰는 85vh 고정 높이와 최적화된 스크롤 시스템을 갖추어, 대량의 로그나 코드 변경 사항도 끊김 없이 확인할 수 있습니다.
 - **시각적 워크플로우**: `WorkflowFlowchart`를 통해 에이전트 간의 작업 흐름을 한눈에 파악할 수 있습니다.
 
 #### 4. 강력한 에이전트 스킬셋 (`lib/skills/`)
