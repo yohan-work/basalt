@@ -171,6 +171,17 @@ export function WorkflowFlowchart({ workflow, progress }: WorkflowFlowchartProps
                     0%, 100% { box-shadow: 0 0 0 3px #3b82f6, 0 0 20px rgba(59, 130, 246, 0.5); }
                     50% { box-shadow: 0 0 0 5px #3b82f6, 0 0 30px rgba(59, 130, 246, 0.8); }
                 }
+                .react-flow__controls button {
+                    background-color: #1e293b !important;
+                    border-bottom: 1px solid #334155 !important;
+                    fill: #94a3b8 !important;
+                }
+                .react-flow__controls button:hover {
+                    background-color: #334155 !important;
+                }
+                .react-flow__controls button svg {
+                    fill: #f1f5f9 !important;
+                }
             `}</style>
             <ReactFlow
                 nodes={nodes}
@@ -184,8 +195,9 @@ export function WorkflowFlowchart({ workflow, progress }: WorkflowFlowchartProps
                 zoomOnScroll={true}
                 minZoom={0.5}
                 maxZoom={1.5}
+                colorMode="dark"
             >
-                <Background color="#94a3b8" gap={16} size={1} />
+                <Background color="#334155" gap={16} size={1} />
                 <Controls showInteractive={false} />
             </ReactFlow>
         </div>
