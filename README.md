@@ -41,6 +41,8 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - 매 step 완료 시 컨텍스트를 Supabase에 영속화하여 재시도 시 복원
 - SSE(Server-Sent Events) 기반 실시간 진행 스트리밍 (optional `StreamEmitter` 주입)
 - 파일 변경 diff 추적 (`write_code` 실행 시 before/after 캡처 → `metadata.fileChanges`)
+- **자기 수정 루프(Self-Correction Loop)**: 작업 중 에러 발생 시 `analyze_error_logs`를 호출하여 원인을 파악하고 스스로 수정을 시도
+- **상세 PR 설명 자동화**: 변경된 파일의 diff를 분석하여 전문적이고 상세한 PR 본문을 자동 생성
 
 ### TeamOrchestrator
 
@@ -65,6 +67,9 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 - **AbortController 기반 타임아웃** (코드 생성 120초, JSON 생성 60초)
 - **환경변수 기반 설정** (`OLLAMA_BASE_URL`, 모델 오버라이드)
 - **SSE 스트리밍 모드** — `stream: true`로 Ollama API 호출 시 토큰 단위 실시간 전송 지원 (`generateCodeStream`, `generateJSONStream`)
+- **지능형 워크플로우 최적화**: 특정 예시(로그인 페이지 등)에 고착되지 않도록 가이드라인을 추상화하여 사용자 의도 정확도 향상
+- **App Router & SEO 준수**: Client Component 충돌 방지 및 `<title>`, `<meta>` 등 SEO 필수 요소 자동 포함
+- **프로파일러 연동**: 프로젝트 구조 및 Barrel import 지원 여부를 감지하여 존재하지 않는 경로 임포트(할루시네이션) 방지
 
 용도별로 다른 모델을 사용합니다 (`model-config.ts`):
 
@@ -104,8 +109,8 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | `write_code` | 파일 생성/수정 |
 | `refactor_code` | 코드 리팩토링 |
 | `lint_code`, `typecheck` | 코드 품질 검사 |
-| `manage_git` | checkout, commit, push, PR 생성 |
-| `run_shell_command` | 터미널 명령 실행 |
+| `manage_git` | checkout, commit, push, PR 생성 (`gh` CLI 미설치 대응 및 상세 에러 로그) |
+| `run_shell_command` | 터미널 명령 실행 (`emitter` safe 호출 지원) |
 | `check_environment` | Node 버전 등 환경 체크 |
 | `generate_scss` | SCSS 파일 생성 |
 | `apply_design_system` | 디자인 토큰 적용 |
@@ -144,7 +149,7 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | 컴포넌트 | 하는 일 |
 |----------|--------|
 | `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독. SSE 기반 액션 스트리밍. 스켈레톤 로딩, 에러 토스트, 빈 상태 표시 |
-| `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR). `taskId` 기반 필터링 지원 |
+| `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR). `taskId` 기반 필터링 및 ID 기반 중복 제거 지원 |
 | `TaskDetailsModal` | 태스크 상세 모달 (Radix Dialog 기반). Details, Live, Changes, Logs 4개 탭. 워크플로우, 에이전트 상태, 파일 활동, 코드 diff, 실시간 진행을 한눈에 |
 | `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 8종 템플릿 선택 지원. 제목, 설명, 우선순위. Cmd+Enter 단축키, 폼 자동 초기화 |
 | `CodeDiffViewer` | 파일 변경 diff 뷰어. 사이드바 파일 목록 + split/unified diff. 신규/수정 파일 구분. 다크모드 지원 |
