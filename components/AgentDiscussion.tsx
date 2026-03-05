@@ -36,6 +36,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const [visibleThoughts, setVisibleThoughts] = useState<AgentThought[]>([]);
     const [currentThoughtIndex, setCurrentThoughtIndex] = useState(-1);
     const logEndRef = useRef<HTMLDivElement>(null);
+    const meetingZoneRef = useRef<HTMLDivElement>(null);
+    const [meetingSize, setMeetingSize] = useState({ width: 0, height: 0 });
 
     // 1. Fetch and Subscribe
     useEffect(() => {
@@ -118,6 +120,18 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
         logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [visibleThoughts]);
 
+    // Meeting zone size for circular agent layout
+    useEffect(() => {
+        const el = meetingZoneRef.current;
+        if (!el) return;
+        const ro = new ResizeObserver((entries) => {
+            const { width, height } = entries[0]?.contentRect ?? { width: 0, height: 0 };
+            setMeetingSize({ width, height });
+        });
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
     const currentThought = currentThoughtIndex >= 0 ? allThoughts[currentThoughtIndex] : null;
     const progress = allThoughts.length > 0 ? ((currentThoughtIndex + 1) / allThoughts.length) * 100 : 0;
 
@@ -175,17 +189,16 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                 {/* Left: Meeting Zone - Dark Layout */}
                 <div className="flex-[1.2] relative bg-[#020617] border-r border-slate-800 flex items-center justify-center p-4 overflow-hidden">
                     {/* The Meeting Table Indicator - Subtle Grid/Line */}
-                    <div className="absolute w-[70%] h-[50%] border border-slate-800/50 flex items-center justify-center pointer-events-none">
+                    <div className="absolute w-[70%] h-[50%] flex items-center justify-center pointer-events-none">
                         <span className="text-slate-800 text-3xl font-black tracking-widest select-none uppercase opacity-40">Basalt AI</span>
                     </div>
 
-                    <div className="relative h-full w-full">
+                    <div ref={meetingZoneRef} className="relative h-full w-full">
                         {AGENTS.map((agent, idx) => {
                             const angle = (idx / AGENTS.length) * Math.PI * 2 - Math.PI / 2;
-                            const rx = 130;
-                            const ry = 80;
-                            const x = Math.cos(angle) * rx;
-                            const y = Math.sin(angle) * ry;
+                            const radius = Math.max(140, Math.min(meetingSize.width, meetingSize.height) * 0.46);
+                            const x = Math.cos(angle) * radius;
+                            const y = Math.sin(angle) * radius;
 
                             const isSpeaking = currentThought?.agent === agent.role;
 
