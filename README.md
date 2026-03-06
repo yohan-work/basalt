@@ -43,6 +43,7 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - 파일 변경 diff 추적 (`write_code` 실행 시 before/after 캡처 → `metadata.fileChanges`)
 - **자기 수정 루프(Self-Correction Loop)**: 작업 중 에러 발생 시 `analyze_error_logs`를 호출하여 원인을 파악하고 스스로 수정을 시도
 - **상세 PR 설명 자동화**: 변경된 파일의 diff를 분석하여 전문적이고 상세한 PR 본문을 자동 생성
+- **지속적 잠금 메커니즘(Persistent Locking)**: DB 레벨의 잠금 장치를 통해 작업의 중복 실행을 방지하고 작업 안정성 확보
 
 ### TeamOrchestrator
 
@@ -70,6 +71,7 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 - **지능형 워크플로우 최적화**: 특정 예시(로그인 페이지 등)에 고착되지 않도록 가이드라인을 추상화하여 사용자 의도 정확도 향상
 - **App Router & SEO 준수**: Client Component 충돌 방지 및 `<title>`, `<meta>` 등 SEO 필수 요소 자동 포함
 - **프로파일러 연동**: 프로젝트 구조 및 Barrel import 지원 여부를 감지하여 존재하지 않는 경로 임포트(할루시네이션) 방지
+- **지능적 컨텍스트 라우팅**: 스킬의 난이도에 따라 FAST(단순 경로/인자) 또는 SMART(추론/분석) 모델을 동적으로 선택하여 속도와 정확도 최적화
 
 용도별로 다른 모델을 사용합니다 (`model-config.ts`):
 
@@ -122,6 +124,7 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | `analyze_error_logs` | 에러 로그 원인 분석 |
 | `check_responsive` | 반응형 레이아웃 검사 |
 | `list_directory` | 디렉토리 목록 조회 |
+| `consult_agents` | 에이전트 간 브레인스토밍 논의 생성 (Boardroom AI 연동) |
 
 스킬 정의는 `lib/skills/` 폴더 아래 `SKILL.md` 파일로 관리됩니다.
 
@@ -150,7 +153,7 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 |----------|--------|
 | `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독. SSE 기반 액션 스트리밍. 스켈레톤 로딩, 에러 토스트, 빈 상태 표시 |
 | `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR). `taskId` 기반 필터링 및 ID 기반 중복 제거 지원 |
-| `AgentDiscussion` | **Boardroom AI**. 에이전트들의 논의 과정을 시각화한 원형 보드룸 인터페이스. 실시간 발언 애니메이션 및 채팅 스타일의 논의 스트림 제공 |
+| `AgentDiscussion` | **Boardroom AI**. 에이전트들의 논의 과정을 시각화한 원형 보드룸 인터페이스. 실시간 발언 애니메이션 및 채팅 스타일의 논의 스트림 제공. 논의 진행 상황 실시간 업데이트(Drip Feed) 지원 |
 | `TaskDetailsModal` | 태스크 상세 모달. Details, Changes, Brainstorm, Live Logs 4개 탭 통합. 85vh 고정 높이 레이아웃으로 모든 뷰의 스크롤 안정성 확보 |
 | `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 8종 템플릿 선택 지원. 제목, 설명, 우선순위. Cmd+Enter 단축키, 폼 자동 초기화 |
 | `CodeDiffViewer` | 파일 변경 diff 뷰어. 사이드바 파일 목록 + split/unified diff. 신규/수정 파일 구분. 다크모드 지원 |
