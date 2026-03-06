@@ -151,15 +151,21 @@ export async function consult_agents(
     taskAnalysis: any,
     availableAgents: AgentDefinition[],
     codebaseContext: string,
-    emitter: any = null
+    emitter: any = null,
+    pastThoughts: any[] = []
 ) {
     try {
         const requiredAgents = taskAnalysis.required_agents || [];
         const agents = availableAgents.filter(a => requiredAgents.includes(a.role) || a.role === 'main-agent');
         const agentsList = agents.map(a => `- ${a.name} (Role: ${a.role}, Expertise: ${a.skills.join(', ')})`).join('\n');
 
+        const contextDiscussion = pastThoughts.length > 0
+            ? `Previous Discussion History:\n${pastThoughts.map(t => `[${t.agent_role || t.agent}] ${t.message || t.thought}`).join('\n')}\n`
+            : '';
+
         const systemPrompt = `You are a group of AI agents brainstorming a technical solution.
 Generate a realistic dialogue between the following agents about the task at hand.
+${pastThoughts.length > 0 ? 'Continue the existing discussion based on the history provided.' : ''}
 
 Available Agents in this discussion:
 ${agentsList}
@@ -170,10 +176,12 @@ ${codebaseContext}
 Task Analysis:
 ${JSON.stringify(taskAnalysis)}
 
+${contextDiscussion}
+
 Instructions:
-1. Generate 4-6 distinct thoughts/messages.
+1. Generate 3-5 additional distinct thoughts/messages.
 2. Each message should be from one of the available agents.
-3. The discussion should focus on technical implementation details, potential pitfalls, and architectural decisions.
+3. The discussion should focus on responding to the latest points or the user's feedback if present.
 4. The tone should be professional and collaborative.
 5. MANDATORY: All thoughts/messages MUST BE IN KOREAN.
 6. Provide the output as a JSON object with the following schema:

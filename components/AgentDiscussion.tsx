@@ -5,8 +5,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, MessageSquare, Lightbulb } from 'lucide-react';
+import { Sparkles, MessageSquare, Lightbulb, Send, Coffee, Beer, Music } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 
 
 interface AgentThought {
@@ -23,11 +25,11 @@ interface AgentDiscussionProps {
 }
 
 const AGENTS = [
-    { role: 'product-manager', name: 'PM', color: 'bg-amber-500' },
-    { role: 'software-engineer', name: 'Dev', color: 'bg-violet-500' },
-    { role: 'qa', name: 'QA', color: 'bg-emerald-500' },
-    { role: 'main-agent', name: 'Lead', color: 'bg-blue-500' },
-    { role: 'style-architect', name: 'Style', color: 'bg-pink-500' }
+    { role: 'product-manager', name: 'PM', color: 'bg-[#ff00ff]', pixelIcon: '☕' },
+    { role: 'software-engineer', name: 'Dev', color: 'bg-[#00ffff]', pixelIcon: '💻' },
+    { role: 'qa', name: 'QA', color: 'bg-[#00ff00]', pixelIcon: '🔍' },
+    { role: 'main-agent', name: 'Lead', color: 'bg-[#ffff00]', pixelIcon: '👑' },
+    { role: 'style-architect', name: 'Style', color: 'bg-[#ff0066]', pixelIcon: '🎨' }
 ];
 
 
@@ -35,8 +37,10 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const [allThoughts, setAllThoughts] = useState<AgentThought[]>([]);
     const [visibleThoughts, setVisibleThoughts] = useState<AgentThought[]>([]);
     const [currentThoughtIndex, setCurrentThoughtIndex] = useState(-1);
-    const logEndRef = useRef<HTMLDivElement>(null);
+    const [userInput, setUserInput] = useState('');
+    const [isSending, setIsSending] = useState(false);
     const meetingZoneRef = useRef<HTMLDivElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [meetingSize, setMeetingSize] = useState({ width: 0, height: 0 });
 
     // 1. Fetch and Subscribe
@@ -52,7 +56,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
             if (!error && data) {
                 const thoughtLogs = data
-                    .filter(log => log.metadata?.type === 'THOUGHT' &&
+                    .filter(log => (log.metadata?.type === 'THOUGHT' || log.agent_role === 'user') &&
                         log.message !== "에이전트 그룹 논의 시작: 작업 범위를 확정하고 최적의 실행 계획을 수립합니다.")
                     .map(log => ({
                         id: log.id,
@@ -79,7 +83,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                 },
                 (payload) => {
                     const newLog = payload.new;
-                    if (newLog.metadata?.type === 'THOUGHT' &&
+                    if ((newLog.metadata?.type === 'THOUGHT' || newLog.agent_role === 'user') &&
                         newLog.message !== "에이전트 그룹 논의 시작: 작업 범위를 확정하고 최적의 실행 계획을 수립합니다.") {
                         const newThought: AgentThought = {
                             id: newLog.id,
@@ -117,10 +121,12 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
     // Auto-scroll log
     useEffect(() => {
-        logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (scrollContainerRef.current) {
+            scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
     }, [visibleThoughts]);
 
-    // Meeting zone size for circular agent layout
+    // Resize observer for meeting zone
     useEffect(() => {
         const el = meetingZoneRef.current;
         if (!el) return;
@@ -131,6 +137,28 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
         ro.observe(el);
         return () => ro.disconnect();
     }, []);
+
+    // 3. User Interaction
+    const handleSendMessage = async () => {
+        if (!userInput.trim() || isSending) return;
+
+        setIsSending(true);
+        try {
+            const res = await fetch('/api/agent/discuss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId, message: userInput })
+            });
+
+            if (res.ok) {
+                setUserInput('');
+            }
+        } catch (err) {
+            console.error('Failed to send message:', err);
+        } finally {
+            setIsSending(false);
+        }
+    };
 
     const currentThought = currentThoughtIndex >= 0 ? allThoughts[currentThoughtIndex] : null;
     const progress = allThoughts.length > 0 ? ((currentThoughtIndex + 1) / allThoughts.length) * 100 : 0;
@@ -153,52 +181,62 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     }
 
     return (
-        <div className="flex flex-col gap-0 w-full h-full animate-in fade-in duration-700 font-sans text-slate-300 bg-[#020617] overflow-hidden border border-slate-800">
-            {/* Dark Minimal Header */}
-            <div className="bg-[#0f172a] border-b border-slate-800 p-3 shrink-0">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-[#3b9eff]" />
+        <div className="flex flex-col gap-0 w-full h-[600px] animate-in fade-in duration-700 font-mono text-slate-300 bg-[#0a0a0f] overflow-hidden border-4 border-[#1a1a2e] shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+            {/* Retro Neon Header */}
+            <div className="bg-[#1a1a2e] border-b-4 border-[#0f0f1a] p-3 shrink-0 relative overflow-hidden">
+                <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#ff00ff_1px,transparent_1px)] bg-[size:10px_10px]" />
+                <div className="flex items-center justify-between relative z-10">
+                    <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-black flex items-center justify-center border-2 border-[#ff00ff] shadow-[0_0_10px_#ff00ff]">
+                            <Music className="w-4 h-4 text-[#ff00ff] animate-pulse" />
+                        </div>
                         <div>
-                            <div className="flex items-center gap-1.5">
-                                <h3 className="text-[11px] font-bold text-slate-100 uppercase tracking-tight">AI Brainstorming</h3>
-                                <Badge variant="outline" className="text-[#3b9eff] border-[#3b9eff]/30 h-4 text-[9px] px-1 rounded-none bg-[#3b9eff]/10">
-                                    {currentThoughtIndex + 1} / {allThoughts.length}
+                            <div className="flex items-center gap-2">
+                                <h3 className="text-[14px] font-black text-white italic tracking-tighter uppercase">
+                                    <span className="text-[#ff00ff] animate-pulse">Neon</span> <span className="text-[#00ffff]">Basalt Bar</span>
+                                </h3>
+                                <Badge className="bg-[#ff00ff] text-white animate-bounce h-5 text-[8px] border-none px-1 rounded-none scale-90">
+                                    LIVE {currentThoughtIndex + 1}/{allThoughts.length}
                                 </Badge>
-                            </div>
-                            <div className="h-0.5 w-32 bg-slate-800 mt-1.5 rounded-none overflow-hidden text-[#3b9eff]">
-                                <motion.div
-                                    className="h-full bg-current"
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${progress}%` }}
-                                    transition={{ duration: 0.8 }}
-                                />
                             </div>
                         </div>
                     </div>
-                    {currentThought && (
-                        <div className="flex items-center gap-1.5 px-2 py-0.5 border border-slate-800 bg-slate-900/50">
-                            <span className="w-1 h-1 bg-green-500 animate-pulse" />
-                            <span className="text-[9px] font-bold text-[#3b9eff] uppercase tracking-tighter">{AGENTS.find(a => a.role === currentThought.agent)?.name} SPEAKING</span>
-                        </div>
-                    )}
                 </div>
             </div>
 
-            <div className="flex flex-1 min-h-0">
-                {/* Left: Meeting Zone - Dark Layout */}
-                <div className="flex-[1.2] relative bg-[#020617] border-r border-slate-800 flex items-center justify-center p-4 overflow-hidden">
-                    {/* The Meeting Table Indicator - Subtle Grid/Line */}
-                    <div className="absolute w-[70%] h-[50%] flex items-center justify-center pointer-events-none">
-                        <span className="text-slate-800 text-3xl font-black tracking-widest select-none uppercase opacity-40">Basalt AI</span>
+            <div className="flex flex-1 min-h-0 overflow-hidden">
+                {/* Left: Pixel Street Zone */}
+                <div className="flex-[1.4] relative bg-[#050510] border-r-4 border-[#1a1a2e] flex items-center justify-center p-4 overflow-hidden h-full">
+                    {/* Retro Grid Floor (2D) */}
+                    <div className="absolute bottom-0 inset-x-0 h-32 opacity-30 select-none z-0">
+                        <div className="w-full h-full" style={{
+                            backgroundImage: 'linear-gradient(#ff00ff 1px, transparent 1px), linear-gradient(90deg, #ff00ff 1px, transparent 1px)',
+                            backgroundSize: '30px 30px',
+                            maskImage: 'linear-gradient(to top, black, transparent)'
+                        }} />
                     </div>
 
-                    <div ref={meetingZoneRef} className="relative h-full w-full">
+                    {/* Bar Counter / Table (Pixel Style) */}
+                    <div className="absolute inset-x-10 bottom-24 h-4 z-10 bg-[#1a1a2e] border-t-2 border-b-2 border-pink-500 shadow-[0_0_15px_rgba(255,0,255,0.4)]" />
+
+                    {/* Background Neon Signs */}
+                    <div className="absolute top-10 right-10 opacity-40 select-none">
+                        <div className="text-[20px] font-black text-[#00ffff] blur-[1px] rotate-12 flex items-center gap-2 border-2 border-dashed border-[#00ffff] p-2">
+                            <Coffee className="w-5 h-5" /> OPEN
+                        </div>
+                    </div>
+                    <div className="absolute top-20 left-10 opacity-30 select-none">
+                        <div className="text-[16px] font-black text-[#ff0066] -rotate-6 flex items-center gap-2">
+                            <Beer className="w-5 h-5" /> 24H SERVICE
+                        </div>
+                    </div>
+
+                    <div ref={meetingZoneRef} className="relative h-full w-full z-20">
                         {AGENTS.map((agent, idx) => {
-                            const angle = (idx / AGENTS.length) * Math.PI * 2 - Math.PI / 2;
-                            const radius = Math.max(140, Math.min(meetingSize.width, meetingSize.height) * 0.46);
-                            const x = Math.cos(angle) * radius;
-                            const y = Math.sin(angle) * radius;
+                            // Lay out agents along the "bar counter" or in a freeform street way
+                            const isOdd = idx % 2 === 0;
+                            const xOffset = (idx - 2) * 100;
+                            const yOffset = isOdd ? -40 : 20;
 
                             const isSpeaking = currentThought?.agent === agent.role;
 
@@ -207,105 +245,137 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                     key={agent.role}
                                     className="absolute"
                                     style={{
-                                        left: `calc(50% + ${x}px)`,
-                                        top: `calc(50% + ${y}px)`,
+                                        left: `calc(50% + ${xOffset}px)`,
+                                        top: `calc(70% + ${yOffset}px)`,
                                         transform: 'translate(-50%, -50%)'
                                     }}
                                     animate={{
-                                        scale: isSpeaking ? 1.1 : 1,
-                                        zIndex: isSpeaking ? 30 : 10
+                                        y: isSpeaking ? [0, -10, 0] : 0,
+                                        scale: isSpeaking ? 1.1 : 1
                                     }}
+                                    transition={isSpeaking ? { repeat: Infinity, duration: 2 } : {}}
                                 >
-                                    <div className="flex flex-col items-center gap-1.5">
+                                    <div className="flex flex-col items-center gap-2">
                                         <div className={`
-                                            w-10 h-10 border transition-all duration-300 shadow-lg
-                                            ${isSpeaking ? 'bg-[#3b9eff] border-[#3b9eff] shadow-[#3b9eff]/20' : 'bg-slate-900 border-slate-800'}
+                                            relative w-16 h-16 transition-all duration-300
+                                            flex flex-col items-center justify-center overflow-hidden
+                                            border-4 ${isSpeaking ? 'border-[#00ffff] shadow-[0_0_15px_#00ffff]' : 'border-slate-800 opacity-70'}
+                                            bg-black
                                         `}>
-                                            <div className={`w-full h-full flex items-center justify-center text-xs font-black ${isSpeaking ? 'text-white' : 'text-slate-600'}`}>
-                                                {agent.name.charAt(0)}
-                                            </div>
+                                            {/* Pixel Character Body */}
+                                            <div className="text-2xl mb-1">{agent.pixelIcon}</div>
+                                            <div className="text-[10px] font-black text-white bg-black/50 px-1">{agent.name}</div>
+
+                                            {/* Retro Scanline effect */}
+                                            <div className="absolute inset-0 pointer-events-none opacity-20 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[size:100%_4px,3px_100%]" />
                                         </div>
-                                        <p className={`text-[8px] font-bold uppercase tracking-tighter ${isSpeaking ? 'text-[#3b9eff]' : 'text-slate-600'}`}>{agent.name}</p>
                                     </div>
                                 </motion.div>
                             );
                         })}
 
-                        {/* Speech Overlay - Dark Premium Card */}
+                        {/* Speech Bubble - Classic RPG Style */}
                         <AnimatePresence mode="wait">
                             {currentThought && (
                                 <motion.div
                                     key={currentThought.id}
-                                    initial={{ opacity: 0, y: 10, scale: 0.98 }}
-                                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                                    exit={{ opacity: 0, y: -5, scale: 0.98 }}
-                                    className="absolute inset-x-4 bottom-4 bg-[#0f172a]/90 backdrop-blur-md border border-slate-700 p-3 shadow-2xl z-50 ring-1 ring-white/5"
+                                    initial={{ opacity: 0, scale: 0.8, y: 10 }}
+                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                    exit={{ opacity: 0, scale: 0.8 }}
+                                    className="absolute inset-x-8 top-16 z-50"
                                 >
-                                    <div className="flex items-center gap-2 mb-2">
-                                        <div className="w-0.5 h-3 bg-[#3b9eff]" />
-                                        <span className="text-[9px] font-bold text-slate-100 uppercase tracking-wide">
-                                            {AGENTS.find(a => a.role === currentThought.agent)?.name}
-                                        </span>
+                                    <div className="relative bg-white text-black p-4 border-4 border-black shadow-[4px_4px_0_#ff00ff]">
+                                        {/* Pixel Bubble Tail */}
+                                        <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-8 h-8 bg-white border-r-4 border-b-4 border-black rotate-45" />
+
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <span className="text-[10px] bg-black text-white px-1 font-black uppercase">
+                                                {AGENTS.find(a => a.role === currentThought.agent)?.name}
+                                            </span>
+                                            <div className="flex-1 h-0.5 bg-black" />
+                                        </div>
+                                        <p className="text-[12px] leading-tight font-bold font-mono">
+                                            {currentThought.thought}
+                                        </p>
                                     </div>
-                                    <p className="text-[11px] text-slate-300 leading-normal font-medium">
-                                        {currentThought.thought}
-                                    </p>
                                 </motion.div>
                             )}
                         </AnimatePresence>
                     </div>
                 </div>
 
-                {/* Right: Meeting Log - Chat Style Dark */}
-                <div className="flex-1 flex flex-col bg-[#020617] overflow-hidden">
-                    <div className="px-3 py-2 border-b border-slate-800 bg-[#0f172a]/30">
-                        <h3 className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Discussion Stream</h3>
+                {/* Right: Retro Arcade Log */}
+                <div className="flex-1 flex flex-col bg-[#050510] overflow-hidden h-full">
+                    <div className="px-3 py-2 border-b-4 border-[#1a1a2e] bg-[#0a0a1a]">
+                        <h3 className="text-[10px] font-black text-[#ff00ff] uppercase italic">System.Log_Disk</h3>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                    <div
+                        ref={scrollContainerRef}
+                        className="flex-1 overflow-y-auto p-3 space-y-4 custom-scrollbar"
+                    >
                         {visibleThoughts.map((log, i) => {
-                            const isCurrent = log.id === currentThought?.id;
-                            const agent = AGENTS.find(a => a.role === log.agent) || AGENTS[0];
+                            const isUser = log.agent === 'user';
+                            const agent = isUser ? { name: 'YOU', color: 'bg-white' } : (AGENTS.find(a => a.role === log.agent) || AGENTS[0]);
 
                             return (
                                 <motion.div
                                     key={log.id}
-                                    initial={{ opacity: 0, x: 5 }}
+                                    initial={{ opacity: 0, x: isUser ? 10 : -10 }}
                                     animate={{ opacity: 1, x: 0 }}
-                                    className="flex flex-col gap-1"
+                                    className={`relative p-2 border-2 ${isUser ? 'border-white bg-white/5 ml-4' : 'border-[#1a1a2e] bg-[#0a0a1a] mr-4'}`}
                                 >
-                                    <div className="flex items-center justify-between">
-                                        <span className={`text-[8px] font-bold uppercase ${isCurrent ? 'text-[#3b9eff]' : 'text-slate-500'}`}>
-                                            {agent.name}
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className={`text-[9px] font-black uppercase ${isUser ? 'text-white' : 'text-[#00ffff]'}`}>
+                                            [{agent.name}]
                                         </span>
-                                        <span className="text-[7px] text-slate-700 font-mono">STEP {i + 1}</span>
+                                        <span className="text-[7px] text-slate-700 font-mono flex-1 text-right">0x{log.id.slice(0, 4)}</span>
                                     </div>
-                                    <div className={`
-                                        p-2.5 text-[10px] leading-relaxed transition-colors border
-                                        ${isCurrent
-                                            ? 'bg-[#3b9eff]/10 border-[#3b9eff]/30 text-slate-200'
-                                            : 'bg-slate-900/50 border-slate-800 text-slate-500'
-                                        }
-                                    `}>
+                                    <div className={`text-[11px] leading-tight ${isUser ? 'text-white' : 'text-slate-400'}`}>
                                         {log.thought}
                                     </div>
                                 </motion.div>
                             );
                         })}
-                        <div ref={logEndRef} />
+                    </div>
+
+                    {/* Arcade Input */}
+                    <div className="p-3 border-t-4 border-[#1a1a2e] bg-[#0a0a1a]">
+                        <div className="flex gap-2">
+                            <Input
+                                value={userInput}
+                                onChange={(e) => setUserInput(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                                placeholder="[INPUT MESSAGE...]"
+                                className="h-10 text-[12px] bg-black border-2 border-slate-700 text-[#00ff00] placeholder:text-slate-800 rounded-none focus-visible:ring-0 focus-visible:border-[#00ff00]"
+                                disabled={isSending}
+                            />
+                            <Button
+                                size="sm"
+                                onClick={handleSendMessage}
+                                disabled={isSending || !userInput.trim()}
+                                className="h-10 w-12 p-0 bg-[#00ff00] hover:bg-[#00cc00] text-black rounded-none shadow-[4px_4px_0_#1a1a2e] transition-transform active:translate-x-1 active:translate-y-1"
+                            >
+                                <Send className="w-5 h-5" />
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <style jsx global>{`
-                .custom-scrollbar::-webkit-scrollbar {
-                    width: 2px;
+                .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+                .custom-scrollbar::-webkit-scrollbar-track { background: #050510; }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: #1a1a2e; }
+
+                @keyframes flicker {
+                    0% { opacity: 0.9; }
+                    5% { opacity: 0.8; }
+                    10% { opacity: 1; }
+                    15% { opacity: 0.9; }
+                    100% { opacity: 1; }
                 }
-                .custom-scrollbar::-webkit-scrollbar-track {
-                    background: transparent;
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb {
-                    background: #1e293b;
-                }
+
+                .animate-flicker { animation: flicker 2s infinite; }
             `}</style>
         </div>
     );
