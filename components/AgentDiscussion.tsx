@@ -66,6 +66,9 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                         timestamp: new Date(log.created_at).getTime()
                     }));
                 setAllThoughts(thoughtLogs);
+                // History should be visible immediately
+                setVisibleThoughts(thoughtLogs);
+                setCurrentThoughtIndex(thoughtLogs.length - 1);
             }
         };
 
@@ -92,10 +95,23 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                             type: (newLog.metadata?.thought_type || 'idea') as AgentThought['type'],
                             timestamp: new Date(newLog.created_at).getTime()
                         };
-                        setAllThoughts(prev => {
-                            if (prev.some(t => t.id === newThought.id)) return prev;
-                            return [...prev, newThought];
-                        });
+
+                        if (newLog.agent_role === 'user') {
+                            // User messages should be visible immediately
+                            setAllThoughts(prev => {
+                                if (prev.some(t => t.id === newThought.id)) return prev;
+                                const updated = [...prev, newThought];
+                                setVisibleThoughts(v => [...v, newThought]);
+                                setCurrentThoughtIndex(updated.length - 1);
+                                return updated;
+                            });
+                        } else {
+                            // Agent thoughts will be drip-fed via the interval effect
+                            setAllThoughts(prev => {
+                                if (prev.some(t => t.id === newThought.id)) return prev;
+                                return [...prev, newThought];
+                            });
+                        }
                     }
                 }
             )
