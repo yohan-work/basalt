@@ -1,57 +1,87 @@
 import React from 'react';
 
-// 에이전트들의 책상 하드코딩 위치 (AgentDiscussion.tsx의 idle zone과 정확히 일치시킴)
 export function OfficeLayout() {
     return (
-        <div className="absolute inset-0 w-full h-full overflow-hidden">
-            {/* 1. 벽돌 벽 -> 다이아몬드 그물망 패턴 (상단 고정 180px) */}
+        <div className="absolute inset-0 w-full h-full bg-[#f1f5f9] overflow-hidden flex items-center justify-center">
+            {/* Minimal Dot Grid Background */}
             <div
-                className="absolute top-0 left-0 w-full h-[180px] bg-[#eef2f6] z-0 flex items-center justify-center gap-8"
+                className="absolute inset-0 opacity-20"
                 style={{
-                    backgroundImage: `
-                        linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%, #e2e8f0), 
-                        linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%, #e2e8f0)
-                    `,
-                    backgroundSize: '20px 20px',
-                    backgroundPosition: '0 0, 10px 10px',
-                    borderBottom: '2px solid #cbd5e1'
+                    backgroundImage: 'radial-gradient(#94a3b8 1px, transparent 1px)',
+                    backgroundSize: '24px 24px'
                 }}
-            >
-                {/* 2D Flat Dashboard Screens */}
-                <div className="w-[180px] h-[80px] bg-slate-800 rounded flex flex-col justify-center px-4 shadow-sm border-[3px] border-slate-600">
-                    <div className="flex justify-between text-emerald-400 text-[10px] font-mono mb-1">
-                        <span>Clients</span><span>Users</span><span>Spots</span>
+            />
+
+            {/* Overall wrapper to keep things organized relative to the center */}
+            <div className="relative w-full max-w-5xl h-[600px]">
+
+                {/* 1. Boardroom (Top Left) */}
+                <div className="absolute top-[5%] left-[5%] w-[38%] h-[40%] bg-white rounded-md shadow-md border-[2px] border-slate-200 overflow-hidden isolate">
+                    {/* Pink accent side line */}
+                    <div className="absolute top-0 left-0 w-8 h-full bg-pink-50" />
+
+                    {/* Checkered pattern background */}
+                    <div className="absolute inset-0 opacity-10" style={{ backgroundImage: `linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%, #e2e8f0), linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%, #e2e8f0)`, backgroundSize: '20px 20px', backgroundPosition: '0 0, 10px 10px' }}></div>
+
+                    <div className="absolute top-4 left-4 bg-slate-900 text-white text-[10px] font-bold px-3 py-1 rounded-sm uppercase tracking-wider z-10 shadow-sm">Boardroom</div>
+
+                    {/* Giant Dark Gray Oval Table */}
+                    <div className="absolute top-1/2 left-[55%] -translate-x-1/2 -translate-y-1/2 w-[65%] h-[50%] bg-[#2d3748] rounded-full shadow-md border-[3px] border-[#1a202c] overflow-hidden z-10">
+                        {/* Inner detail */}
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[70%] h-[40%] bg-[#4a5568] rounded-full opacity-60"></div>
                     </div>
-                    <div className="flex justify-between text-emerald-400 text-xl font-mono font-bold leading-none">
-                        <span>49</span><span>44</span><span>29</span>
+
+                    {/* Circular decorations / plants */}
+                    <div className="absolute bottom-6 left-6 w-8 h-8 rounded-full border-[3px] border-emerald-300 flex items-center justify-center bg-transparent z-10">
+                        <div className="w-3 h-3 rounded-full bg-emerald-400"></div>
+                    </div>
+                    {/* Top right target-like shape */}
+                    <div className="absolute top-6 right-8 w-6 h-6 rounded-full border-[2px] border-emerald-300 z-10"></div>
+                </div>
+
+                {/* 2. Patio (Top Right) */}
+                <div className="absolute top-[8%] right-[5%] w-[42%] h-[35%] bg-emerald-50/50 rounded-md shadow-sm border-[3px] border-emerald-200 p-4 isolate font-mono">
+                    <div className="absolute top-4 right-4 bg-white text-emerald-600 text-[10px] font-bold px-3 py-1 rounded-sm uppercase tracking-wider z-10 shadow-sm">Patio</div>
+
+                    {/* Large green bush/shape */}
+                    <div className="absolute top-6 left-6 w-16 h-16 rounded-full bg-emerald-500 shadow-sm z-10 opacity-90"></div>
+                    <div className="absolute top-16 left-12 w-10 h-10 rounded-full bg-emerald-400 shadow-sm z-10 opacity-90 border-2 border-emerald-50"></div>
+
+                    {/* Blue striped area (Pool or Rug) */}
+                    <div className="absolute bottom-4 right-4 w-[55%] h-[60%] border-[2px] border-cyan-300 bg-cyan-50 opacity-80"
+                        style={{
+                            backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(165,243,252,0.5) 5px, rgba(165,243,252,0.5) 10px)`
+                        }}>
                     </div>
                 </div>
 
-                <div className="w-[240px] h-[80px] bg-white rounded shadow-sm border border-slate-200 flex items-center px-4 relative">
-                    <div className="w-16 h-2 bg-slate-100 rounded-full absolute top-3 left-4" />
-                    <div className="w-12 h-2 bg-slate-100 rounded-full absolute top-7 left-4" />
-                    {/* 도넛 차트 모조 */}
-                    <div className="absolute top-1/2 right-6 -translate-y-1/2 w-10 h-10 rounded-full border-[4px] border-slate-100 border-r-emerald-400 border-t-emerald-400" />
+                {/* 3. Engineering Hub (Bottom Center-Left) */}
+                <div className="absolute bottom-[10%] left-[8%] w-[55%] h-[40%] bg-[#fff8f1] rounded-md shadow-sm border-[3px] border-orange-100 p-4 isolate">
+                    <div className="absolute top-4 left-4 text-orange-400 text-[10px] font-extrabold uppercase tracking-widest z-10">Engineering Hub</div>
+
+                    {/* Concentric rings design element */}
+                    <div className="absolute top-0 right-[20%] w-24 h-24 rounded-full border-[10px] border-slate-100/80 -translate-y-1/2 -mb-10 flex justify-center items-center">
+                        <div className="w-2 h-2 rounded-full bg-slate-400"></div>
+                    </div>
+
+                    {/* Minimalist White Desk Blocks */}
+                    <div className="absolute bottom-6 left-[10%] w-[35%] h-[20%] bg-white rounded-sm shadow-md border-b-[6px] border-slate-200 border-x border-t flex justify-center items-center">
+                        <div className="w-[60%] h-1 bg-slate-200 rounded">
+                            <div className="w-8 h-full bg-cyan-300 mx-auto rounded"></div>
+                        </div>
+                    </div>
+
+                    <div className="absolute bottom-6 right-[10%] w-[35%] h-[20%] bg-white rounded-sm shadow-md border-b-[6px] border-slate-200 border-x border-t flex justify-center items-center">
+                        <div className="w-[60%] h-1 bg-slate-200 rounded"></div>
+                    </div>
                 </div>
 
-                <div className="w-[180px] h-[80px] bg-white rounded shadow-sm border border-slate-200 flex items-end p-3 gap-2">
-                    {[30, 60, 20, 80, 50, 20].map((h, i) => (
-                        <div key={i} className="flex-1 bg-emerald-400 opacity-90 rounded-sm" style={{ height: `${h}%` }} />
-                    ))}
+                {/* 4. Studio Hub Placeholder Area (Bottom Right) */}
+                <div className="absolute bottom-[10%] right-[10%] w-[15%] h-[20%]">
+                    {/* Optional extra elements for the Design/Studio area could go here, 
+                        or it can just be open space with the dots */}
                 </div>
-            </div>
 
-            {/* 2. 스트라이프 바닥 영역 (하단 나머지) */}
-            <div
-                className="absolute top-[180px] bottom-0 left-0 w-full z-0"
-                style={{
-                    backgroundColor: '#ded0ba', // Wood base color
-                    backgroundImage: `linear-gradient(90deg, transparent 50%, rgba(255,255,255,0.2) 50%)`,
-                    backgroundSize: '60px 100%',
-                }}
-            >
-                {/* Top Shadow from wall */}
-                <div className="absolute top-0 w-full h-8 bg-gradient-to-b from-black/5 to-transparent pointer-events-none" />
             </div>
         </div>
     );

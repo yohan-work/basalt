@@ -25,22 +25,25 @@ interface AgentDiscussionProps {
 }
 
 const AGENTS = [
-    // Idle: Spread out in the back/sides. Meeting: Center front.
     {
+        // PM -> Engineering Hub
         role: 'product-manager', name: 'PM', color: 'bg-emerald-500', baseColor: 'bg-emerald-500',
-        zone: { idle: { left: '15%', top: '150px' }, meeting: { left: '30%', top: '220px' } }
+        zone: { idle: { left: '25%', top: '75%' }, meeting: { left: '25%', top: '25%' } } // idle on left desk hub, meeting inside Boardroom
     },
     {
+        // Lead -> Patio
         role: 'main-agent', name: 'Lead', color: 'bg-blue-500', baseColor: 'bg-blue-500',
-        zone: { idle: { left: '40%', top: '120px' }, meeting: { left: '50%', top: '230px' } }
+        zone: { idle: { left: '72%', top: '22%' }, meeting: { left: '30%', top: '30%' } }
     },
     {
+        // Dev -> Boardroom 
         role: 'software-engineer', name: 'Dev', color: 'bg-indigo-500', baseColor: 'bg-indigo-500',
-        zone: { idle: { left: '60%', top: '120px' }, meeting: { left: '70%', top: '220px' } }
+        zone: { idle: { left: '15%', top: '35%' }, meeting: { left: '27%', top: '21%' } } // Center of the oval table
     },
     {
+        // Design -> Bottom Right area
         role: 'designer', name: 'Design', color: 'bg-pink-500', baseColor: 'bg-pink-500',
-        zone: { idle: { left: '85%', top: '150px' }, meeting: { left: '80%', top: '200px' } }
+        zone: { idle: { left: '80%', top: '80%' }, meeting: { left: '32%', top: '25%' } }
     }
 ];
 
@@ -52,6 +55,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const [isSending, setIsSending] = useState(false);
     const [isUserFocused, setIsUserFocused] = useState(false);
     const [showInteractions, setShowInteractions] = useState<{ id: number, x: number }[]>([]);
+    const [movingAgents, setMovingAgents] = useState<Set<string>>(new Set());
     const meetingZoneRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [chatPortalTarget, setChatPortalTarget] = useState<HTMLElement | null>(null);
@@ -319,6 +323,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                             }
 
                             const isThinking = nextAgentData?.role === agent.role;
+                            const isWalking = movingAgents.has(agent.role);
 
                             return (
                                 <motion.div
@@ -327,17 +332,19 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                     animate={{
                                         left: targetPos.left,
                                         top: targetPos.top,
-                                        zIndex: isSpeaking ? 40 : 20
+                                        zIndex: isSpeaking ? 40 : (isWalking ? 30 : 20)
                                     }}
                                     transition={{ type: "spring", stiffness: 60, damping: 12, mass: 1 }}
                                     style={{ transform: 'translate(-50%, -50%)' }}
+                                    onAnimationStart={() => setMovingAgents(prev => new Set(prev).add(agent.role))}
+                                    onAnimationComplete={() => setMovingAgents(prev => { const next = new Set(prev); next.delete(agent.role); return next; })}
                                 >
                                     <AgentAvatar
                                         role={agent.role}
                                         name={agent.name}
                                         color={agent.baseColor}
                                         isSpeaking={isSpeaking}
-                                        isWalking={isSpeaking} // While speaking, they are in the meeting zone, so we'll give them a walking/bouncing animation for liveliness
+                                        isWalking={isWalking}
                                         thoughtType={isSpeaking ? currentThought?.type : null}
                                         isThinking={isThinking}
                                         lookDirection={lookDirection}
