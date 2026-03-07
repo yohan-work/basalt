@@ -2,14 +2,13 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, MessageSquare, Lightbulb, Send, Coffee, Beer, Music } from 'lucide-react';
+import { Sparkles, MessageSquare, Send } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-
+import { AgentAvatar } from './AgentAvatar';
+import { OfficeLayout } from './OfficeLayout';
 
 interface AgentThought {
     id: string;
@@ -25,13 +24,11 @@ interface AgentDiscussionProps {
 }
 
 const AGENTS = [
-    { role: 'product-manager', name: 'PM', color: 'bg-[#ff00ff]', pixelIcon: '☕' },
-    { role: 'software-engineer', name: 'Dev', color: 'bg-[#00ffff]', pixelIcon: '💻' },
-    { role: 'qa', name: 'QA', color: 'bg-[#00ff00]', pixelIcon: '🔍' },
-    { role: 'main-agent', name: 'Lead', color: 'bg-[#ffff00]', pixelIcon: '👑' },
-    { role: 'style-architect', name: 'Style', color: 'bg-[#ff0066]', pixelIcon: '🎨' }
+    // Center Row (V4 Concept - Fixed px height to prevent overlapping with bottom modal)
+    { role: 'product-manager', name: 'PM', color: 'bg-green-500', baseColor: 'bg-green-500', zone: { idle: { left: '25%', top: '190px' }, meeting: { left: '25%', top: '190px' } } },
+    { role: 'main-agent', name: 'Lead', color: 'bg-green-500', baseColor: 'bg-green-500', zone: { idle: { left: '50%', top: '190px' }, meeting: { left: '50%', top: '190px' } } },
+    { role: 'software-engineer', name: 'Dev', color: 'bg-green-500', baseColor: 'bg-green-500', zone: { idle: { left: '75%', top: '190px' }, meeting: { left: '75%', top: '190px' } } }
 ];
-
 
 export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const [allThoughts, setAllThoughts] = useState<AgentThought[]>([]);
@@ -41,9 +38,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const [isSending, setIsSending] = useState(false);
     const meetingZoneRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
-    const [meetingSize, setMeetingSize] = useState({ width: 0, height: 0 });
 
-    // 1. Fetch and Subscribe
+    // 1. Fetch and Subscribe (SAME)
     useEffect(() => {
         if (!taskId) return;
 
@@ -56,9 +52,9 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
             if (!error && data) {
                 const thoughtLogs = data
-                    .filter(log => (log.metadata?.type === 'THOUGHT' || log.agent_role === 'user') &&
+                    .filter((log: any) => (log.metadata?.type === 'THOUGHT' || log.agent_role === 'user') &&
                         log.message !== "에이전트 그룹 논의 시작: 작업 범위를 확정하고 최적의 실행 계획을 수립합니다.")
-                    .map(log => ({
+                    .map((log: any) => ({
                         id: log.id,
                         agent: log.agent_role,
                         thought: log.message,
@@ -66,7 +62,6 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                         timestamp: new Date(log.created_at).getTime()
                     }));
                 setAllThoughts(thoughtLogs);
-                // History should be visible immediately
                 setVisibleThoughts(thoughtLogs);
                 setCurrentThoughtIndex(thoughtLogs.length - 1);
             }
@@ -84,7 +79,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                     table: 'Execution_Logs',
                     filter: `task_id=eq.${taskId}`
                 },
-                (payload) => {
+                (payload: any) => {
                     const newLog = payload.new;
                     if ((newLog.metadata?.type === 'THOUGHT' || newLog.agent_role === 'user') &&
                         newLog.message !== "에이전트 그룹 논의 시작: 작업 범위를 확정하고 최적의 실행 계획을 수립합니다.") {
@@ -97,18 +92,19 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                         };
 
                         if (newLog.agent_role === 'user') {
-                            // User messages should be visible immediately
-                            setAllThoughts(prev => {
-                                if (prev.some(t => t.id === newThought.id)) return prev;
+                            setAllThoughts((prev: AgentThought[]) => {
+                                if (prev.some((t: AgentThought) => t.id === newThought.id)) return prev;
                                 const updated = [...prev, newThought];
-                                setVisibleThoughts(v => [...v, newThought]);
+                                setVisibleThoughts((v: AgentThought[]) => {
+                                    if (v.some(t => t.id === newThought.id)) return v;
+                                    return [...v, newThought];
+                                });
                                 setCurrentThoughtIndex(updated.length - 1);
                                 return updated;
                             });
                         } else {
-                            // Agent thoughts will be drip-fed via the interval effect
-                            setAllThoughts(prev => {
-                                if (prev.some(t => t.id === newThought.id)) return prev;
+                            setAllThoughts((prev: AgentThought[]) => {
+                                if (prev.some((t: AgentThought) => t.id === newThought.id)) return prev;
                                 return [...prev, newThought];
                             });
                         }
@@ -128,7 +124,11 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
             if (currentThoughtIndex < allThoughts.length - 1) {
                 const nextIndex = currentThoughtIndex + 1;
                 setCurrentThoughtIndex(nextIndex);
-                setVisibleThoughts(prev => [...prev, allThoughts[nextIndex]]);
+                setVisibleThoughts((prev: AgentThought[]) => {
+                    const nextThought = allThoughts[nextIndex];
+                    if (prev.some(t => t.id === nextThought.id)) return prev;
+                    return [...prev, nextThought];
+                });
             }
         }, 4500);
 
@@ -141,18 +141,6 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
             scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
         }
     }, [visibleThoughts]);
-
-    // Resize observer for meeting zone
-    useEffect(() => {
-        const el = meetingZoneRef.current;
-        if (!el) return;
-        const ro = new ResizeObserver((entries) => {
-            const { width, height } = entries[0]?.contentRect ?? { width: 0, height: 0 };
-            setMeetingSize({ width, height });
-        });
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, []);
 
     // 3. User Interaction
     const handleSendMessage = async () => {
@@ -177,19 +165,20 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     };
 
     const currentThought = currentThoughtIndex >= 0 ? allThoughts[currentThoughtIndex] : null;
-    const progress = allThoughts.length > 0 ? ((currentThoughtIndex + 1) / allThoughts.length) * 100 : 0;
 
     if (allThoughts.length === 0) {
         return (
-            <div className="relative w-full h-[500px] bg-slate-950/40 rounded-2xl border border-slate-800/60 flex items-center justify-center backdrop-blur-xl">
+            <div className="relative w-full h-[500px] bg-slate-950/40 rounded-2xl border border-slate-800/60 flex items-center justify-center backdrop-blur-xl group">
                 <div className="text-center space-y-4 animate-in fade-in zoom-in duration-700">
                     <div className="relative inline-block">
-                        <div className="absolute inset-0 bg-blue-500/10 rounded-full blur-2xl animate-pulse" />
-                        <MessageSquare className="w-16 h-16 text-slate-800 relative" />
+                        <div className="absolute inset-0 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all duration-1000" />
+                        <motion.div animate={{ rotate: 360 }} transition={{ duration: 20, repeat: Infinity, ease: "linear" }}>
+                            <MessageSquare className="w-16 h-16 text-slate-700 relative" />
+                        </motion.div>
                     </div>
                     <div className="space-y-2">
-                        <p className="text-slate-400 text-sm font-medium">에이전트들이 회의실로 모이고 있습니다...</p>
-                        <p className="text-slate-600 text-xs">잠시만 기다려주세요</p>
+                        <p className="text-slate-400 text-sm font-black uppercase tracking-widest">Entering Virtual Workspace...</p>
+                        <p className="text-slate-600 text-[10px] font-mono">Synchronizing Neural Links</p>
                     </div>
                 </div>
             </div>
@@ -197,201 +186,162 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     }
 
     return (
-        <div className="flex flex-col gap-0 w-full h-[600px] animate-in fade-in duration-700 font-mono text-slate-300 bg-[#0a0a0f] overflow-hidden border-4 border-[#1a1a2e] shadow-[0_0_20px_rgba(0,0,0,0.5)]">
-            {/* Retro Neon Header */}
-            <div className="bg-[#1a1a2e] border-b-4 border-[#0f0f1a] p-3 shrink-0 relative overflow-hidden">
-                <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#ff00ff_1px,transparent_1px)] bg-[size:10px_10px]" />
-                <div className="flex items-center justify-between relative z-10">
-                    <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-black flex items-center justify-center border-2 border-[#ff00ff] shadow-[0_0_10px_#ff00ff]">
-                            <Music className="w-4 h-4 text-[#ff00ff] animate-pulse" />
+        <div className="flex flex-col gap-0 w-full h-[75vh] min-h-[600px] max-h-[850px] animate-in fade-in duration-700 font-sans text-slate-800 bg-[#f5f5f5] overflow-hidden border border-slate-200 rounded-xl shadow-md">
+            {/* Header - White Minimalist */}
+            <div className="bg-white border-b border-slate-200 p-4 shrink-0 relative z-10">
+                <div className="flex items-center justify-between relative">
+                    <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-slate-50 flex items-center justify-center border border-slate-200 rounded-lg shadow-sm">
+                            <Sparkles className="w-5 h-5 text-emerald-500" />
                         </div>
                         <div>
-                            <div className="flex items-center gap-2">
-                                <h3 className="text-[14px] font-black text-white italic tracking-tighter uppercase">
-                                    <span className="text-[#ff00ff] animate-pulse">Neon</span> <span className="text-[#00ffff]">Basalt Bar</span>
+                            <div className="flex items-center gap-3">
+                                <h3 className="text-[16px] font-black text-slate-800 tracking-tight">
+                                    Basalt <span className="text-slate-400 font-medium">Virtual Office</span>
                                 </h3>
-                                <Badge className="bg-[#ff00ff] text-white animate-bounce h-5 text-[8px] border-none px-1 rounded-none scale-90">
-                                    LIVE {currentThoughtIndex + 1}/{allThoughts.length}
-                                </Badge>
+                                <div className="flex items-center gap-2 px-2 py-0.5 bg-emerald-50 border border-emerald-100 rounded-full">
+                                    <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                                    <span className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider">Live</span>
+                                </div>
+                            </div>
+                            <p className="text-[10px] text-slate-500 font-medium">Session ID: {taskId?.slice(0, 8)}</p>
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Progress</div>
+                        <div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <motion.div
+                                className="h-full bg-emerald-400"
+                                initial={{ width: 0 }}
+                                animate={{ width: `${((currentThoughtIndex + 1) / allThoughts.length) * 100}%` }}
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div className="flex flex-1 min-h-0 overflow-hidden relative">
+                {/* Background Office Zone (V4 - Full Width) */}
+                <div className="w-full relative bg-white overflow-hidden h-full flex flex-col">
+                    {/* The Office Layout Component (Contains Brick Wall & Wooden Floor) */}
+                    <div className="absolute inset-0 pointer-events-none z-0">
+                        <OfficeLayout />
+                    </div>
+
+                    {/* Agent Avatars Layer */}
+                    <div ref={meetingZoneRef} className="relative h-full w-full z-10">
+                        {AGENTS.map((agent) => {
+                            const isSpeaking = currentThought?.agent === agent.role;
+                            const pos = agent.zone.idle;
+
+                            return (
+                                <motion.div
+                                    key={agent.role}
+                                    className="absolute"
+                                    animate={{
+                                        left: pos.left,
+                                        top: pos.top,
+                                        zIndex: isSpeaking ? 40 : 20
+                                    }}
+                                    transition={{ type: "spring", stiffness: 70, damping: 15 }}
+                                    style={{ transform: 'translate(-50%, -50%)' }}
+                                >
+                                    <AgentAvatar
+                                        role={agent.role}
+                                        name={agent.name}
+                                        color={agent.baseColor}
+                                        isSpeaking={isSpeaking}
+                                        isWalking={false}
+                                    />
+                                </motion.div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* V4 Floating Chat Modal (Bottom Center) */}
+                <div className="absolute inset-x-0 bottom-0 z-50 p-4 pointer-events-none flex justify-center pb-6">
+                    <div className="w-full max-w-4xl bg-white/95 backdrop-blur-xl rounded-2xl shadow-[0_-10px_40px_rgba(0,0,0,0.1)] border border-slate-200 pointer-events-auto flex flex-col overflow-hidden">
+
+                        {/* Conversation Log (Floating Area) */}
+                        <div
+                            ref={scrollContainerRef}
+                            className="max-h-[160px] overflow-y-auto p-4 space-y-4 custom-scrollbar"
+                        >
+                            {visibleThoughts.length === 0 ? (
+                                <div className="text-center text-slate-400 text-sm py-4">Waiting for agents to speak...</div>
+                            ) : (
+                                visibleThoughts.slice(-8).map((log: AgentThought, i: number) => { // 최근 8개만 렌더링
+                                    const isUser = log.agent === 'user';
+                                    const agentData = isUser ? { name: 'YOU', baseColor: 'bg-emerald-500' } : (AGENTS.find(a => a.role === log.agent) || AGENTS[0]);
+
+                                    return (
+                                        <motion.div
+                                            key={log.id}
+                                            initial={{ opacity: 0, y: 10 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
+                                        >
+                                            {/* Avatar Circle */}
+                                            <div className="shrink-0 flex flex-col items-center">
+                                                <div className="w-8 h-8 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center p-1 relative">
+                                                    <div className={`w-full h-full rounded-full ${agentData.baseColor}`} />
+                                                    {log.id === currentThought?.id && !isUser && (
+                                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full animate-pulse" />
+                                                    )}
+                                                </div>
+                                                <div className="text-[10px] font-bold text-slate-600 mt-1 uppercase">
+                                                    {agentData.name}
+                                                </div>
+                                            </div>
+
+                                            {/* Message Bubble */}
+                                            <div className={`max-w-[85%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
+                                                {!isUser && (
+                                                    <Badge variant="secondary" className="mb-1 text-[10px] bg-slate-100 text-slate-500 hover:bg-slate-200 px-2 py-0">
+                                                        {log.type}
+                                                    </Badge>
+                                                )}
+                                                <div className={`text-[14px] leading-relaxed font-medium ${isUser ? 'text-emerald-900 bg-emerald-50 px-4 py-2 rounded-2xl rounded-tr-none' : 'text-slate-700 bg-slate-50 px-4 py-2 rounded-2xl rounded-tl-none border border-slate-100'}`}>
+                                                    {log.thought}
+                                                </div>
+                                            </div>
+                                        </motion.div>
+                                    );
+                                })
+                            )}
+                        </div>
+
+                        {/* Input Area */}
+                        <div className="p-4 border-t border-slate-100 bg-white/50">
+                            <div className="relative flex items-center">
+                                <Input
+                                    value={userInput}
+                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUserInput(e.target.value)}
+                                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleSendMessage()}
+                                    placeholder="메시지를 입력하여 논의에 참여하세요..."
+                                    className="h-12 w-full pl-5 pr-14 text-[13px] bg-white border border-slate-300 text-slate-800 placeholder:text-slate-400 rounded-full focus:bg-white focus:border-emerald-400 focus:ring-4 focus:ring-emerald-50 transition-all font-medium shadow-sm"
+                                    disabled={isSending}
+                                />
+                                <Button
+                                    size="sm"
+                                    onClick={handleSendMessage}
+                                    disabled={isSending || !userInput.trim()}
+                                    className="absolute right-1.5 h-9 w-10 p-0 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full transition-all active:scale-95 flex items-center justify-center shadow-sm disabled:opacity-50 disabled:bg-slate-300"
+                                >
+                                    <Send className="w-4 h-4 ml-0.5" />
+                                </Button>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div className="flex flex-1 min-h-0 overflow-hidden">
-                {/* Left: Pixel Street Zone */}
-                <div className="flex-[1.4] relative bg-[#050510] border-r-4 border-[#1a1a2e] flex items-center justify-center p-4 overflow-hidden h-full">
-                    {/* Retro Grid Floor (2D) */}
-                    <div className="absolute bottom-0 inset-x-0 h-32 opacity-30 select-none z-0">
-                        <div className="w-full h-full" style={{
-                            backgroundImage: 'linear-gradient(#ff00ff 1px, transparent 1px), linear-gradient(90deg, #ff00ff 1px, transparent 1px)',
-                            backgroundSize: '30px 30px',
-                            maskImage: 'linear-gradient(to top, black, transparent)'
-                        }} />
-                    </div>
-
-                    {/* Bar Counter / Table (Pixel Style) */}
-                    <div className="absolute inset-x-10 bottom-24 h-4 z-10 bg-[#1a1a2e] border-t-2 border-b-2 border-pink-500 shadow-[0_0_15px_rgba(255,0,255,0.4)]" />
-
-                    {/* Background Neon Signs */}
-                    <div className="absolute top-10 right-10 opacity-40 select-none">
-                        <div className="text-[20px] font-black text-[#00ffff] blur-[1px] rotate-12 flex items-center gap-2 border-2 border-dashed border-[#00ffff] p-2">
-                            <Coffee className="w-5 h-5" /> OPEN
-                        </div>
-                    </div>
-                    <div className="absolute top-20 left-10 opacity-30 select-none">
-                        <div className="text-[16px] font-black text-[#ff0066] -rotate-6 flex items-center gap-2">
-                            <Beer className="w-5 h-5" /> 24H SERVICE
-                        </div>
-                    </div>
-
-                    <div ref={meetingZoneRef} className="relative h-full w-full z-20">
-                        {AGENTS.map((agent, idx) => {
-                            // Lay out agents along the "bar counter" or in a freeform street way
-                            const isOdd = idx % 2 === 0;
-                            const xOffset = (idx - 2) * 100;
-                            const yOffset = isOdd ? -40 : 20;
-
-                            const isSpeaking = currentThought?.agent === agent.role;
-
-                            return (
-                                <motion.div
-                                    key={agent.role}
-                                    className="absolute"
-                                    style={{
-                                        left: `calc(50% + ${xOffset}px)`,
-                                        top: `calc(70% + ${yOffset}px)`,
-                                        transform: 'translate(-50%, -50%)'
-                                    }}
-                                    animate={{
-                                        y: isSpeaking ? [0, -10, 0] : 0,
-                                        scale: isSpeaking ? 1.1 : 1
-                                    }}
-                                    transition={isSpeaking ? { repeat: Infinity, duration: 2 } : {}}
-                                >
-                                    <div className="flex flex-col items-center gap-2">
-                                        <div className={`
-                                            relative w-16 h-16 transition-all duration-300
-                                            flex flex-col items-center justify-center overflow-hidden
-                                            border-4 ${isSpeaking ? 'border-[#00ffff] shadow-[0_0_15px_#00ffff]' : 'border-slate-800 opacity-70'}
-                                            bg-black
-                                        `}>
-                                            {/* Pixel Character Body */}
-                                            <div className="text-2xl mb-1">{agent.pixelIcon}</div>
-                                            <div className="text-[10px] font-black text-white bg-black/50 px-1">{agent.name}</div>
-
-                                            {/* Retro Scanline effect */}
-                                            <div className="absolute inset-0 pointer-events-none opacity-20 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.25)_50%),linear-gradient(90deg,rgba(255,0,0,0.06),rgba(0,255,0,0.02),rgba(0,0,255,0.06))] bg-[size:100%_4px,3px_100%]" />
-                                        </div>
-                                    </div>
-                                </motion.div>
-                            );
-                        })}
-
-                        {/* Speech Bubble - Classic RPG Style */}
-                        <AnimatePresence mode="wait">
-                            {currentThought && (
-                                <motion.div
-                                    key={currentThought.id}
-                                    initial={{ opacity: 0, scale: 0.8, y: 10 }}
-                                    animate={{ opacity: 1, scale: 1, y: 0 }}
-                                    exit={{ opacity: 0, scale: 0.8 }}
-                                    className="absolute inset-x-8 top-16 z-50"
-                                >
-                                    <div className="relative bg-white text-black p-4 border-4 border-black shadow-[4px_4px_0_#ff00ff]">
-                                        {/* Pixel Bubble Tail */}
-                                        <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-8 h-8 bg-white border-r-4 border-b-4 border-black rotate-45" />
-
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <span className="text-[10px] bg-black text-white px-1 font-black uppercase">
-                                                {AGENTS.find(a => a.role === currentThought.agent)?.name}
-                                            </span>
-                                            <div className="flex-1 h-0.5 bg-black" />
-                                        </div>
-                                        <p className="text-[12px] leading-tight font-bold font-mono">
-                                            {currentThought.thought}
-                                        </p>
-                                    </div>
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
-                    </div>
-                </div>
-
-                {/* Right: Retro Arcade Log */}
-                <div className="flex-1 flex flex-col bg-[#050510] overflow-hidden h-full">
-                    <div className="px-3 py-2 border-b-4 border-[#1a1a2e] bg-[#0a0a1a]">
-                        <h3 className="text-[10px] font-black text-[#ff00ff] uppercase italic">System.Log_Disk</h3>
-                    </div>
-                    <div
-                        ref={scrollContainerRef}
-                        className="flex-1 overflow-y-auto p-3 space-y-4 custom-scrollbar"
-                    >
-                        {visibleThoughts.map((log, i) => {
-                            const isUser = log.agent === 'user';
-                            const agent = isUser ? { name: 'YOU', color: 'bg-white' } : (AGENTS.find(a => a.role === log.agent) || AGENTS[0]);
-
-                            return (
-                                <motion.div
-                                    key={log.id}
-                                    initial={{ opacity: 0, x: isUser ? 10 : -10 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    className={`relative p-2 border-2 ${isUser ? 'border-white bg-white/5 ml-4' : 'border-[#1a1a2e] bg-[#0a0a1a] mr-4'}`}
-                                >
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className={`text-[9px] font-black uppercase ${isUser ? 'text-white' : 'text-[#00ffff]'}`}>
-                                            [{agent.name}]
-                                        </span>
-                                        <span className="text-[7px] text-slate-700 font-mono flex-1 text-right">0x{log.id.slice(0, 4)}</span>
-                                    </div>
-                                    <div className={`text-[11px] leading-tight ${isUser ? 'text-white' : 'text-slate-400'}`}>
-                                        {log.thought}
-                                    </div>
-                                </motion.div>
-                            );
-                        })}
-                    </div>
-
-                    {/* Arcade Input */}
-                    <div className="p-3 border-t-4 border-[#1a1a2e] bg-[#0a0a1a]">
-                        <div className="flex gap-2">
-                            <Input
-                                value={userInput}
-                                onChange={(e) => setUserInput(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                                placeholder="[INPUT MESSAGE...]"
-                                className="h-10 text-[12px] bg-black border-2 border-slate-700 text-[#00ff00] placeholder:text-slate-800 rounded-none focus-visible:ring-0 focus-visible:border-[#00ff00]"
-                                disabled={isSending}
-                            />
-                            <Button
-                                size="sm"
-                                onClick={handleSendMessage}
-                                disabled={isSending || !userInput.trim()}
-                                className="h-10 w-12 p-0 bg-[#00ff00] hover:bg-[#00cc00] text-black rounded-none shadow-[4px_4px_0_#1a1a2e] transition-transform active:translate-x-1 active:translate-y-1"
-                            >
-                                <Send className="w-5 h-5" />
-                            </Button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <style jsx global>{`
-                .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-                .custom-scrollbar::-webkit-scrollbar-track { background: #050510; }
-                .custom-scrollbar::-webkit-scrollbar-thumb { background: #1a1a2e; }
-
-                @keyframes flicker {
-                    0% { opacity: 0.9; }
-                    5% { opacity: 0.8; }
-                    10% { opacity: 1; }
-                    15% { opacity: 0.9; }
-                    100% { opacity: 1; }
-                }
-
-                .animate-flicker { animation: flicker 2s infinite; }
+                .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+                .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
             `}</style>
         </div>
     );
