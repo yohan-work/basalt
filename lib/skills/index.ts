@@ -156,18 +156,40 @@ export async function consult_agents(
 ) {
     try {
         const requiredAgents = taskAnalysis.required_agents || [];
-        const agents = availableAgents.filter(a => requiredAgents.includes(a.role) || a.role === 'main-agent');
+        const CORE_UI_AGENTS = ['product-manager', 'main-agent', 'software-engineer', 'style-architect'];
+        const activeRoles = Array.from(new Set([...requiredAgents, ...CORE_UI_AGENTS]));
+        const agents = availableAgents.filter(a => activeRoles.includes(a.role));
         const agentsList = agents.map(a => `- ${a.name} (Role: ${a.role}, Expertise: ${a.skills.join(', ')})`).join('\n');
 
         const contextDiscussion = pastThoughts.length > 0
             ? `Previous Discussion History:\n${pastThoughts.map(t => `[${t.agent_role || t.agent}] ${t.message || t.thought}`).join('\n')}\n`
             : '';
 
+        // Detect targeted agent from the last user message
+        const lastUserThought = pastThoughts.filter(t => t.agent_role === 'user').pop();
+        const lastUserMessage = lastUserThought ? (lastUserThought.message || lastUserThought.thought || '') : '';
+
+        let targetedAgentRole = null;
+        const msgLower = lastUserMessage.toLowerCase();
+        if (msgLower.includes('디자이너') || msgLower.includes('스타일') || msgLower.includes('디자인')) {
+            targetedAgentRole = 'style-architect';
+        } else if (msgLower.includes('엔지니어') || msgLower.includes('개발') || msgLower.includes('프론트') || msgLower.includes('백엔드')) {
+            targetedAgentRole = 'software-engineer';
+        } else if (msgLower.includes('pm') || msgLower.includes('기획') || msgLower.includes('피엠')) {
+            targetedAgentRole = 'product-manager';
+        } else if (msgLower.includes('리드') || msgLower.includes('팀장') || msgLower.includes('메인')) {
+            targetedAgentRole = 'main-agent';
+        }
+
+        const targetedRule = targetedAgentRole
+            ? `\n\nCRITICAL DIRECTIVE: The user has explicitly addressed the ${targetedAgentRole}. You MUST ONLY generate exactly ONE thought, and its "agent" field MUST BE "${targetedAgentRole}". DO NOT generate thoughts for any other agent.`
+            : '';
+
         const systemPrompt = `You are a group of AI agents brainstorming a technical solution.
 Generate a realistic dialogue between the following agents about the task at hand.
 ${pastThoughts.length > 0 ? 'Continue the existing discussion based on the history provided.' : ''}
 
-Available Agents in this discussion:
+Available Agents in this discussion (USE THESE EXACT ROLES):
 ${agentsList}
 
 Current Codebase Context:
@@ -175,24 +197,24 @@ ${codebaseContext}
 
 Task Analysis:
 ${JSON.stringify(taskAnalysis)}
-
-${contextDiscussion}
+${contextDiscussion}${targetedRule}
 
 Instructions:
-1. Generate 3-5 additional distinct thoughts/messages.
-2. Each message should be from one of the available agents.
-3. The discussion should focus on responding to the latest points or the user's feedback if present.
+1. Analyze the latest user message from the Previous Discussion History.
+2. TARGETED RESPONSE RULE: If the user explicitly addresses a specific role, ONLY that role should respond with a single thought. (See CRITICAL DIRECTIVE above).
+3. GENERAL DISCUSSION RULE: If no specific agent is addressed, generate 1-3 collaborative thoughts from different agents discussing the topic.
 4. The tone should be professional and collaborative.
 5. MANDATORY: All thoughts/messages MUST BE IN KOREAN.
 6. Provide the output as a JSON object with the following schema:
    {
      "thoughts": [
-       { "agent": "software-engineer", "thought": "메시지 내용...", "type": "idea" | "critique" | "agreement" },
-       ...
+       { "agent": "exact-role-slug-from-available-agents", "thought": "메시지 내용...", "type": "idea" | "critique" | "agreement" }
      ]
    }
 
-중요: 모든 대화 내용은 한국어로 작성하십시오.
+중요 (CRITICAL):
+- 호칭(예: 디자이너, 스타일 아키텍트, PM, 개발자 등)을 통해 질문이 특정 인물을 향해 있다면 프롬프트의 지시(CRITICAL DIRECTIVE)에 따라 **반드시 그 에이전트만** 대답하게 하세요. 다른 에이전트가 끼어들면 안 됩니다.
+- 대답 끝에 반드시 다른 사람에게 질문을 던져 대화를 이어가세요.
 `;
 
         const response = await llm.generateJSONStream(

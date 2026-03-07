@@ -27,16 +27,20 @@ interface AgentDiscussionProps {
 const AGENTS = [
     // Idle: Spread out in the back/sides. Meeting: Center front.
     {
-        role: 'product-manager', name: 'PM', color: 'bg-green-500', baseColor: 'bg-green-500',
+        role: 'product-manager', name: 'PM', color: 'bg-emerald-500', baseColor: 'bg-emerald-500',
         zone: { idle: { left: '15%', top: '150px' }, meeting: { left: '30%', top: '220px' } }
     },
     {
-        role: 'main-agent', name: 'Lead', color: 'bg-green-500', baseColor: 'bg-green-500',
-        zone: { idle: { left: '50%', top: '120px' }, meeting: { left: '50%', top: '230px' } }
+        role: 'main-agent', name: 'Lead', color: 'bg-blue-500', baseColor: 'bg-blue-500',
+        zone: { idle: { left: '40%', top: '120px' }, meeting: { left: '50%', top: '230px' } }
     },
     {
-        role: 'software-engineer', name: 'Dev', color: 'bg-green-500', baseColor: 'bg-green-500',
-        zone: { idle: { left: '85%', top: '150px' }, meeting: { left: '70%', top: '220px' } }
+        role: 'software-engineer', name: 'Dev', color: 'bg-indigo-500', baseColor: 'bg-indigo-500',
+        zone: { idle: { left: '60%', top: '120px' }, meeting: { left: '70%', top: '220px' } }
+    },
+    {
+        role: 'designer', name: 'Design', color: 'bg-pink-500', baseColor: 'bg-pink-500',
+        zone: { idle: { left: '85%', top: '150px' }, meeting: { left: '80%', top: '200px' } }
     }
 ];
 
@@ -46,6 +50,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const [currentThoughtIndex, setCurrentThoughtIndex] = useState(-1);
     const [userInput, setUserInput] = useState('');
     const [isSending, setIsSending] = useState(false);
+    const [isUserFocused, setIsUserFocused] = useState(false);
+    const [showInteractions, setShowInteractions] = useState<{ id: number, x: number }[]>([]);
     const meetingZoneRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [chatPortalTarget, setChatPortalTarget] = useState<HTMLElement | null>(null);
@@ -161,6 +167,12 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const handleSendMessage = async () => {
         if (!userInput.trim() || isSending) return;
 
+        const newId = Date.now();
+        setShowInteractions(prev => [...prev, { id: newId, x: 50 + (Math.random() * 20 - 10) }]);
+        setTimeout(() => {
+            setShowInteractions(prev => prev.filter(p => p.id !== newId));
+        }, 800);
+
         setIsSending(true);
         try {
             const res = await fetch('/api/agent/discuss', {
@@ -180,6 +192,38 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     };
 
     const currentThought = currentThoughtIndex >= 0 ? allThoughts[currentThoughtIndex] : null;
+
+    const activeAgentData = React.useMemo(() => {
+        if (!currentThought || currentThought.agent === 'user') return null;
+        const currentAgentStr = currentThought.agent.toLowerCase();
+        for (const agent of AGENTS) {
+            if (currentAgentStr === agent.role.toLowerCase() || (agent.role === 'designer' && currentAgentStr === 'style-architect')) return agent;
+            if (agent.role === 'main-agent' && (currentAgentStr.includes('lead') || currentAgentStr.includes('main'))) return agent;
+            if (agent.role === 'software-engineer' && (currentAgentStr.includes('dev') || currentAgentStr.includes('software'))) return agent;
+            if (agent.role === 'designer' && (currentAgentStr.includes('design') || currentAgentStr.includes('style'))) return agent;
+        }
+        if (!currentAgentStr.includes('lead') && !currentAgentStr.includes('dev') && !currentAgentStr.includes('design') && !currentAgentStr.includes('main') && !currentAgentStr.includes('software') && !currentAgentStr.includes('style')) {
+            return AGENTS[0];
+        }
+        return null;
+    }, [currentThought]);
+
+    const nextThought = currentThoughtIndex + 1 < allThoughts.length ? allThoughts[currentThoughtIndex + 1] : null;
+
+    const nextAgentData = React.useMemo(() => {
+        if (!nextThought || nextThought.agent === 'user') return null;
+        const nextAgentStr = nextThought.agent.toLowerCase();
+        for (const agent of AGENTS) {
+            if (nextAgentStr === agent.role.toLowerCase() || (agent.role === 'designer' && nextAgentStr === 'style-architect')) return agent;
+            if (agent.role === 'main-agent' && (nextAgentStr.includes('lead') || nextAgentStr.includes('main'))) return agent;
+            if (agent.role === 'software-engineer' && (nextAgentStr.includes('dev') || nextAgentStr.includes('software'))) return agent;
+            if (agent.role === 'designer' && (nextAgentStr.includes('design') || nextAgentStr.includes('style'))) return agent;
+        }
+        if (!nextAgentStr.includes('lead') && !nextAgentStr.includes('dev') && !nextAgentStr.includes('design') && !nextAgentStr.includes('main') && !nextAgentStr.includes('software') && !nextAgentStr.includes('style')) {
+            return AGENTS[0];
+        }
+        return null;
+    }, [nextThought]);
 
     if (allThoughts.length === 0) {
         return (
@@ -243,20 +287,38 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                         <OfficeLayout />
                     </div>
 
+                    {/* User Interaction Beams Layer */}
+                    <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden rounded-b-xl">
+                        <AnimatePresence>
+                            {showInteractions.map(interaction => (
+                                <motion.div
+                                    key={interaction.id}
+                                    initial={{ opacity: 0, top: '100%', left: `${interaction.x}%`, x: '-50%', scale: 0 }}
+                                    animate={{ opacity: [0, 1, 1, 0], top: ['100%', '35%'], scale: [0.5, 1, 1.2, 0.8] }}
+                                    transition={{ duration: 0.8, ease: "easeOut" }}
+                                    className="absolute z-50 pointer-events-none origin-bottom"
+                                >
+                                    <div className="w-1.5 h-24 bg-gradient-to-t from-transparent via-cyan-400 to-cyan-200 rounded-full blur-[2px] shadow-[0_0_20px_rgba(34,211,238,0.8)]" />
+                                </motion.div>
+                            ))}
+                        </AnimatePresence>
+                    </div>
+
                     {/* Agent Avatars Layer */}
                     <div ref={meetingZoneRef} className="relative h-full w-full z-10">
                         {AGENTS.map((agent) => {
-                            const isSpeaking = currentThought?.agent === agent.role;
-                            // Determine target position based on speaking state
+                            const isSpeaking = activeAgentData?.role === agent.role;
                             const targetPos = isSpeaking ? agent.zone.meeting : agent.zone.idle;
 
-                            // To simulate walking, we could use a state, but for a declarative approach with Framer Motion,
-                            // we can rely on `isWalking` being true ONLY when the position is changing.
-                            // A simple way is to treat `isSpeaking` as the trigger to walk to the center.
-                            // For a more refined effect, we'll keep `isWalking` simple for now: true if speaking (as they walk out and stay active).
-                            // In a real robust system, we'd track previous positions, but let's use `isSpeaking` to toggle walking briefly or just use frame-motion onUpdate.
-                            // For now, let's pass `isWalking={isSpeaking}` to see the bounce when active, or we can use a timeout trick.
-                            // Actually, Let's add a temporary `movingAgents` state if needed, or simply let `framer-motion` handle the translation.
+                            let lookDirection: 'left' | 'right' | 'forward' = 'forward';
+                            if (!isUserFocused && activeAgentData && !isSpeaking) {
+                                const myLeft = parseInt(agent.zone.meeting.left);
+                                const activeLeft = parseInt(activeAgentData.zone.meeting.left);
+                                if (myLeft < activeLeft) lookDirection = 'right';
+                                else if (myLeft > activeLeft) lookDirection = 'left';
+                            }
+
+                            const isThinking = nextAgentData?.role === agent.role;
 
                             return (
                                 <motion.div
@@ -276,6 +338,9 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                         color={agent.baseColor}
                                         isSpeaking={isSpeaking}
                                         isWalking={isSpeaking} // While speaking, they are in the meeting zone, so we'll give them a walking/bouncing animation for liveliness
+                                        thoughtType={isSpeaking ? currentThought?.type : null}
+                                        isThinking={isThinking}
+                                        lookDirection={lookDirection}
                                     />
                                 </motion.div>
                             );
@@ -303,7 +368,29 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                             ) : (
                                 visibleThoughts.map((log: AgentThought, i: number) => { // 전체 렌더링으로 변경
                                     const isUser = log.agent === 'user';
-                                    const agentData = isUser ? { name: 'YOU', baseColor: 'bg-emerald-500' } : (AGENTS.find(a => a.role === log.agent) || AGENTS[0]);
+
+                                    // Default mapping logic
+                                    let agentData: any = isUser ? { name: 'YOU', baseColor: 'bg-emerald-500', role: 'user' } : null;
+
+                                    if (!isUser) {
+                                        // Try exact match
+                                        agentData = AGENTS.find(a => a.role.toLowerCase() === log.agent.toLowerCase());
+                                        // Fallback by keyword parsing or index
+                                        if (!agentData) {
+                                            if (log.agent.toLowerCase().includes('lead') || log.agent.toLowerCase().includes('main')) {
+                                                agentData = AGENTS.find(a => a.role === 'main-agent');
+                                            } else if (log.agent.toLowerCase().includes('dev') || log.agent.toLowerCase().includes('software')) {
+                                                agentData = AGENTS.find(a => a.role === 'software-engineer');
+                                            } else if (log.agent.toLowerCase().includes('design') || log.agent.toLowerCase().includes('style')) {
+                                                agentData = AGENTS.find(a => a.role === 'designer');
+                                            } else {
+                                                // If still not matched, fallback to PM
+                                                agentData = AGENTS[0];
+                                            }
+                                        }
+                                    }
+                                    // TypeScript fallback
+                                    if (!agentData) agentData = AGENTS[0];
 
                                     return (
                                         <motion.div
@@ -349,6 +436,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                     value={userInput}
                                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUserInput(e.target.value)}
                                     onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleSendMessage()}
+                                    onFocus={() => setIsUserFocused(true)}
+                                    onBlur={() => setIsUserFocused(false)}
                                     placeholder="메시지 입력..."
                                     className="h-10 w-full pl-4 pr-12 text-[13px] bg-slate-50 border border-slate-200 text-slate-800 placeholder:text-slate-400 rounded-full focus:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-50 transition-all font-medium shadow-inner"
                                     disabled={isSending}
