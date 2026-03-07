@@ -56,6 +56,12 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const [isUserFocused, setIsUserFocused] = useState(false);
     const [showInteractions, setShowInteractions] = useState<{ id: number, x: number }[]>([]);
     const [movingAgents, setMovingAgents] = useState<Set<string>>(new Set());
+
+    // User Agency State
+    const [userPos, setUserPos] = useState({ x: 50, y: 85 });
+    const [userDir, setUserDir] = useState<'left' | 'right' | 'forward'>('forward');
+    const [isUserWalking, setIsUserWalking] = useState(false);
+
     const meetingZoneRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [chatPortalTarget, setChatPortalTarget] = useState<HTMLElement | null>(null);
@@ -160,6 +166,39 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
         return () => clearInterval(interval);
     }, [allThoughts, currentThoughtIndex]);
 
+    // 3. WASD Movement Logic
+    useEffect(() => {
+        if (isUserFocused) return; // Disable movement if user is typing
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            const step = 2.5; // Movement speed %
+            let moved = false;
+            setUserPos(prev => {
+                let newX = prev.x;
+                let newY = prev.y;
+
+                if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') { newY -= step; moved = true; }
+                if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') { newY += step; moved = true; }
+                if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') { newX -= step; moved = true; setUserDir('left'); }
+                if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') { newX += step; moved = true; setUserDir('right'); }
+
+                if (moved) {
+                    setIsUserWalking(true);
+                    // Clear walking animation after short delay if no more keys
+                    setTimeout(() => setIsUserWalking(false), 200);
+
+                    // Clamp to bounds to prevent walking off-screen
+                    newX = Math.max(5, Math.min(95, newX));
+                    newY = Math.max(5, Math.min(95, newY));
+                }
+                return { x: newX, y: newY };
+            });
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isUserFocused]);
+
     // Auto-scroll log
     useEffect(() => {
         if (scrollContainerRef.current) {
@@ -228,6 +267,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
         }
         return null;
     }, [nextThought]);
+
+
 
     if (allThoughts.length === 0) {
         return (
@@ -308,6 +349,23 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                         </AnimatePresence>
                     </div>
 
+                    {/* User Interaction Beams Layer */}
+                    <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden rounded-b-xl">
+                        <AnimatePresence>
+                            {showInteractions.map(interaction => (
+                                <motion.div
+                                    key={interaction.id}
+                                    initial={{ opacity: 0, top: '100%', left: `${interaction.x}%`, x: '-50%', scale: 0 }}
+                                    animate={{ opacity: [0, 1, 1, 0], top: ['100%', '35%'], scale: [0.5, 1, 1.2, 0.8] }}
+                                    transition={{ duration: 0.8, ease: "easeOut" }}
+                                    className="absolute z-50 pointer-events-none origin-bottom"
+                                >
+                                    <div className="w-1.5 h-24 bg-gradient-to-t from-transparent via-cyan-400 to-cyan-200 rounded-full blur-[2px] shadow-[0_0_20px_rgba(34,211,238,0.8)]" />
+                                </motion.div>
+                            ))}
+                        </AnimatePresence>
+                    </div>
+
                     {/* Agent Avatars Layer */}
                     <div ref={meetingZoneRef} className="relative h-full w-full z-10">
                         {AGENTS.map((agent) => {
@@ -352,6 +410,27 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                 </motion.div>
                             );
                         })}
+
+                        {/* User Avatar */}
+                        <motion.div
+                            className="absolute pointer-events-none"
+                            animate={{ left: `${userPos.x}%`, top: `${userPos.y}%`, zIndex: 100 }}
+                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                            style={{ transform: 'translate(-50%, -50%)' }}
+                        >
+                            <AgentAvatar
+                                role="user"
+                                name="YOU"
+                                color="bg-emerald-600"
+                                isSpeaking={false}
+                                isWalking={isUserWalking}
+                                thoughtType={null}
+                                isThinking={false}
+                                lookDirection={userDir}
+                            />
+                            {/* Proximity Radius Debug/Hint (Optional visual) */}
+                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[30vw] h-[30vw] min-w-[300px] min-h-[300px] rounded-full border-2 border-emerald-400/10 bg-emerald-400/5 -z-10 pointer-events-none"></div>
+                        </motion.div>
                     </div>
                 </div>
 
@@ -360,9 +439,15 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                     <div className="w-full h-full bg-slate-50 border border-slate-200 flex flex-col relative z-[9999] shadow-2xl rounded-xl overflow-hidden pointer-events-auto">
 
                         {/* Header for Chat */}
-                        <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center shadow-sm z-10">
-                            <MessageSquare className="w-4 h-4 text-emerald-500 mr-2" />
-                            <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Live Discussion</span>
+                        <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center justify-between shadow-sm z-10">
+                            <div className="flex items-center">
+                                <MessageSquare className="w-4 h-4 text-emerald-500 mr-2" />
+                                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Live Discussion</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
+                                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Chat: ON</span>
+                            </div>
                         </div>
 
                         {/* Conversation Log */}
@@ -370,14 +455,23 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                             ref={scrollContainerRef}
                             className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-slate-50"
                         >
-                            {visibleThoughts.length === 0 ? (
-                                <div className="text-center text-slate-400 text-sm py-4">Waiting for agents to speak...</div>
-                            ) : (
-                                visibleThoughts.map((log: AgentThought, i: number) => { // 전체 렌더링으로 변경
+                            {(() => {
+                                if (visibleThoughts.length === 0) {
+                                    return (
+                                        <div className="text-center text-slate-400 text-sm py-8 flex flex-col items-center gap-2">
+                                            <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">
+                                                <MessageSquare className="w-4 h-4 text-slate-500" />
+                                            </div>
+                                            <p className="font-bold">아직 대화가 없습니다.</p>
+                                        </div>
+                                    );
+                                }
+
+                                return visibleThoughts.map((log: AgentThought, i: number) => {
                                     const isUser = log.agent === 'user';
 
                                     // Default mapping logic
-                                    let agentData: any = isUser ? { name: 'YOU', baseColor: 'bg-emerald-500', role: 'user' } : null;
+                                    let agentData: any = isUser ? { name: 'YOU', baseColor: 'bg-emerald-600', role: 'user' } : null;
 
                                     if (!isUser) {
                                         // Try exact match
@@ -402,8 +496,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                     return (
                                         <motion.div
                                             key={log.id}
-                                            initial={{ opacity: 0, y: 10 }}
-                                            animate={{ opacity: 1, y: 0 }}
+                                            initial={{ opacity: 0, scale: 0.95 }}
+                                            animate={{ opacity: 1, scale: 1 }}
                                             className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
                                         >
                                             {/* Avatar Circle */}
@@ -432,8 +526,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                             </div>
                                         </motion.div>
                                     );
-                                })
-                            )}
+                                });
+                            })()}
                         </div>
 
                         {/* Input Area */}
