@@ -10,9 +10,10 @@ interface AgentAvatarProps {
     thoughtType?: 'idea' | 'critique' | 'agreement' | null;
     isThinking?: boolean;
     lookDirection?: 'left' | 'right' | 'forward';
+    emote?: 'thumbsup' | 'heart' | 'question' | null;
 }
 
-export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, thoughtType, isThinking, lookDirection = 'forward' }: AgentAvatarProps) => {
+export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, thoughtType, isThinking, lookDirection = 'forward', emote = null }: AgentAvatarProps) => {
 
     const pantsColor = "bg-[#1e40af]"; // Lego classic blue pants
     const shoeColor = "bg-[#0f172a]";
@@ -52,7 +53,7 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, thoughtT
             >
                 {/* Floating Acton Effects */}
                 <AnimatePresence>
-                    {isThinking && !isSpeaking && (
+                    {isThinking && !isSpeaking && !emote && (
                         <motion.div
                             initial={{ opacity: 0, scale: 0.5, y: 10 }}
                             animate={{ opacity: 1, scale: 1, y: -20 }}
@@ -84,6 +85,18 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, thoughtT
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" /></svg>
                         </motion.div>
                     )}
+                    {emote && (
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.5, y: 10 }}
+                            animate={{ opacity: 1, scale: 1, y: -25 }}
+                            exit={{ opacity: 0, scale: 0.5, y: -10 }}
+                            className="absolute -top-6 z-50 text-2xl drop-shadow-md"
+                        >
+                            {emote === 'thumbsup' && '👍'}
+                            {emote === 'heart' && '❤️'}
+                            {emote === 'question' && '❓'}
+                        </motion.div>
+                    )}
                 </AnimatePresence>
 
                 {/* LEGO BODY WRAPPER */}
@@ -96,12 +109,12 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, thoughtT
                         <div className={`w-3 h-1.5 ${skinColor} rounded-t-sm border-x border-t border-black/20`} /> {/* Lego stud */}
                         <div className={`w-9 h-9 ${skinColor} rounded-xl border-2 border-black/20 shadow-sm relative overflow-hidden flex justify-center items-center`}>
                             {/* Eyes */}
-                            <div className="absolute top-[35%] flex gap-2">
+                            <div className={`absolute top-[35%] flex gap-2 transition-transform duration-300 ${lookDirection !== 'forward' ? 'translate-x-[3px]' : ''}`}>
                                 <div className="w-1.5 h-1.5 rounded-full bg-black/80" />
                                 <div className="w-1.5 h-1.5 rounded-full bg-black/80" />
                             </div>
                             {/* Mouth */}
-                            <div className={`absolute bottom-[20%] w-3 h-1 ${isSpeaking ? 'bg-black/80 rounded-full h-2' : 'border-b-2 border-black/80 rounded-full h-1'} transition-all`} />
+                            <div className={`absolute bottom-[20%] w-3 h-1 ${isSpeaking ? 'bg-black/80 rounded-full h-2' : 'border-b-2 border-black/80 rounded-full h-1'} transition-transform duration-300 ${lookDirection !== 'forward' ? 'translate-x-[3px]' : ''}`} />
                         </div>
                     </div>
 

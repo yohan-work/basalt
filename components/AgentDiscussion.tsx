@@ -61,6 +61,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const [userPos, setUserPos] = useState({ x: 50, y: 85 });
     const [userDir, setUserDir] = useState<'left' | 'right' | 'forward'>('forward');
     const [isUserWalking, setIsUserWalking] = useState(false);
+    const [activeEmote, setActiveEmote] = useState<'thumbsup' | 'heart' | 'question' | null>(null);
+    const [thoughtParticles, setThoughtParticles] = useState<{ id: string, type: string, role: string, x: string, y: string }[]>([]);
 
     const meetingZoneRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -158,6 +160,32 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                 setVisibleThoughts((prev: AgentThought[]) => {
                     const nextThought = allThoughts[nextIndex];
                     if (prev.some(t => t.id === nextThought.id)) return prev;
+
+                    // --- Particle Generation ---
+                    if (nextThought.agent !== 'user') {
+                        let parsedData: any = AGENTS.find(a => a.role.toLowerCase() === nextThought.agent.toLowerCase());
+                        if (!parsedData) {
+                            if (nextThought.agent.toLowerCase().includes('lead') || nextThought.agent.toLowerCase().includes('main')) parsedData = AGENTS.find(a => a.role === 'main-agent');
+                            else if (nextThought.agent.toLowerCase().includes('dev') || nextThought.agent.toLowerCase().includes('software')) parsedData = AGENTS.find(a => a.role === 'software-engineer');
+                            else if (nextThought.agent.toLowerCase().includes('design') || nextThought.agent.toLowerCase().includes('style')) parsedData = AGENTS.find(a => a.role === 'designer');
+                            else parsedData = AGENTS[0];
+                        }
+                        if (parsedData) {
+                            const newParticle = {
+                                id: nextThought.id + '-' + Date.now(),
+                                type: nextThought.type,
+                                role: parsedData.role,
+                                x: parsedData.zone.meeting.left,
+                                y: parsedData.zone.meeting.top
+                            };
+                            setThoughtParticles(pt => [...pt, newParticle]);
+                            setTimeout(() => {
+                                setThoughtParticles(pt => pt.filter(p => p.id !== newParticle.id));
+                            }, 2500); // Life time of particle
+                        }
+                    }
+                    // -------------------------
+
                     return [...prev, nextThought];
                 });
             }
@@ -166,11 +194,28 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
         return () => clearInterval(interval);
     }, [allThoughts, currentThoughtIndex]);
 
-    // 3. WASD Movement Logic
+    // 3. Movement and Emote Logic
     useEffect(() => {
-        if (isUserFocused) return; // Disable movement if user is typing
+        if (isUserFocused) return; // Disable keys if user is typing
 
         const handleKeyDown = (e: KeyboardEvent) => {
+            // Emote keys
+            if (e.key === '1') {
+                setActiveEmote('thumbsup');
+                setTimeout(() => setActiveEmote(null), 2500);
+                return;
+            }
+            if (e.key === '2' || e.key === '4') { // Accommodate the '4' key preference if mentioned, or map '4' to heart as well
+                setActiveEmote('heart');
+                setTimeout(() => setActiveEmote(null), 2500);
+                return;
+            }
+            if (e.key === '3') {
+                setActiveEmote('question');
+                setTimeout(() => setActiveEmote(null), 2500);
+                return;
+            }
+
             const step = 2.5; // Movement speed %
             let moved = false;
             setUserPos(prev => {
@@ -270,6 +315,17 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
 
 
+    // Proximity and Distance Logic
+    const getDistance = (p1Left: string, p1Top: string, p2X: number, p2Y: number) => {
+        const x1 = parseFloat(p1Left);
+        const y1 = parseFloat(p1Top);
+        const dx = x1 - p2X;
+        const dy = y1 - p2Y;
+        return Math.sqrt(dx * dx + dy * dy);
+    };
+
+    const PROXIMITY_RADIUS = 30; // 30% screen distance
+
     if (allThoughts.length === 0) {
         return (
             <div className="relative w-full h-[500px] bg-slate-950/40 rounded-2xl border border-slate-800/60 flex items-center justify-center backdrop-blur-xl group">
@@ -366,6 +422,25 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                         </AnimatePresence>
                     </div>
 
+                    {/* Thought Particles Layer */}
+                    <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden rounded-b-xl">
+                        <AnimatePresence>
+                            {thoughtParticles.map(particle => (
+                                <motion.div
+                                    key={particle.id}
+                                    initial={{ opacity: 0, left: particle.x, top: particle.y, scale: 0.5, y: -20, x: '-50%' }}
+                                    animate={{ opacity: [0, 1, 0], y: -80, scale: [0.5, 1.2, 0.8] }}
+                                    transition={{ duration: 2.5, ease: "easeOut" }}
+                                    className="absolute z-50 pointer-events-none"
+                                >
+                                    {particle.type === 'idea' && <div className="text-2xl drop-shadow-md relative -left-4">💡</div>}
+                                    {particle.type === 'critique' && <div className="text-2xl drop-shadow-md relative -left-4">⚠️</div>}
+                                    {particle.type === 'agreement' && <div className="text-2xl drop-shadow-md relative -left-4">👍</div>}
+                                </motion.div>
+                            ))}
+                        </AnimatePresence>
+                    </div>
+
                     {/* Agent Avatars Layer */}
                     <div ref={meetingZoneRef} className="relative h-full w-full z-10">
                         {AGENTS.map((agent) => {
@@ -373,9 +448,20 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                             const targetPos = isSpeaking ? agent.zone.meeting : agent.zone.idle;
 
                             let lookDirection: 'left' | 'right' | 'forward' = 'forward';
-                            if (!isUserFocused && activeAgentData && !isSpeaking) {
-                                const myLeft = parseInt(agent.zone.meeting.left);
-                                const activeLeft = parseInt(activeAgentData.zone.meeting.left);
+
+                            // 1. If agent is speaking, maybe look at who they're talking to? (Skipped for now, defaults forward)
+
+                            // 2. If User is nearby, stare at the user (GAZE)
+                            const distToUser = getDistance(targetPos.left, targetPos.top, userPos.x, userPos.y);
+                            if (distToUser < PROXIMITY_RADIUS && !isSpeaking) {
+                                const myLeft = parseFloat(targetPos.left);
+                                if (myLeft < userPos.x - 5) lookDirection = 'right';
+                                else if (myLeft > userPos.x + 5) lookDirection = 'left';
+                            }
+                            // 3. Otherwise look at active speaker
+                            else if (!isUserFocused && activeAgentData && !isSpeaking) {
+                                const myLeft = parseFloat(targetPos.left);
+                                const activeLeft = parseFloat(activeAgentData.zone.meeting.left);
                                 if (myLeft < activeLeft) lookDirection = 'right';
                                 else if (myLeft > activeLeft) lookDirection = 'left';
                             }
@@ -427,6 +513,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                 thoughtType={null}
                                 isThinking={false}
                                 lookDirection={userDir}
+                                emote={activeEmote}
                             />
                             {/* Proximity Radius Debug/Hint (Optional visual) */}
                             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[30vw] h-[30vw] min-w-[300px] min-h-[300px] rounded-full border-2 border-emerald-400/10 bg-emerald-400/5 -z-10 pointer-events-none"></div>
