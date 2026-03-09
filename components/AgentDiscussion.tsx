@@ -125,16 +125,21 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                         };
 
                         if (newLog.agent_role === 'user') {
+                            let isNew = false;
                             setAllThoughts((prev: AgentThought[]) => {
                                 if (prev.some((t: AgentThought) => t.id === newThought.id)) return prev;
-                                const updated = [...prev, newThought];
-                                setVisibleThoughts((v: AgentThought[]) => {
-                                    if (v.some(t => t.id === newThought.id)) return v;
-                                    return [...v, newThought];
-                                });
-                                setCurrentThoughtIndex(updated.length - 1);
-                                return updated;
+                                isNew = true;
+                                return [...prev, newThought];
                             });
+                            setTimeout(() => {
+                                if (isNew) {
+                                    setVisibleThoughts((v: AgentThought[]) => {
+                                        if (v.some(t => t.id === newThought.id)) return v;
+                                        return [...v, newThought];
+                                    });
+                                    setCurrentThoughtIndex(prev => prev + 1);
+                                }
+                            }, 0);
                         } else {
                             setAllThoughts((prev: AgentThought[]) => {
                                 if (prev.some((t: AgentThought) => t.id === newThought.id)) return prev;
@@ -156,36 +161,36 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
         const interval = setInterval(() => {
             if (currentThoughtIndex < allThoughts.length - 1) {
                 const nextIndex = currentThoughtIndex + 1;
+                const nextThought = allThoughts[nextIndex];
+
+                // --- Particle Generation ---
+                if (nextThought && nextThought.agent !== 'user') {
+                    let parsedData: any = AGENTS.find(a => a.role.toLowerCase() === nextThought.agent.toLowerCase());
+                    if (!parsedData) {
+                        if (nextThought.agent.toLowerCase().includes('lead') || nextThought.agent.toLowerCase().includes('main')) parsedData = AGENTS.find(a => a.role === 'main-agent');
+                        else if (nextThought.agent.toLowerCase().includes('dev') || nextThought.agent.toLowerCase().includes('software')) parsedData = AGENTS.find(a => a.role === 'software-engineer');
+                        else if (nextThought.agent.toLowerCase().includes('design') || nextThought.agent.toLowerCase().includes('style')) parsedData = AGENTS.find(a => a.role === 'designer');
+                        else parsedData = AGENTS[0];
+                    }
+                    if (parsedData) {
+                        const newParticle = {
+                            id: `${nextThought.id}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                            type: nextThought.type,
+                            role: parsedData.role,
+                            x: parsedData.zone.meeting.left,
+                            y: parsedData.zone.meeting.top
+                        };
+                        setThoughtParticles(pt => [...pt, newParticle]);
+                        setTimeout(() => {
+                            setThoughtParticles(pt => pt.filter(p => p.id !== newParticle.id));
+                        }, 2500); // Life time of particle
+                    }
+                }
+                // -------------------------
+
                 setCurrentThoughtIndex(nextIndex);
                 setVisibleThoughts((prev: AgentThought[]) => {
-                    const nextThought = allThoughts[nextIndex];
                     if (prev.some(t => t.id === nextThought.id)) return prev;
-
-                    // --- Particle Generation ---
-                    if (nextThought.agent !== 'user') {
-                        let parsedData: any = AGENTS.find(a => a.role.toLowerCase() === nextThought.agent.toLowerCase());
-                        if (!parsedData) {
-                            if (nextThought.agent.toLowerCase().includes('lead') || nextThought.agent.toLowerCase().includes('main')) parsedData = AGENTS.find(a => a.role === 'main-agent');
-                            else if (nextThought.agent.toLowerCase().includes('dev') || nextThought.agent.toLowerCase().includes('software')) parsedData = AGENTS.find(a => a.role === 'software-engineer');
-                            else if (nextThought.agent.toLowerCase().includes('design') || nextThought.agent.toLowerCase().includes('style')) parsedData = AGENTS.find(a => a.role === 'designer');
-                            else parsedData = AGENTS[0];
-                        }
-                        if (parsedData) {
-                            const newParticle = {
-                                id: nextThought.id + '-' + Date.now(),
-                                type: nextThought.type,
-                                role: parsedData.role,
-                                x: parsedData.zone.meeting.left,
-                                y: parsedData.zone.meeting.top
-                            };
-                            setThoughtParticles(pt => [...pt, newParticle]);
-                            setTimeout(() => {
-                                setThoughtParticles(pt => pt.filter(p => p.id !== newParticle.id));
-                            }, 2500); // Life time of particle
-                        }
-                    }
-                    // -------------------------
-
                     return [...prev, nextThought];
                 });
             }
