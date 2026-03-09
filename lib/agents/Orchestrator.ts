@@ -267,6 +267,11 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 model,
                 () => this.refreshLock()
             );
+
+            if (response.__tokens) {
+                await this.accumulateTokens(response.__tokens.prompt_eval_count, response.__tokens.eval_count);
+            }
+
             return response.arguments || [];
         } catch (e: any) {
             console.error(`Failed to generate arguments for ${skillName}`, e);
@@ -288,6 +293,30 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
             // console.log(`[System] Lock refreshed at ${new Date().toLocaleTimeString()}`);
         } catch (e) {
             console.error('Failed to refresh lock:', e);
+        }
+    }
+
+    private async accumulateTokens(promptTokens: number, evalTokens: number) {
+        try {
+            const { data: current } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+            const existingTokens = current?.metadata?.tokens || { prompt: 0, completion: 0, total: 0 };
+            
+            const newTokens = {
+                prompt: existingTokens.prompt + promptTokens,
+                completion: existingTokens.completion + evalTokens,
+                total: existingTokens.total + promptTokens + evalTokens
+            };
+
+            const newMetadata = {
+                ...(current?.metadata || {}),
+                tokens: newTokens
+            };
+            await supabase.from('Tasks').update({ metadata: newMetadata }).eq('id', this.taskId);
+
+            // Emit token update to UI if needed
+            this.emitter?.emit({ type: 'llm_token_usage', tokens: newTokens });
+        } catch (e) {
+            console.error('Failed to record token usage:', e);
         }
     }
 
@@ -486,6 +515,10 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                                             techStack,
                                             () => this.refreshLock()
                                         );
+
+                                        if (codeResult?.tokens) {
+                                            await this.accumulateTokens(codeResult.tokens.prompt_eval_count, codeResult.tokens.eval_count);
+                                        }
 
                                         if (!codeResult.error) break;
 
@@ -729,6 +762,11 @@ Use 'feat:', 'fix:', 'refactor:' conventions for commit messages.
                         MODEL_CONFIG.FAST_MODEL,
                         () => this.refreshLock()
                     );
+                    
+                    if (generated.__tokens) {
+                        await this.accumulateTokens(generated.__tokens.prompt_eval_count, generated.__tokens.eval_count);
+                    }
+
                     if (generated.commitMessage) {
                         gitDetails = { ...gitDetails, ...generated };
                     }

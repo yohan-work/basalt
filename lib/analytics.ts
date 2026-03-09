@@ -20,15 +20,29 @@ export interface ErrorStats {
     agent: string;
 }
 
+export interface DateRange {
+    from: Date;
+    to?: Date;
+}
+
 /**
  * Fetches and aggregates agent performance statistics based on execution logs.
  * Counts how many 'ACTION' type logs each agent has generated.
  */
-export async function getAgentPerformanceStats(): Promise<AgentPerformance[]> {
-    const { data, error } = await supabase
+export async function getAgentPerformanceStats(dateRange?: DateRange): Promise<AgentPerformance[]> {
+    let query = supabase
         .from('Execution_Logs')
-        .select('agent_role, metadata')
+        .select('agent_role, metadata, created_at')
         .eq('metadata->>type', 'ACTION');
+
+    if (dateRange) {
+        query = query.gte('created_at', dateRange.from.toISOString());
+        if (dateRange.to) {
+            query = query.lte('created_at', dateRange.to.toISOString());
+        }
+    }
+
+    const { data, error } = await query;
 
     if (error) {
         console.error('Error fetching agent stats:', error);
@@ -53,10 +67,19 @@ export async function getAgentPerformanceStats(): Promise<AgentPerformance[]> {
 /**
  * Fetches task success metrics from the Tasks table.
  */
-export async function getTaskSuccessMetrics(): Promise<TaskSuccessMetrics> {
-    const { data, error } = await supabase
+export async function getTaskSuccessMetrics(dateRange?: DateRange): Promise<TaskSuccessMetrics> {
+    let query = supabase
         .from('Tasks')
-        .select('status');
+        .select('status, created_at');
+
+    if (dateRange) {
+        query = query.gte('created_at', dateRange.from.toISOString());
+        if (dateRange.to) {
+            query = query.lte('created_at', dateRange.to.toISOString());
+        }
+    }
+
+    const { data, error } = await query;
 
     if (error) {
         console.error('Error fetching task metrics:', error);
@@ -83,15 +106,36 @@ export async function getTaskSuccessMetrics(): Promise<TaskSuccessMetrics> {
 }
 
 /**
+ * Normalizes error messages by removing variable parts like module names or file paths.
+ */
+function normalizeErrorMessage(msg: string): string {
+    if (!msg) return 'Unknown Error';
+    return msg
+        .replace(/(['"])(?:(?!\1|\\).|\\.)*\1/g, "'...'") // replaces string literals in quotes
+        .replace(/(\/.*?\.[\w:]+)/g, '/.../file.ext') // replaces file paths roughly
+        .replace(/\b([A-Za-z0-9_-]+)\.ts(x)?\b/gi, 'file.ts') // replaces specific file names
+        .trim();
+}
+
+/**
  * Aggregates error logs to find most frequent errors.
  */
-export async function getErrorAnalysis(): Promise<ErrorStats[]> {
-    const { data, error } = await supabase
+export async function getErrorAnalysis(dateRange?: DateRange): Promise<ErrorStats[]> {
+    let query = supabase
         .from('Execution_Logs')
-        .select('message, agent_role, metadata')
+        .select('message, agent_role, metadata, created_at')
         .eq('metadata->>type', 'ERROR')
         .order('created_at', { ascending: false })
-        .limit(50); // Analyze last 50 errors
+        .limit(100);
+
+    if (dateRange) {
+        query = query.gte('created_at', dateRange.from.toISOString());
+        if (dateRange.to) {
+            query = query.lte('created_at', dateRange.to.toISOString());
+        }
+    }
+
+    const { data, error } = await query;
 
     if (error) {
         console.error('Error fetching error stats:', error);
@@ -101,9 +145,7 @@ export async function getErrorAnalysis(): Promise<ErrorStats[]> {
     const errorCounts: Record<string, { count: number; agent: string }> = {};
 
     data?.forEach((log) => {
-        // Group by message roughly (trancate to avoid unique timestamp diffs if any)
-        // Assuming messages are consistent strings.
-        const msg = log.message;
+        const msg = normalizeErrorMessage(log.message);
         if (!errorCounts[msg]) {
             errorCounts[msg] = { count: 0, agent: log.agent_role };
         }
@@ -146,4 +188,175 @@ export async function getTeamState(taskId?: string): Promise<import('./team-type
     }
 
     return null;
+}
+
+export interface ResourceMetrics {
+    totalTokens: number;
+    avgTokensPerTask: number;
+    avgLeadTimeSeconds: number;
+}
+
+/**
+ * Calculates total tokens, average tokens, and average lead time from tasks.
+ */
+export async function getSystemResourceMetrics(dateRange?: DateRange): Promise<ResourceMetrics> {
+    let query = supabase
+        .from('Tasks')
+        .select('status, created_at, updated_at, metadata');
+
+    if (dateRange) {
+        query = query.gte('created_at', dateRange.from.toISOString());
+        if (dateRange.to) {
+            query = query.lte('created_at', dateRange.to.toISOString());
+        }
+    }
+
+    const { data, error } = await query;
+    if (error || !data) {
+        return { totalTokens: 0, avgTokensPerTask: 0, avgLeadTimeSeconds: 0 };
+    }
+
+    let totalTokens = 0;
+    let completedTasksWithLoc = 0;
+    let totalLeadTime = 0;
+
+    data.forEach(task => {
+        // Tokens
+        const tokens = task.metadata?.tokens;
+        if (tokens && typeof tokens.total === 'number') {
+            totalTokens += tokens.total;
+        }
+
+        // Lead time (only for completed ones to be meaningful)
+        if (task.status === 'done' || task.status === 'review') {
+            const start = new Date(task.created_at).getTime();
+            let end = start;
+
+            if (task.updated_at) {
+                end = new Date(task.updated_at).getTime();
+            } else if (task.metadata?.contextLogs && task.metadata.contextLogs.length > 0) {
+                const logs = task.metadata.contextLogs;
+                end = logs[logs.length - 1].timestamp;
+            }
+
+            if (end > start) {
+                totalLeadTime += (end - start);
+                completedTasksWithLoc++;
+            }
+        }
+    });
+
+    return {
+        totalTokens,
+        avgTokensPerTask: data.length > 0 ? Math.round(totalTokens / data.length) : 0,
+        avgLeadTimeSeconds: completedTasksWithLoc > 0 ? Math.round((totalLeadTime / completedTasksWithLoc) / 1000) : 0
+    };
+}
+
+/**
+ * Aggregates daily token consumption for a given date range.
+ */
+export async function getDailyTokenTrends(dateRange?: DateRange): Promise<{ date: string; tokens: number }[]> {
+    let query = supabase
+        .from('Tasks')
+        .select('created_at, metadata');
+
+    if (dateRange) {
+        query = query.gte('created_at', dateRange.from.toISOString());
+        if (dateRange.to) {
+            query = query.lte('created_at', dateRange.to.toISOString());
+        }
+    }
+
+    const { data, error } = await query;
+    if (error || !data) {
+        return [];
+    }
+
+    const dailyMap: Record<string, number> = {};
+
+    data.forEach(task => {
+        const tokens = task.metadata?.tokens;
+        if (tokens && typeof tokens.total === 'number') {
+            // Use YYYY-MM-DD as key
+            const dateKey = new Date(task.created_at).toISOString().split('T')[0];
+            dailyMap[dateKey] = (dailyMap[dateKey] || 0) + tokens.total;
+        }
+    });
+
+    return Object.entries(dailyMap)
+        .map(([date, tokens]) => ({ date, tokens }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export interface AgentActionDistribution {
+    actionType: string;
+    [agentName: string]: string | number; // 'actionType' is string, rests are numbers (count)
+}
+
+/**
+ * Gathers distribution of action types per agent for the Radar Chart.
+ */
+export async function getAgentActionDistribution(dateRange?: DateRange): Promise<AgentActionDistribution[]> {
+    let query = supabase
+        .from('Execution_Logs')
+        .select('message, agent_role, created_at')
+        .eq('metadata->>type', 'ACTION');
+
+    if (dateRange) {
+        query = query.gte('created_at', dateRange.from.toISOString());
+        if (dateRange.to) {
+            query = query.lte('created_at', dateRange.to.toISOString());
+        }
+    }
+
+    const { data, error } = await query;
+    if (error || !data) return [];
+
+    // Map: ActionType -> { AgentName -> count }
+    const distributionMap: Record<string, Record<string, number>> = {};
+    const agentsSet = new Set<string>();
+
+    data.forEach(log => {
+        const agent = log.agent_role || 'Unknown';
+        agentsSet.add(agent);
+
+        let actionType = 'other';
+        const msg = log.message || '';
+        if (msg.startsWith('Executing ')) {
+            actionType = msg.replace('Executing ', '').trim();
+        } else if (msg.startsWith('Generating code')) {
+            actionType = 'write_code';
+        }
+
+        // Simplify action names if too long
+        if (actionType.length > 20) {
+            actionType = actionType.substring(0, 20) + '...';
+        }
+
+        if (!distributionMap[actionType]) {
+            distributionMap[actionType] = {};
+        }
+        distributionMap[actionType][agent] = (distributionMap[actionType][agent] || 0) + 1;
+    });
+
+    const result: AgentActionDistribution[] = [];
+    const agents = Array.from(agentsSet);
+
+    Object.entries(distributionMap).forEach(([actionType, counts]) => {
+        const entry: AgentActionDistribution = { actionType };
+        agents.forEach(a => {
+            entry[a] = counts[a] || 0;
+        });
+        result.push(entry);
+    });
+
+    // Sort by total frequency so radar chart shows most frequent actions
+    result.sort((a, b) => {
+        const sumA = agents.reduce((acc, curr) => acc + (a[curr] as number || 0), 0);
+        const sumB = agents.reduce((acc, curr) => acc + (b[curr] as number || 0), 0);
+        return sumB - sumA;
+    });
+
+    return result.slice(0, 6); // Top 6 actions looks best on radar chart
 }

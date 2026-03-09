@@ -17,6 +17,7 @@ export type StreamEvent =
     | { type: 'skill_result'; skill: string; summary: string }
     | { type: 'progress'; step: number; total: number; percent: number; eta: number }
     | { type: 'error'; message: string; step?: number }
+    | { type: 'llm_token_usage'; tokens: { prompt: number; completion: number; total: number } }
     | { type: 'done'; status: string };
 
 export class StreamEmitter {

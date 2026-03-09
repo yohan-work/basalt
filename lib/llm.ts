@@ -18,6 +18,10 @@ export interface LLMResponse {
     content: string;
     files: Array<{ path: string; content: string }>;
     error?: boolean;
+    tokens?: {
+        prompt_eval_count: number;
+        eval_count: number;
+    };
 }
 
 /**
@@ -259,6 +263,7 @@ Task: ${prompt}
 
     try {
         let fullText = '';
+        let tokens: LLMResponse['tokens'] = undefined;
         await withRetry(async () => {
             await ollamaRequest(
                 `${OLLAMA_BASE_URL}/api/generate`,
@@ -269,14 +274,22 @@ Task: ${prompt}
                     for await (const chunk of res) chunks.push(chunk);
                     const data = JSON.parse(Buffer.concat(chunks).toString());
                     fullText = data.response;
+                    if (data.prompt_eval_count || data.eval_count) {
+                        tokens = {
+                            prompt_eval_count: data.prompt_eval_count || 0,
+                            eval_count: data.eval_count || 0
+                        };
+                    }
                 }
             );
         });
 
         const files = extractFilesFromRaw(fullText);
+        
         return {
             content: fullText.split('File:')[0].trim(),
-            files
+            files,
+            tokens
         };
 
     } catch (error: any) {
@@ -301,6 +314,7 @@ export async function generateJSON(
 
     return withRetry(async () => {
         let fullText = '';
+        let tokens: { prompt_eval_count: number; eval_count: number } | undefined;
         await ollamaRequest(
             `${OLLAMA_BASE_URL}/api/generate`,
             { model, prompt: fullPrompt, stream: false, format: 'json' },
@@ -310,9 +324,23 @@ export async function generateJSON(
                 for await (const chunk of res) chunks.push(chunk);
                 const data = JSON.parse(Buffer.concat(chunks).toString());
                 fullText = data.response;
+                if (data.prompt_eval_count || data.eval_count) {
+                    tokens = {
+                        prompt_eval_count: data.prompt_eval_count || 0,
+                        eval_count: data.eval_count || 0
+                    };
+                }
             }
         );
-        return JSON.parse(cleanJSON(fullText));
+        const result = JSON.parse(cleanJSON(fullText));
+        if (tokens) {
+            // Attach hidden metadata if possible, or we just rely on streaming for detailed tracking
+            Object.defineProperty(result, '__tokens', {
+                value: tokens,
+                enumerable: false
+            });
+        }
+        return result;
     });
 }
 
@@ -377,6 +405,7 @@ Task: ${prompt}
 
     try {
         let fullText = '';
+        let tokens: LLMResponse['tokens'] = undefined;
         await withRetry(async () => {
             await ollamaStreamRequest(
                 `${OLLAMA_BASE_URL}/api/generate`,
@@ -385,6 +414,12 @@ Task: ${prompt}
                 (chunk) => {
                     const token = chunk.response || '';
                     fullText += token;
+                    if (chunk.prompt_eval_count || chunk.eval_count) {
+                        tokens = {
+                            prompt_eval_count: chunk.prompt_eval_count || 0,
+                            eval_count: chunk.eval_count || 0
+                        };
+                    }
                     if (token && emitter) emitter.emit({ type: 'llm_token', token, context: 'code_generation' });
                 },
                 onHeartbeat
@@ -398,7 +433,8 @@ Task: ${prompt}
         const files = extractFilesFromRaw(fullText);
         return {
             content: fullText.split('File:')[0].trim(),
-            files
+            files,
+            tokens
         };
     } catch (error: any) {
         if (emitter && typeof (emitter as any).emit === 'function') {
@@ -426,6 +462,7 @@ export async function generateJSONStream(
 
     try {
         let fullText = '';
+        let tokens: { prompt_eval_count: number; eval_count: number } | undefined;
         await withRetry(async () => {
             await ollamaStreamRequest(
                 `${OLLAMA_BASE_URL}/api/generate`,
@@ -434,6 +471,12 @@ export async function generateJSONStream(
                 (chunk) => {
                     const token = chunk.response || '';
                     fullText += token;
+                    if (chunk.prompt_eval_count || chunk.eval_count) {
+                        tokens = {
+                            prompt_eval_count: chunk.prompt_eval_count || 0,
+                            eval_count: chunk.eval_count || 0
+                        };
+                    }
                     if (token) emitter.emit({ type: 'llm_token', token, context: 'json_generation' });
                 },
                 onHeartbeat
@@ -443,7 +486,14 @@ export async function generateJSONStream(
         if (emitter && typeof (emitter as any).emit === 'function') {
             (emitter as any).emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'json_generation' });
         }
-        return JSON.parse(cleanJSON(fullText));
+        const result = JSON.parse(cleanJSON(fullText));
+        if (tokens) {
+            Object.defineProperty(result, '__tokens', {
+                value: tokens,
+                enumerable: false
+            });
+        }
+        return result;
     } catch (error: any) {
         if (emitter && typeof (emitter as any).emit === 'function') {
             (emitter as any).emit({ type: 'error', message: error.message });
