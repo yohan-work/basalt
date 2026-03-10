@@ -16,7 +16,7 @@ import {
 import { TASK_TEMPLATES, type TaskTemplate } from '@/lib/task-templates';
 import {
     LayoutGrid, Globe, Bug, RefreshCw, FileText,
-    Paintbrush, TestTube, BookOpen, ChevronDown, ChevronUp, FileEdit,
+    Paintbrush, TestTube, BookOpen, ChevronDown, ChevronUp, FileEdit, Wand2,
 } from 'lucide-react';
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -35,6 +35,7 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit }: CreateTaskModa
     const [description, setDescription] = useState('');
     const [priority, setPriority] = useState('Medium');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [isEnhancing, setIsEnhancing] = useState(false);
     const [showTemplates, setShowTemplates] = useState(true);
     const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
 
@@ -45,6 +46,7 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit }: CreateTaskModa
             setDescription('');
             setPriority('Medium');
             setIsSubmitting(false);
+            setIsEnhancing(false);
             setSelectedTemplateId(null);
             setShowTemplates(true);
         }
@@ -74,6 +76,28 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit }: CreateTaskModa
             onOpenChange(false);
         } finally {
             setIsSubmitting(false);
+        }
+    };
+
+    const handleEnhancePrompt = async () => {
+        if (!title.trim() && !description.trim()) return;
+        setIsEnhancing(true);
+        try {
+            const res = await fetch('/api/agent/enhance-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, description })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to enhance prompt');
+            if (data.enhancedPrompt) {
+                setDescription(data.enhancedPrompt);
+            }
+        } catch (err: any) {
+            console.error('Enhance Prompt Error:', err);
+            alert(err.message || 'Error enhancing prompt.');
+        } finally {
+            setIsEnhancing(false);
         }
     };
 
@@ -166,7 +190,20 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit }: CreateTaskModa
                         />
                     </div>
                     <div className="grid gap-2">
-                        <Label htmlFor="task-description">Description</Label>
+                        <div className="flex items-center justify-between">
+                            <Label htmlFor="task-description">Description</Label>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={handleEnhancePrompt}
+                                disabled={isEnhancing || (!title.trim() && !description.trim())}
+                                className="h-6 text-xs px-2 text-primary hover:bg-primary/10"
+                            >
+                                <Wand2 className="w-3 h-3 mr-1" />
+                                {isEnhancing ? 'Enhancing...' : 'AI Enhance'}
+                            </Button>
+                        </div>
                         <textarea
                             id="task-description"
                             value={description}
