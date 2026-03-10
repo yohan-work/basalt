@@ -62,7 +62,10 @@ export class ProjectProfiler {
         hasDefaultExports: boolean,
         hasIndexFile: boolean
     }> {
-        const componentsPath = path.join(this.projectRoot, 'components', 'ui');
+        let componentsPath = path.join(this.projectRoot, 'components', 'ui');
+        if (!fs.existsSync(componentsPath)) {
+            componentsPath = path.join(this.projectRoot, 'src', 'components', 'ui');
+        }
         const result = { names: [] as string[], hasNamedExports: false, hasDefaultExports: false, hasIndexFile: false };
         if (!fs.existsSync(componentsPath)) return result;
 
@@ -92,8 +95,10 @@ export class ProjectProfiler {
     }
 
     private detectStructure() {
-        if (fs.existsSync(path.join(this.projectRoot, 'app'))) return 'app-router';
-        if (fs.existsSync(path.join(this.projectRoot, 'pages'))) return 'pages-router';
+        if (fs.existsSync(path.join(this.projectRoot, 'app'))) return 'app-router (Base: app/)';
+        if (fs.existsSync(path.join(this.projectRoot, 'src', 'app'))) return 'app-router (Base: src/app/)';
+        if (fs.existsSync(path.join(this.projectRoot, 'pages'))) return 'pages-router (Base: pages/)';
+        if (fs.existsSync(path.join(this.projectRoot, 'src', 'pages'))) return 'pages-router (Base: src/pages/)';
         return 'unknown';
     }
 
@@ -117,8 +122,8 @@ export class ProjectProfiler {
             ? '\n- Barrel Imports: `components/ui/index.ts` exists. You CAN use `import { Button, Card } from "@/components/ui"`.'
             : '\n- MANDATORY: NO barrel imports found in `@/components/ui`. You MUST import each component from its own file (e.g., `import { Button } from "@/components/ui/button"`). NEVER use `import { ... } from "@/components/ui"`.';
 
-        const clientDirectiveInfo = data.structure === 'app-router'
-            ? '\n- Next.js Client Components: If you use React hooks (useState, useEffect, etc.) in files under `app/`, you MUST add `"use client"` at the very top of the file.'
+        const clientDirectiveInfo = data.structure.includes('app-router')
+            ? '\n- Next.js Client Components: If you use React hooks (useState, useEffect, etc.), you MUST add `"use client"` at the very top of the file. CRITICAL: You CANNOT export `metadata` in a Client Component file.'
             : '';
 
         return `

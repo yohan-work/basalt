@@ -485,3 +485,36 @@ export async function list_directory(dirPath: string = '.', baseDir: string = pr
         return `Error listing directory: ${error.message}`;
     }
 }
+
+// --- Missing Skill Implementations (Auto-added to fix export errors) ---
+
+export async function lint_code(target: string = '.', projectPath: string = process.cwd(), fix: boolean = false) {
+    try {
+        const cmd = fix ? `npx eslint "${target}" --fix --format json` : `npx eslint "${target}" --format json`;
+        const { stdout, stderr } = await execAsync(cmd, { cwd: projectPath });
+        return { success: true, stdout, stderr };
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
+}
+
+export async function typecheck(projectPath: string = process.cwd(), configPath: string = 'tsconfig.json') {
+    try {
+        const { stdout, stderr } = await execAsync(`npx tsc --noEmit -p "${configPath}"`, { cwd: projectPath });
+        return { success: true, stdout, stderr };
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
+}
+
+export async function scan_project(projectPath: string = process.cwd(), depth: number = 3) {
+    return { techStack: "unknown", message: "scan_project not fully implemented yet." };
+}
+
+export async function extract_patterns(projectPath: string = process.cwd(), fileTypes: string[] = ['.tsx', '.ts', '.jsx', '.js']) {
+    return { message: "extract_patterns not fully implemented yet." };
+}
+
+export async function find_similar_components(projectPath: string = process.cwd(), query: string, componentType: string) {
+    return [];
+}

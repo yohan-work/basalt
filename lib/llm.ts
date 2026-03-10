@@ -207,24 +207,23 @@ MANDATORY CODING RULES:
 - Use design tokens ONLY IF the project supports them.
 - Generate COMPLETE, working TypeScript code with all necessary imports.
 - For React components, use proper TypeScript types and export as default.
-- MANDATORY: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/page.tsx", NOT "/app/page.tsx").
-- Respect the existing project structure (app/ vs pages/).
+- MANDATORY FILE PATH RULE: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/page.tsx", NOT "/app/page.tsx"). YOU MUST prepend the Router Base Path (e.g., "src/app/", "app/", "src/pages/", "pages/") explicitly mentioned in the [PROJECT CONTEXT].
 - Ensure all files are self-contained with correct relative import paths.
 - **SEO BEST PRACTICES**:
   - Always include proper \`<title>\` and \`<meta name="description" content="...">\` tags.
   - In App Router, use the \`export const metadata = { title: '...', description: '...' }\` pattern.
   - In Page Router, use the \`next/head\` component.
   - Use appropriate semantic HTML tags (h1, section, main, article) for better accessibility and ranking.
-- **NEXT.JS APP ROUTER CONFLICTS**:
-  - **CRITICAL**: In App Router, you CANNOT use React hooks (\`useState\`, \`useEffect\`) and export \`metadata\` in the same file.
-  - If a page needs hooks, use \`"use client"\` at the top and OMIT the \`metadata\` export (or move hooks to a separate Client Component).
+- **NEXT.JS APP ROUTER CONFLICTS (FATAL ERROR PREVENTION)**:
+  - **CRITICAL**: In App Router, you CANNOT use React hooks (\`useState\`, \`useEffect\`) and export \`metadata\` in the same file. Combining them causes a FATAL BUILD ERROR.
+  - If a page needs hooks, use \`"use client"\` at the top and COMPLETELY REMOVE the \`export const metadata\` block.
   - Prefer keeping pages as Server Components (no hooks) for better SEO and performance.
 `.trim();
 
 const FILE_FORMAT_INSTRUCTIONS = `
 ### FORMAT RULE:
 For EACH file you create or modify, you MUST use the following PRECISE format.
-1. The path MUST be on a line starting with "File: "
+1. The path MUST be on a line starting with "File: " and MUST NOT contain a leading slash. Target the correct framework directory (e.g. File: src/app/route/page.tsx).
 2. The code block MUST follow immediately after the file path line.
 3. DO NOT use markdown headers(###) or bolding(**) for the "File:" line.
 
@@ -252,6 +251,8 @@ export async function generateCode(
 
     const fullPrompt = `
 ${CODE_GENERATION_SYSTEM_RULES}
+
+Task Context: The target tech stack is ${techStack}.
 
 ${FILE_FORMAT_INSTRUCTIONS}
 
@@ -394,6 +395,8 @@ export async function generateCodeStream(
 
     const fullPrompt = `
 ${CODE_GENERATION_SYSTEM_RULES}
+
+Task Context: The target tech stack is ${techStack}.
 
 ${FILE_FORMAT_INSTRUCTIONS}
 
