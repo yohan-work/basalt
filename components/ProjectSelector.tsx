@@ -42,6 +42,33 @@ export function ProjectSelector({ selectedProjectId, onProjectSelect }: ProjectS
         };
 
         fetchProjects();
+
+        // Subscribe to real-time changes for Projects
+        const channel = supabase
+            .channel('projects')
+            .on(
+                'postgres_changes',
+                { event: '*', schema: 'public', table: 'Projects' },
+                (payload) => {
+                    if (payload.eventType === 'INSERT') {
+                        setProjects(prev => {
+                            // Prevent duplicates
+                            if (prev.some(p => p.id === payload.new.id)) return prev;
+                            return [payload.new as Project, ...prev];
+                        });
+                    } else if (payload.eventType === 'UPDATE') {
+                        setProjects(prev => prev.map(p => p.id === payload.new.id ? (payload.new as Project) : p));
+                    } else if (payload.eventType === 'DELETE') {
+                        setProjects(prev => prev.filter(p => p.id !== payload.old.id));
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const handleCreateProject = async () => {
