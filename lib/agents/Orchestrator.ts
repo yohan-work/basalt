@@ -149,8 +149,8 @@ export class Orchestrator {
                 }
             }
 
-            // Load all available agents
-            const availableAgents = AgentLoader.listAgents();
+            // Load all available agents, excluding git-manager which is reserved for Orchestrator automation
+            const availableAgents = AgentLoader.listAgents().filter(a => a.name !== 'git-manager');
             await this.log(mainAgentName, `Loaded ${availableAgents.length} potential agents.`);
 
             // Analyze with context
