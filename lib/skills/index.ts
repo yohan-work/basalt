@@ -20,6 +20,9 @@ export async function analyze_task(
         const rawAgents = (availableAgents && availableAgents.length > 0) ? availableAgents : AgentLoader.listAgents();
         const agents = Array.isArray(rawAgents) ? rawAgents : [];
         const agentsList = agents.map(a => `- ${a.name} (Role: ${a.role}, Skills: ${a.skills?.join(', ') || ''})`).join('\n');
+        
+        const skillsBrief = AgentLoader.listSkillsBrief();
+        const skillsInfo = skillsBrief.map(s => `- ${s.name}: ${s.description}`).join('\n');
 
         const systemPrompt = `You are a Lead AI Architect.
 Your goal is to analyze a user request and determine which agents are required to fulfill it.
@@ -28,6 +31,10 @@ ${codebaseContext ? `Current Codebase Context:\n${codebaseContext}\n` : ''}
 
 Available Agents:
 ${agentsList}
+
+Available Skills (for agents to use):
+${skillsInfo}
+
 
 IMPORTANT: Provide all analysis summaries and reasoning in KOREAN.
 중요: 모든 분석 결과와 이유 등 사용자가 읽는 텍스트는 한국어로 작성하세요.
@@ -69,6 +76,9 @@ export async function create_workflow(
             .map(a => `- ${a.name}: [${a.skills.join(', ')}]`)
             .join('\n');
 
+        const skillsBrief = AgentLoader.listSkillsBrief();
+        const skillsInfo = skillsBrief.map(s => `- ${s.name}: ${s.description}`).join('\n');
+
         const systemPrompt = `You are a Project Manager.
 Create a step-by-step workflow to complete the task.
 Use ONLY the available agents and their specific skills.
@@ -76,19 +86,7 @@ Use ONLY the available agents and their specific skills.
 ${codebaseContext ? `Current Codebase Context (Project Structure/Config):\n${codebaseContext}\n` : ''}
 
 Supported Skills:
-- read_codebase: Read file content
-- write_code: Create or modify files
-- refactor_code: Refactor existing code
-- run_shell_command: Execute terminal commands
-- manage_git: Git operations (checkout, commit, push, etc.)
-- list_directory: List directory contents
-- apply_design_system: Apply design tokens to components
-- generate_scss: Generate SCSS module files
-- check_responsive: Check responsive layout
-- check_environment: Verify dev environment setup
-- search_npm_package: Search npm registry
-- analyze_error_logs: Analyze error logs for root cause
-- verify_final_output: Final verification of task completion
+${skillsInfo}
 
 Available Agents and their skills:
 ${agentsInfo}

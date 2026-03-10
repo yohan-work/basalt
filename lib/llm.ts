@@ -207,17 +207,27 @@ MANDATORY CODING RULES:
 - Use design tokens ONLY IF the project supports them.
 - Generate COMPLETE, working TypeScript code with all necessary imports.
 - For React components, use proper TypeScript types and export as default.
-- MANDATORY FILE PATH RULE: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/page.tsx", NOT "/app/page.tsx"). YOU MUST prepend the Router Base Path (e.g., "src/app/", "app/", "src/pages/", "pages/") explicitly mentioned in the [PROJECT CONTEXT].
+- MANDATORY FILE PATH RULE: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/some-feature/page.tsx", NOT "/app/some-feature/page.tsx"). YOU MUST prepend the Router Base Path (e.g., "src/app/", "app/", "src/pages/", "pages/") explicitly mentioned in the [PROJECT CONTEXT].
+- CRITICAL PATH MAPPING RULE: If the user explicitly requests to create a new page at a specific route (e.g., "/post"), you MUST place the file at the correct subfolder path (e.g., "app/post/page.tsx" or "src/app/post/page.tsx"). DO NOT override the root "app/page.tsx" or "src/app/page.tsx" unless the user explicitly asks to edit the Home/Root page.
 - Ensure all files are self-contained with correct relative import paths.
 - **SEO BEST PRACTICES**:
   - Always include proper \`<title>\` and \`<meta name="description" content="...">\` tags.
   - In App Router, use the \`export const metadata = { title: '...', description: '...' }\` pattern.
   - In Page Router, use the \`next/head\` component.
   - Use appropriate semantic HTML tags (h1, section, main, article) for better accessibility and ranking.
-- **NEXT.JS APP ROUTER CONFLICTS (FATAL ERROR PREVENTION)**:
-  - **CRITICAL**: In App Router, you CANNOT use React hooks (\`useState\`, \`useEffect\`) and export \`metadata\` in the same file. Combining them causes a FATAL BUILD ERROR.
-  - If a page needs hooks, use \`"use client"\` at the top and COMPLETELY REMOVE the \`export const metadata\` block.
+  - **CRITICAL**: In App Router, you CANNOT use React hooks (\`useState\`, \`useEffect\`, \`useRef\`) and export \`metadata\` in the same file. Combining them causes a FATAL BUILD ERROR.
+  - **"USE CLIENT" MANDATORY**: If your code uses ANY React hooks (\`useState\`, \`useEffect\`) or DOM events (\`onClick\`) in an App Router project, the VERY FIRST LINE of your code MUST BE EXACTLY: \`"use client";\`
+  - You MUST include \`"use client";\` at the very top if hooks are present. Do not assume the parent has it.
   - Prefer keeping pages as Server Components (no hooks) for better SEO and performance.
+- **PRE-EMPTIVE NEXT.JS BUG PREVENTION**:
+  - **Routing**: NEVER use standard HTML \`<a>\` tags for internal navigation. You MUST use \`import Link from 'next/link'\` and the \`<Link href="...">\` component.
+  - **Browser APIs**: NEVER access \`window\`, \`document\`, \`localStorage\`, or \`navigator\` directly in the component body. These cause 500 crashes during SSR. Wrap them in a \`useEffect\` hook (which requires \`"use client";\`).
+  - **Dynamic Hooks**: When accessing URL params, use \`import { useParams, useSearchParams } from 'next/navigation'\` (NOT \`next/router\`).
+  - **Data Fetching**: NEVER use \`getServerSideProps\` or \`getStaticProps\` (Page Router legacy). In App Router, use standard \`async/await\` in Server Components, or \`fetch\` inside \`useEffect\` in Client Components.
+  - **Fetch API (JSON Parsing Error Prevention)**: When using \`fetch()\` to get JSON data, **ALWAYS** check \`response.ok\` and ensure the Content-Type is \`application/json\` BEFORE calling \`await response.json()\`. Otherwise, fetching a 404 endpoint will return Next.js HTML error pages, causing a fatal \`Unexpected token '<', "<!DOCTYPE "... is not valid JSON\` runtime crash.
+- **NEXT.JS IMAGE COMPONENTS**:
+  - If you need to use placeholder images from external URLs (e.g., \`via.placeholder.com\`, \`unsplash.com\`), **DO NOT** use the Next.js \`<Image>\` component (\`next/image\`). It will cause a runtime error because the hostname is not configured in \`next.config.js\`.
+  - Instead, use a standard HTML \`<img>\` tag with appropriate styling for external placeholder images.
 `.trim();
 
 const FILE_FORMAT_INSTRUCTIONS = `

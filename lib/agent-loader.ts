@@ -87,6 +87,41 @@ export class AgentLoader {
     }
 
     /**
+     * Lists brief info (name, description) for all skills for Progressive Disclosure
+     */
+    static listSkillsBrief(): { name: string; description: string }[] {
+        try {
+            const skillsDir = path.join(BASE_DIR, 'lib', 'skills');
+            if (!fs.existsSync(skillsDir)) return [];
+
+            const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+            const skillsBrief: { name: string; description: string }[] = [];
+
+            for (const entry of entries) {
+                if (entry.isDirectory()) {
+                    try {
+                        const filePath = path.join(skillsDir, entry.name, 'SKILL.md');
+                        if (fs.existsSync(filePath)) {
+                            const fileContent = fs.readFileSync(filePath, 'utf-8');
+                            const { data } = matter(fileContent);
+                            skillsBrief.push({
+                                name: data.name || entry.name,
+                                description: data.description || 'No description provided.'
+                            });
+                        }
+                    } catch (e) {
+                        console.warn(`Skipping invalid skill directory: ${entry.name}`);
+                    }
+                }
+            }
+            return skillsBrief;
+        } catch (error) {
+            console.error('Failed to list skills brief:', error);
+            return [];
+        }
+    }
+
+    /**
      * Loads a Skill configuration from lib/skills/[skillName]/SKILL.md
      */
     static loadSkill(skillName: string): SkillDefinition {

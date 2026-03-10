@@ -21,7 +21,9 @@ Writes string content to a specified file path.
 4.  **IMPORTANT**: Always use the correct file extension based on the explicit `Tech Stack` provided in the context (e.g., use `.tsx` for React/Next.js components, `.ts` for logic, `.css`/`.scss` for styles).
 5.  Do NOT create `.txt` or `.md` files unless explicitly asked for documentation.
 6.  For UI components in Next.js/React, ensure you import React and necessary libraries.
-7.  **CRITICAL (Next.js App Router)**: If the project uses App Router (files in `app/`) and you use React Hooks (e.g., `useState`, `useEffect`, `useContext`) or event handlers (e.g., `onClick`), you **MUST** include `"use client"` at the very top of the file (Line 1).
+7.  **CRITICAL (Next.js App Router)**: If the project uses App Router (files in `app/`) and you use React Hooks (e.g., `useState`, `useEffect`, `useContext`) or event handlers (e.g., `onClick`), you **MUST** include `"use client";` at the very first line of the file (Line 1). DO NOT FORGET IT, OR IT WILL CAUSE A FATAL BUILD ERROR.
+8.  **NO BROWSER APIS IN SSR**: Never access `window`, `document`, or `localStorage` directly in a component body. Always wrap them in `useEffect`.
+9.  **NO `<a>` TAGS**: Use `import Link from 'next/link'` for all internal navigation to prevent SPA reloads.
 
 ## UI Component Guidelines (MANDATORY)
 
