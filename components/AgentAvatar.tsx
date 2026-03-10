@@ -56,6 +56,7 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, isWorkin
                 <AnimatePresence>
                     {isThinking && !isSpeaking && !emote && (
                         <motion.div
+                            key="thinking"
                             initial={{ opacity: 0, scale: 0.5, y: 10 }}
                             animate={{ opacity: 1, scale: 1, y: -20 }}
                             exit={{ opacity: 0, scale: 0.5, y: -10 }}
@@ -68,6 +69,7 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, isWorkin
                     )}
                     {isSpeaking && thoughtType === 'idea' && (
                         <motion.div
+                            key="idea"
                             initial={{ opacity: 0, y: 10, scale: 0.5 }}
                             animate={{ opacity: 1, y: -25, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.5 }}
@@ -78,6 +80,7 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, isWorkin
                     )}
                     {isSpeaking && thoughtType === 'agreement' && (
                         <motion.div
+                            key="agreement"
                             initial={{ opacity: 0, y: 10, scale: 0.5 }}
                             animate={{ opacity: 1, y: -25, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.5 }}
@@ -88,6 +91,7 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, isWorkin
                     )}
                     {emote && (
                         <motion.div
+                            key="emote"
                             initial={{ opacity: 0, scale: 0.5, y: 10 }}
                             animate={{ opacity: 1, scale: 1, y: -25 }}
                             exit={{ opacity: 0, scale: 0.5, y: -10 }}
@@ -100,6 +104,7 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, isWorkin
                     )}
                     {isWorking && !isSpeaking && !isWalking && (
                         <motion.div
+                            key="working"
                             initial={{ opacity: 0, y: 10, scale: 0.5 }}
                             animate={{ opacity: 1, y: -25, scale: 1 }}
                             exit={{ opacity: 0, scale: 0.5 }}
