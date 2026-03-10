@@ -11,10 +11,11 @@ interface AgentAvatarProps {
     thoughtType?: 'idea' | 'critique' | 'agreement' | null;
     isThinking?: boolean;
     lookDirection?: 'left' | 'right' | 'forward';
-    emote?: 'thumbsup' | 'heart' | 'question' | null;
+    emote?: 'thumbsup' | 'heart' | 'question' | 'sweat' | 'exclamation' | 'idea' | null;
+    isDebating?: boolean;
 }
 
-export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, isWorking, thoughtType, isThinking, lookDirection = 'forward', emote = null }: AgentAvatarProps) => {
+export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, isWorking, thoughtType, isThinking, lookDirection = 'forward', emote = null, isDebating = false }: AgentAvatarProps) => {
 
     const pantsColor = "bg-[#1e40af]"; // Lego classic blue pants
     const shoeColor = "bg-[#0f172a]";
@@ -43,11 +44,11 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, isWorkin
                         thoughtType === 'critique' ? { x: [-2, 2, -2, 2, 0] } :
                             thoughtType === 'agreement' ? { y: [0, -3, 0] } :
                                 { scale: [1, 1.05, 1] }
-                    ) : (isWorking ? { y: [0, -1, 0] } : {}))
+                    ) : (isWorking ? { y: [0, -1, 0] } : (isDebating ? { x: [-1, 1, -1, 1, 0] } : {})))
                 }
                 transition={{
                     repeat: Infinity,
-                    duration: isWalking ? 0.3 : (thoughtType === 'critique' ? 0.4 : (isWorking ? 0.5 : 1.5)),
+                    duration: isWalking ? 0.3 : ((thoughtType === 'critique' || isDebating) ? 0.4 : (isWorking ? 0.5 : 1.5)),
                     ease: "linear"
                 }}
                 style={{ transformOrigin: 'bottom center' }}
@@ -89,17 +90,41 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, isWorkin
                             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" /></svg>
                         </motion.div>
                     )}
+                    {isSpeaking && thoughtType === 'critique' && (
+                        <motion.div
+                            key="critique"
+                            initial={{ opacity: 0, y: 10, scale: 0.5 }}
+                            animate={{ opacity: 1, y: -25, scale: [1, 1.2, 1] }}
+                            transition={{ repeat: Infinity, duration: 0.5 }}
+                            exit={{ opacity: 0, scale: 0.5 }}
+                            className="absolute -top-3 z-40 text-red-500 drop-shadow-md text-2xl font-bold"
+                        >
+                            ❗
+                        </motion.div>
+                    )}
                     {emote && (
                         <motion.div
                             key="emote"
                             initial={{ opacity: 0, scale: 0.5, y: 10 }}
-                            animate={{ opacity: 1, scale: 1, y: -25 }}
+                            animate={
+                                emote === 'sweat' || emote === 'exclamation'
+                                    ? { opacity: 1, scale: [1, 1.2, 1], y: [-25, -28, -25] }
+                                    : { opacity: 1, scale: 1, y: -25 }
+                            }
+                            transition={
+                                emote === 'sweat' || emote === 'exclamation'
+                                    ? { repeat: Infinity, duration: 0.5 }
+                                    : {}
+                            }
                             exit={{ opacity: 0, scale: 0.5, y: -10 }}
                             className="absolute -top-6 z-50 text-2xl drop-shadow-md"
                         >
                             {emote === 'thumbsup' && '👍'}
                             {emote === 'heart' && '❤️'}
                             {emote === 'question' && '❓'}
+                            {emote === 'sweat' && '💦'}
+                            {emote === 'exclamation' && '❗'}
+                            {emote === 'idea' && '💡'}
                         </motion.div>
                     )}
                     {isWorking && !isSpeaking && !isWalking && (

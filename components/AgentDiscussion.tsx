@@ -306,7 +306,11 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
             const res = await fetch('/api/agent/discuss', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ taskId, message: userInput })
+                body: JSON.stringify({ 
+                    taskId, 
+                    message: userInput,
+                    targetAgent: nearestAgent?.role || undefined
+                })
             });
 
             if (res.ok) {
@@ -321,41 +325,27 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
     const currentThought = currentThoughtIndex >= 0 ? allThoughts[currentThoughtIndex] : null;
 
-    const activeAgentData = React.useMemo(() => {
-        if (!currentThought || currentThought.agent === 'user') return null;
-        const currentAgentStr = currentThought.agent.toLowerCase();
+    const getAgentData = React.useCallback((thought: AgentThought | null) => {
+        if (!thought || thought.agent === 'user') return null;
+        const agentStr = thought.agent.toLowerCase();
         for (const agent of AGENTS) {
-            if (currentAgentStr === agent.role.toLowerCase() || (agent.role === 'designer' && currentAgentStr === 'style-architect')) return agent;
-            if (agent.role === 'main-agent' && (currentAgentStr.includes('lead') || currentAgentStr.includes('main'))) return agent;
-            if (agent.role === 'software-engineer' && (currentAgentStr.includes('dev') || currentAgentStr.includes('software'))) return agent;
-            if (agent.role === 'designer' && (currentAgentStr.includes('design') || currentAgentStr.includes('style'))) return agent;
+            if (agentStr === agent.role.toLowerCase() || (agent.role === 'designer' && agentStr === 'style-architect')) return agent;
+            if (agent.role === 'main-agent' && (agentStr.includes('lead') || agentStr.includes('main'))) return agent;
+            if (agent.role === 'software-engineer' && (agentStr.includes('dev') || agentStr.includes('software'))) return agent;
+            if (agent.role === 'designer' && (agentStr.includes('design') || agentStr.includes('style'))) return agent;
         }
-        if (!currentAgentStr.includes('lead') && !currentAgentStr.includes('dev') && !currentAgentStr.includes('design') && !currentAgentStr.includes('main') && !currentAgentStr.includes('software') && !currentAgentStr.includes('style')) {
+        if (!agentStr.includes('lead') && !agentStr.includes('dev') && !agentStr.includes('design') && !agentStr.includes('main') && !agentStr.includes('software') && !agentStr.includes('style')) {
             return AGENTS[0];
         }
         return null;
-    }, [currentThought]);
+    }, []);
 
+    const activeAgentData = React.useMemo(() => getAgentData(currentThought), [currentThought, getAgentData]);
     const nextThought = currentThoughtIndex + 1 < allThoughts.length ? allThoughts[currentThoughtIndex + 1] : null;
+    const nextAgentData = React.useMemo(() => getAgentData(nextThought), [nextThought, getAgentData]);
+    const prevThought = currentThoughtIndex > 0 ? allThoughts[currentThoughtIndex - 1] : null;
+    const prevAgentData = React.useMemo(() => getAgentData(prevThought), [prevThought, getAgentData]);
 
-    const nextAgentData = React.useMemo(() => {
-        if (!nextThought || nextThought.agent === 'user') return null;
-        const nextAgentStr = nextThought.agent.toLowerCase();
-        for (const agent of AGENTS) {
-            if (nextAgentStr === agent.role.toLowerCase() || (agent.role === 'designer' && nextAgentStr === 'style-architect')) return agent;
-            if (agent.role === 'main-agent' && (nextAgentStr.includes('lead') || nextAgentStr.includes('main'))) return agent;
-            if (agent.role === 'software-engineer' && (nextAgentStr.includes('dev') || nextAgentStr.includes('software'))) return agent;
-            if (agent.role === 'designer' && (nextAgentStr.includes('design') || nextAgentStr.includes('style'))) return agent;
-        }
-        if (!nextAgentStr.includes('lead') && !nextAgentStr.includes('dev') && !nextAgentStr.includes('design') && !nextAgentStr.includes('main') && !nextAgentStr.includes('software') && !nextAgentStr.includes('style')) {
-            return AGENTS[0];
-        }
-        return null;
-    }, [nextThought]);
-
-
-
-    // Proximity and Distance Logic
     const getDistance = (p1Left: string, p1Top: string, p2X: number, p2Y: number) => {
         const x1 = parseFloat(p1Left);
         const y1 = parseFloat(p1Top);
@@ -363,6 +353,35 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
         const dy = y1 - p2Y;
         return Math.sqrt(dx * dx + dy * dy);
     };
+
+    const nearestAgent = React.useMemo(() => {
+        let nearest: any = null;
+        let minDistance = 15; // 15% radius threshold
+        AGENTS.forEach(agent => {
+            const isSpeaking = activeAgentData?.role === agent.role;
+            const isTarget = activeAgentData && prevAgentData?.role === agent.role && (currentThought?.type === 'critique' || currentThought?.type === 'agreement') ? true : false;
+            let targetLeft = agent.zone.idle.left;
+            let targetTop = agent.zone.idle.top;
+            if (isSpeaking || isTarget) {
+                targetLeft = agent.zone.meeting.left;
+                targetTop = agent.zone.meeting.top;
+            } else {
+                const offset = idleOffsets[agent.role];
+                if (offset) {
+                    targetLeft = `${Math.max(5, Math.min(95, parseFloat(agent.zone.idle.left) + offset.dx))}%`;
+                    targetTop = `${Math.max(5, Math.min(95, parseFloat(agent.zone.idle.top) + offset.dy))}%`;
+                }
+            }
+            const dist = getDistance(targetLeft, targetTop, userPos.x, userPos.y);
+            if (dist < minDistance) {
+                minDistance = dist;
+                nearest = agent;
+            }
+        });
+        return nearest;
+    }, [userPos, activeAgentData, prevAgentData, currentThought, idleOffsets]);
+
+
 
     const PROXIMITY_RADIUS = 30; // 30% screen distance
 
@@ -529,11 +548,14 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
                         {AGENTS.map((agent) => {
                             const isSpeaking = activeAgentData?.role === agent.role;
+                            const isTarget = activeAgentData && prevAgentData?.role === agent.role && (currentThought?.type === 'critique' || currentThought?.type === 'agreement') ? true : false;
+                            const isDebating = currentThought?.type === 'critique' && (isSpeaking || isTarget);
+                            const isNearest = nearestAgent?.role === agent.role;
                             
                             let targetLeft = agent.zone.idle.left;
                             let targetTop = agent.zone.idle.top;
 
-                            if (isSpeaking) {
+                            if (isSpeaking || isTarget) {
                                 targetLeft = agent.zone.meeting.left;
                                 targetTop = agent.zone.meeting.top;
                             } else {
@@ -549,8 +571,15 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
                             let lookDirection: 'left' | 'right' | 'forward' = 'forward';
 
+                            if (isSpeaking && isDebating && prevAgentData) {
+                                // Speaker looking at the target
+                                const myLeft = parseFloat(targetLeft);
+                                const targetLeftPos = parseFloat(prevAgentData.zone.meeting.left);
+                                if (myLeft < targetLeftPos - 2) lookDirection = 'right';
+                                else if (myLeft > targetLeftPos + 2) lookDirection = 'left';
+                            }
                             // 1. If someone is speaking, look at the active speaker
-                            if (activeAgentData && !isSpeaking) {
+                            else if (activeAgentData && !isSpeaking) {
                                 const myLeft = parseFloat(targetLeft);
                                 const activeLeft = parseFloat(activeAgentData.zone.meeting.left);
                                 if (myLeft < activeLeft - 2) lookDirection = 'right';
@@ -561,14 +590,21 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                 const distToUser = getDistance(targetLeft, targetTop, userPos.x, userPos.y);
                                 if (distToUser < PROXIMITY_RADIUS && !isSpeaking) {
                                     const myLeft = parseFloat(targetLeft);
-                                    if (myLeft < userPos.x - 5) lookDirection = 'right';
-                                    else if (myLeft > userPos.x + 5) lookDirection = 'left';
+                                    if (myLeft < userPos.x - 1) lookDirection = 'right';
+                                    else if (myLeft > userPos.x + 1) lookDirection = 'left';
                                 }
                             }
 
                             const isThinking = nextAgentData?.role === agent.role;
                             const isWalking = movingAgents.has(agent.role);
                             const isWorking = workingAgents.has(agent.role) && !isSpeaking && !isWalking;
+
+                            let currentEmote: any = null;
+                            if (isTarget) {
+                                if (currentThought?.type === 'critique') currentEmote = 'sweat';
+                                else if (currentThought?.type === 'agreement') currentEmote = 'idea';
+                            }
+                            if (isSpeaking && currentThought?.type === 'agreement') currentEmote = 'thumbsup';
 
                             return (
                                 <motion.div
@@ -591,10 +627,15 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                         isSpeaking={isSpeaking}
                                         isWalking={isWalking}
                                         isWorking={isWorking}
+                                        isDebating={isDebating}
                                         thoughtType={isSpeaking ? currentThought?.type : null}
                                         isThinking={isThinking}
                                         lookDirection={lookDirection}
+                                        emote={currentEmote}
                                     />
+                                    {isNearest && (
+                                        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-12 h-3 bg-emerald-400/50 blur-[4px] rounded-full pointer-events-none animate-pulse" />
+                                    )}
                                 </motion.div>
                             );
                         })}
@@ -728,8 +769,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                     onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleSendMessage()}
                                     onFocus={() => setIsUserFocused(true)}
                                     onBlur={() => setIsUserFocused(false)}
-                                    placeholder="메시지 입력..."
-                                    className="h-10 w-full pl-4 pr-12 text-[13px] bg-slate-50 border border-slate-200 text-slate-800 placeholder:text-slate-400 rounded-full focus:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-50 transition-all font-medium shadow-inner"
+                                    placeholder={nearestAgent ? `${nearestAgent.name}에게 귓속말하기...` : "메시지 입력..."}
+                                    className={`h-10 w-full pl-4 pr-12 text-[13px] border text-slate-800 placeholder:text-slate-400 rounded-full transition-all font-medium shadow-inner ${nearestAgent ? 'bg-emerald-50/50 border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-200' : 'bg-slate-50 border-slate-200 focus:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-50'}`}
                                     disabled={isSending}
                                 />
                                 <Button
