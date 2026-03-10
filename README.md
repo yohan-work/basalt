@@ -153,9 +153,9 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 |----------|--------|
 | `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독. SSE 기반 액션 스트리밍. 스켈레톤 로딩, 에러 토스트, 빈 상태 표시 |
 | `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR). `taskId` 기반 필터링 및 ID 기반 중복 제거 지원 |
-| `AgentDiscussion` | **Basalt Virtual Office**. 플로팅 카드 형태의 룸들과 점선 그리드 배경을 가진 2.5D 탑다운 가상 오피스 가동. 에이전트들이 작업 상태에 따라 Boardroom, Patio, Engineering Hub 등으로 직접 이동(Lego walk animation)하여 논의. 하단 포탈 기반의 Floating Live Discussion 챗 패널 제공. |
+| `AgentDiscussion` | **Basalt Virtual Office**. 플로팅 카드 형태의 룸들과 점선 그리드 배경을 가진 2.5D 탑다운 가상 오피스. 에이전트들이 작업 상태에 따라 Boardroom, Patio, Engineering Hub 등으로 이동하며, 대기 중일 때는 자연스러운 배회(Wandering) 및 각자의 위치에서 배경 업무(Working Animation)를 수행합니다. 대화 발생 시 발화자와 청취자 간의 데이터 흐름(Data Flow Lines)과 시선 향함(Gaze) 레이아웃이 지원됩니다. |
 | `OfficeLayout` | 점선 그리드(Dotted Grid) 배경 위에 각 공간(Boardroom, Patio, Hub)을 분리된 플로팅 카드로 세련되게 구현한 확장 가능한 오피스 레이아웃 |
-| `AgentAvatar` | 탑다운 시점에서 레고(Lego) 캐릭터 형태로 디자인된 전신 아바타. `framer-motion`을 통해 이동 시 두 다리를 교차하며 걷고 액션 시 반응하는 역동적인 컴포넌트 |
+| `AgentAvatar` | 탑다운 시점에서 레고(Lego) 캐릭터 형태로 디자인된 전신 아바타. `framer-motion`을 통해 이동, 발화, 생각(Thought), 배경 업무(Working), 그리고 시선(Gaze) 애니메이션을 역동적으로 처리하는 심리스한 컴포넌트 |
 | `TaskDetailsModal` | 태스크 상세 모달. Details, Changes, Brainstorm, Live Logs 4개 탭 통합. 85vh 고정 높이 레이아웃으로 모든 뷰의 스크롤 안정성 확보 |
 | `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 8종 템플릿 선택 지원. 제목, 설명, 우선순위. Cmd+Enter 단축키, 폼 자동 초기화 |
 | `CodeDiffViewer` | 파일 변경 diff 뷰어. 사이드바 파일 목록 + split/unified diff. 신규/수정 파일 구분. 다크모드 지원 |
@@ -303,7 +303,7 @@ basalt/
 
 #### 3. 실시간 인터페이스 및 모니터링 (`components/`)
 - **실시간 스트리밍**: SSE(Server-Sent Events)를 통해 에이전트의 사고 과정과 작업 진행률을 지연 없이 사용자에게 전달합니다.
-- **Virtual Office (Brainstorming)**: 에이전트들이 작업 전 논의하는 과정을 2.5D 가상 오피스로 시각화합니다. 점선 그리드 배경과 각 룸(Boardroom, Hub, Patio)이 플로팅 형태로 자유롭게 배치되어 있으며, 레고 형태의 전신 아바타들이 실제 좌표를 따라 걸어 다니며(Walking animation) 상호작용합니다. 우측 하단 포탈 기반의 Floating Live Discussion 챗 패널을 통해 쾌적한 논의 맥락(Drip Feed) 파악이 가능합니다.
+- **Virtual Office (Brainstorming)**: 에이전트들이 작업 전 논의하는 과정을 2.5D 가상 오피스로 시각화합니다. 레고 형태의 전신 아바타들이 실제 좌표를 따라 걸어 다니며 상호작용합니다. 최근 업데이트를 통해 대기 중 **무작위 배회(Idle Wandering)**, 발화자 쪽으로의 **시선 향함(Dynamic Gaze)**, 유휴 시간 중의 **배경 업무 타이핑(Work Animation)**, 참가자 간의 연결을 나타내는 **데이터 플로우(Data Flow Lines)** 가 추가되어 한층 더 살아 숨 쉬는 협업 씬을 연출합니다. 우측 하단 포탈 기반의 Floating Live Discussion 챗 패널을 통해 쾌적한 논의 맥락(Drip Feed) 파악이 가능합니다.
 - **코드 변경 추적**: `write_code` 스킬 실행 시 변경 전/후를 캡처하여 `CodeDiffViewer`를 통해 시각화된 diff를 제공합니다.
 - **고해상도 레이아웃**: 모든 상세 뷰는 85vh 고정 높이와 최적화된 스크롤 시스템을 갖추어, 대량의 로그나 코드 변경 사항도 끊김 없이 확인할 수 있습니다.
 - **시각적 워크플로우**: `WorkflowFlowchart`를 통해 에이전트 간의 작업 흐름을 한눈에 파악할 수 있습니다.
