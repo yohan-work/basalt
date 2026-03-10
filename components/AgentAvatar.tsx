@@ -7,13 +7,14 @@ interface AgentAvatarProps {
     color?: string;
     isSpeaking?: boolean;
     isWalking?: boolean;
+    isWorking?: boolean;
     thoughtType?: 'idea' | 'critique' | 'agreement' | null;
     isThinking?: boolean;
     lookDirection?: 'left' | 'right' | 'forward';
     emote?: 'thumbsup' | 'heart' | 'question' | null;
 }
 
-export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, thoughtType, isThinking, lookDirection = 'forward', emote = null }: AgentAvatarProps) => {
+export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, isWorking, thoughtType, isThinking, lookDirection = 'forward', emote = null }: AgentAvatarProps) => {
 
     const pantsColor = "bg-[#1e40af]"; // Lego classic blue pants
     const shoeColor = "bg-[#0f172a]";
@@ -42,11 +43,11 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, thoughtT
                         thoughtType === 'critique' ? { x: [-2, 2, -2, 2, 0] } :
                             thoughtType === 'agreement' ? { y: [0, -3, 0] } :
                                 { scale: [1, 1.05, 1] }
-                    ) : {})
+                    ) : (isWorking ? { y: [0, -1, 0] } : {}))
                 }
                 transition={{
                     repeat: Infinity,
-                    duration: isWalking ? 0.3 : (thoughtType === 'critique' ? 0.4 : 1.5),
+                    duration: isWalking ? 0.3 : (thoughtType === 'critique' ? 0.4 : (isWorking ? 0.5 : 1.5)),
                     ease: "linear"
                 }}
                 style={{ transformOrigin: 'bottom center' }}
@@ -95,6 +96,23 @@ export const AgentAvatar = ({ role, name, color, isSpeaking, isWalking, thoughtT
                             {emote === 'thumbsup' && '👍'}
                             {emote === 'heart' && '❤️'}
                             {emote === 'question' && '❓'}
+                        </motion.div>
+                    )}
+                    {isWorking && !isSpeaking && !isWalking && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 10, scale: 0.5 }}
+                            animate={{ opacity: 1, y: -25, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.5 }}
+                            className="absolute -top-3 z-40 text-blue-500 drop-shadow-md bg-white border border-slate-200 px-1.5 py-0.5 rounded-md flex items-center shadow-sm"
+                        >
+                            <motion.svg 
+                                animate={{ y: [-2, 2, -2] }} 
+                                transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                                xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                            >
+                                <polyline points="16 18 22 12 16 6"></polyline>
+                                <polyline points="8 6 2 12 8 18"></polyline>
+                            </motion.svg>
                         </motion.div>
                     )}
                 </AnimatePresence>

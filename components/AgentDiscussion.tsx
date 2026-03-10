@@ -56,6 +56,8 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const [isUserFocused, setIsUserFocused] = useState(false);
     const [showInteractions, setShowInteractions] = useState<{ id: number, x: number }[]>([]);
     const [movingAgents, setMovingAgents] = useState<Set<string>>(new Set());
+    const [idleOffsets, setIdleOffsets] = useState<Record<string, { dx: number, dy: number }>>({});
+    const [workingAgents, setWorkingAgents] = useState<Set<string>>(new Set());
 
     // User Agency State
     const [userPos, setUserPos] = useState({ x: 50, y: 85 });
@@ -198,6 +200,39 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
         return () => clearInterval(interval);
     }, [allThoughts, currentThoughtIndex]);
+
+    // 2.5 Idle Wandering Logic (Random movement in idle zone)
+    useEffect(() => {
+        const updateOffsets = () => {
+            setIdleOffsets(prev => {
+                const next = { ...prev };
+                AGENTS.forEach(agent => {
+                    // random -3 to +3 % offset for wandering
+                    const dx = (Math.random() - 0.5) * 6;
+                    const dy = (Math.random() - 0.5) * 6;
+                    next[agent.role] = { dx, dy };
+                });
+                return next;
+            });
+        };
+
+        updateOffsets(); // initial
+        const interval = setInterval(updateOffsets, 4000); // adjust time as needed
+        return () => clearInterval(interval);
+    }, []);
+
+    // 2.6 Background Working Logic (Idle agents occasionally work)
+    useEffect(() => {
+        const updateWorking = () => {
+            setWorkingAgents(new Set(
+                AGENTS.filter(() => Math.random() > 0.6).map(a => a.role)
+            ));
+        };
+
+        updateWorking();
+        const interval = setInterval(updateWorking, 5000); // random work cycles
+        return () => clearInterval(interval);
+    }, []);
 
     // 3. Movement and Emote Logic
     useEffect(() => {
@@ -448,42 +483,103 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
                     {/* Agent Avatars Layer */}
                     <div ref={meetingZoneRef} className="relative h-full w-full z-10">
+                        {/* Data Flow Lines SVG (Phase 3) */}
+                        {activeAgentData && !isUserFocused && (
+                            <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" viewBox="0 0 100 100" preserveAspectRatio="none">
+                                <defs>
+                                    <linearGradient id="dataFlowGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                        <stop offset="0%" stopColor="#10b981" stopOpacity="0.6" />
+                                        <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
+                                    </linearGradient>
+                                </defs>
+                                <AnimatePresence>
+                                    {AGENTS.map(agent => {
+                                        if (agent.role === activeAgentData?.role) return null;
+                                        
+                                        const startX = parseFloat(activeAgentData.zone.meeting.left);
+                                        const startY = parseFloat(activeAgentData.zone.meeting.top);
+                                        
+                                        const offset = idleOffsets[agent.role] || { dx: 0, dy: 0 };
+                                        const endX = Math.max(5, Math.min(95, parseFloat(agent.zone.idle.left) + offset.dx));
+                                        const endY = Math.max(5, Math.min(95, parseFloat(agent.zone.idle.top) + offset.dy));
+
+                                        return (
+                                            <motion.line
+                                                key={`flow-${agent.role}`}
+                                                x1={startX}
+                                                y1={startY}
+                                                x2={endX}
+                                                y2={endY}
+                                                stroke="url(#dataFlowGradient)"
+                                                strokeWidth="0.2"
+                                                strokeDasharray="1 1"
+                                                initial={{ strokeDashoffset: 10, opacity: 0 }}
+                                                animate={{ 
+                                                    strokeDashoffset: 0,
+                                                    opacity: [0, 0.4, 0]
+                                                }}
+                                                exit={{ opacity: 0 }}
+                                                transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                                            />
+                                        );
+                                    })}
+                                </AnimatePresence>
+                            </svg>
+                        )}
+
                         {AGENTS.map((agent) => {
                             const isSpeaking = activeAgentData?.role === agent.role;
-                            const targetPos = isSpeaking ? agent.zone.meeting : agent.zone.idle;
+                            
+                            let targetLeft = agent.zone.idle.left;
+                            let targetTop = agent.zone.idle.top;
+
+                            if (isSpeaking) {
+                                targetLeft = agent.zone.meeting.left;
+                                targetTop = agent.zone.meeting.top;
+                            } else {
+                                // apply wander offset
+                                const offset = idleOffsets[agent.role];
+                                if (offset) {
+                                    const baseL = parseFloat(agent.zone.idle.left);
+                                    const baseT = parseFloat(agent.zone.idle.top);
+                                    targetLeft = `${Math.max(5, Math.min(95, baseL + offset.dx))}%`;
+                                    targetTop = `${Math.max(5, Math.min(95, baseT + offset.dy))}%`;
+                                }
+                            }
 
                             let lookDirection: 'left' | 'right' | 'forward' = 'forward';
 
-                            // 1. If agent is speaking, maybe look at who they're talking to? (Skipped for now, defaults forward)
-
-                            // 2. If User is nearby, stare at the user (GAZE)
-                            const distToUser = getDistance(targetPos.left, targetPos.top, userPos.x, userPos.y);
-                            if (distToUser < PROXIMITY_RADIUS && !isSpeaking) {
-                                const myLeft = parseFloat(targetPos.left);
-                                if (myLeft < userPos.x - 5) lookDirection = 'right';
-                                else if (myLeft > userPos.x + 5) lookDirection = 'left';
-                            }
-                            // 3. Otherwise look at active speaker
-                            else if (!isUserFocused && activeAgentData && !isSpeaking) {
-                                const myLeft = parseFloat(targetPos.left);
+                            // 1. If someone is speaking, look at the active speaker
+                            if (activeAgentData && !isSpeaking) {
+                                const myLeft = parseFloat(targetLeft);
                                 const activeLeft = parseFloat(activeAgentData.zone.meeting.left);
-                                if (myLeft < activeLeft) lookDirection = 'right';
-                                else if (myLeft > activeLeft) lookDirection = 'left';
+                                if (myLeft < activeLeft - 2) lookDirection = 'right';
+                                else if (myLeft > activeLeft + 2) lookDirection = 'left';
+                            }
+                            // 2. Otherwise if User is nearby, stare at the user (GAZE)
+                            else {
+                                const distToUser = getDistance(targetLeft, targetTop, userPos.x, userPos.y);
+                                if (distToUser < PROXIMITY_RADIUS && !isSpeaking) {
+                                    const myLeft = parseFloat(targetLeft);
+                                    if (myLeft < userPos.x - 5) lookDirection = 'right';
+                                    else if (myLeft > userPos.x + 5) lookDirection = 'left';
+                                }
                             }
 
                             const isThinking = nextAgentData?.role === agent.role;
                             const isWalking = movingAgents.has(agent.role);
+                            const isWorking = workingAgents.has(agent.role) && !isSpeaking && !isWalking;
 
                             return (
                                 <motion.div
                                     key={agent.role}
                                     className="absolute"
                                     animate={{
-                                        left: targetPos.left,
-                                        top: targetPos.top,
+                                        left: targetLeft,
+                                        top: targetTop,
                                         zIndex: isSpeaking ? 40 : (isWalking ? 30 : 20)
                                     }}
-                                    transition={{ type: "spring", stiffness: 60, damping: 12, mass: 1 }}
+                                    transition={{ type: "spring", stiffness: 40, damping: 15, mass: 1 }}
                                     style={{ transform: 'translate(-50%, -50%)' }}
                                     onAnimationStart={() => setMovingAgents(prev => new Set(prev).add(agent.role))}
                                     onAnimationComplete={() => setMovingAgents(prev => { const next = new Set(prev); next.delete(agent.role); return next; })}
@@ -494,6 +590,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                         color={agent.baseColor}
                                         isSpeaking={isSpeaking}
                                         isWalking={isWalking}
+                                        isWorking={isWorking}
                                         thoughtType={isSpeaking ? currentThought?.type : null}
                                         isThinking={isThinking}
                                         lookDirection={lookDirection}
