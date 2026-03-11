@@ -87,8 +87,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
 
             if (!error && data) {
                 const thoughtLogs = data
-                    .filter((log: any) => (log.metadata?.type === 'THOUGHT' || log.agent_role === 'user') &&
-                        log.message !== "에이전트 그룹 논의 시작: 작업 범위를 확정하고 최적의 실행 계획을 수립합니다.")
+                    .filter((log: any) => (log.metadata?.type === 'THOUGHT' || log.agent_role === 'user'))
                     .map((log: any) => ({
                         id: log.id,
                         agent: log.agent_role,
@@ -116,8 +115,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                 },
                 (payload: any) => {
                     const newLog = payload.new;
-                    if ((newLog.metadata?.type === 'THOUGHT' || newLog.agent_role === 'user') &&
-                        newLog.message !== "에이전트 그룹 논의 시작: 작업 범위를 확정하고 최적의 실행 계획을 수립합니다.") {
+                    if ((newLog.metadata?.type === 'THOUGHT' || newLog.agent_role === 'user')) {
                         const newThought: AgentThought = {
                             id: newLog.id,
                             agent: newLog.agent_role,

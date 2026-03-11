@@ -216,9 +216,15 @@ MANDATORY CODING RULES:
   - In Page Router, use the \`next/head\` component.
   - Use appropriate semantic HTML tags (h1, section, main, article) for better accessibility and ranking.
   - **CRITICAL**: In App Router, you CANNOT use React hooks (\`useState\`, \`useEffect\`, \`useRef\`) and export \`metadata\` in the same file. Combining them causes a FATAL BUILD ERROR.
-  - **"USE CLIENT" MANDATORY**: If your code uses ANY React hooks (\`useState\`, \`useEffect\`) or DOM events (\`onClick\`) in an App Router project, the VERY FIRST LINE of your code MUST BE EXACTLY: \`"use client";\`
-  - You MUST include \`"use client";\` at the very top if hooks are present. Do not assume the parent has it.
   - Prefer keeping pages as Server Components (no hooks) for better SEO and performance.
+
+🚨 CRITICAL NEXT.JS APP ROUTER RULE 🚨
+- If your code uses ANY React hooks (\`useState\`, \`useEffect\`, \`useRef\`, etc.) or DOM events (\`onClick\`, \`onChange\`, etc.) in an App Router project, the VERY FIRST LINE of your file MUST BE EXACTLY:
+  \`"use client";\`
+- You MUST include \`"use client";\` at the very top. Do NOT assume the parent component has it.
+- Failing to include this when required will cause the application to CRASH.
+- NEVER put \`"use client";\` below the imports; it MUST be the absolute first line.
+
 - **PRE-EMPTIVE NEXT.JS BUG PREVENTION**:
   - **Routing**: NEVER use standard HTML \`<a>\` tags for internal navigation. You MUST use \`import Link from 'next/link'\` and the \`<Link href="...">\` component.
   - **Browser APIs**: NEVER access \`window\`, \`document\`, \`localStorage\`, or \`navigator\` directly in the component body. These cause 500 crashes during SSR. Wrap them in a \`useEffect\` hook (which requires \`"use client";\`).
@@ -499,7 +505,21 @@ export async function generateJSONStream(
         if (emitter && typeof (emitter as any).emit === 'function') {
             (emitter as any).emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'json_generation' });
         }
-        const result = JSON.parse(cleanJSON(fullText));
+        
+        // --- SAFE JSON PARSING ---
+        let result = {};
+        try {
+            result = JSON.parse(cleanJSON(fullText));
+        } catch (parseError: any) {
+            console.error(`[LLM] JSON Parse Error in generateJSONStream:`, parseError.message);
+            console.error(`[LLM] Raw flawed text was:`, fullText.substring(0, 500) + '...');
+            
+            // In the context of consult_agents or arrays, returning `{ thoughts: [] }` or empty obj
+            // Since we don't know the exact schema, returning empty object is safest fallback.
+            // Extractor or consumer functions should handle empty or missing properties safely.
+            result = {}; 
+        }
+
         if (tokens) {
             Object.defineProperty(result, '__tokens', {
                 value: tokens,
