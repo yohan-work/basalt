@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles } from 'lucide-react';
+import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { StepProgress, type ProgressInfo } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
@@ -37,6 +37,7 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
     const [view, setView] = useState<'details' | 'logs' | 'changes' | 'live' | 'brainstorm'>('details'); // Updated state type
     const [isRetrying, setIsRetrying] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isApproving, setIsApproving] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
 
     if (!task) return null;
@@ -48,6 +49,7 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
     const progress = metadata.progress as ProgressInfo | undefined;
     const fileChanges = metadata.fileChanges as FileChange[] | undefined;
     const isFailed = task.status === 'failed';
+    const isReview = task.status === 'review';
     const hasChanges = fileChanges && fileChanges.length > 0;
     const isStreaming = stream?.isActive;
     const hasBrainstorm = !!metadata.brainstorm; // Check if brainstorm data exists
@@ -67,6 +69,28 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
             setActionError('재시도에 실패했습니다. 다시 시도해주세요.');
         } finally {
             setIsRetrying(false);
+        }
+    };
+
+    const handleApprove = async () => {
+        setIsApproving(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id }),
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.error || 'Approve request failed');
+            }
+            onOpenChange(false);
+        } catch (error) {
+            console.error('Approve failed', error);
+            setActionError('승인에 실패했습니다. 다시 시도해주세요.');
+        } finally {
+            setIsApproving(false);
         }
     };
 
@@ -376,6 +400,16 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                 >
                                     <RotateCcw className={`mr-2 h-4 w-4 ${isRetrying ? 'animate-spin' : ''}`} />
                                     {isRetrying ? 'Retrying...' : 'Retry Task'}
+                                </Button>
+                            )}
+                            {isReview && (
+                                <Button
+                                    onClick={handleApprove}
+                                    disabled={isApproving}
+                                    className="bg-emerald-600 hover:bg-emerald-700"
+                                >
+                                    <ThumbsUp className={`mr-2 h-4 w-4 ${isApproving ? 'animate-pulse' : ''}`} />
+                                    {isApproving ? 'Approving...' : 'Approve'}
                                 </Button>
                             )}
                             <Button onClick={() => onOpenChange(false)}>Close</Button>

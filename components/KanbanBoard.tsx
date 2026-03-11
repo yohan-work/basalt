@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3, AlertTriangle } from 'lucide-react';
+import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3, AlertTriangle, ThumbsUp, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 import { CreateTaskModal } from './CreateTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
@@ -175,6 +175,32 @@ export function KanbanBoard() {
         startStreamAction(e, task, 'retry');
     };
 
+    const handleApprove = async (e: React.MouseEvent, task: Task) => {
+        e.stopPropagation();
+        setProcessingTaskIds(prev => new Set(prev).add(task.id));
+        try {
+            const res = await fetch('/api/agent/approve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id }),
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                showActionError('승인 실패: ' + (data.error || res.statusText));
+            }
+            // Realtime subscription이 UI를 자동 업데이트
+        } catch (err) {
+            console.error('Approve error:', err);
+            showActionError('승인 중 오류가 발생했습니다.');
+        } finally {
+            setProcessingTaskIds(prev => {
+                const next = new Set(prev);
+                next.delete(task.id);
+                return next;
+            });
+        }
+    };
+
     const handleDeleteTask = async (e: React.MouseEvent, task: Task) => {
         e.stopPropagation();
         if (!confirm(`"${task.title}" 태스크를 삭제하시겠습니까?\n(관련 로그도 함께 삭제됩니다)`)) return;
@@ -243,8 +269,8 @@ export function KanbanBoard() {
                 );
             case 'review':
                 return (
-                    <Button size="sm" disabled className="w-full text-xs h-7 bg-green-600">
-                        <CheckCircle className="mr-2 h-3 w-3" /> Review Pending
+                    <Button size="sm" onClick={(e) => handleApprove(e, task)} className="w-full text-xs h-7 bg-emerald-600 hover:bg-emerald-700">
+                        <ThumbsUp className="mr-2 h-3 w-3" /> Approve
                     </Button>
                 );
             case 'failed':
@@ -280,6 +306,11 @@ export function KanbanBoard() {
                 </div>
                 <div className="flex items-center gap-2">
                     <ThemeToggle />
+                    <Link href="/done">
+                        <Button variant="outline" className="rounded-none">
+                            <CheckCircle2 className="mr-2 h-4 w-4 text-emerald-500" /> Archive
+                        </Button>
+                    </Link>
                     <Link href="/analytics">
                         <Button variant="outline" className="rounded-none">
                             <BarChart3 className="mr-2 h-4 w-4" /> Analytics
