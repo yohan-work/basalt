@@ -15,7 +15,8 @@ Please follow these guidelines:
 2. The prompt should have clear sections. Use Markdown formatting.
    - **목표 (Objective)**: A clear, single-sentence goal.
    - **맥락 및 요구사항 (Context & Requirements)**: Detailed bullet points on what needs to be built, UI/UX expectations, and logic.
-   - **제약 조건 (Constraints)**: E.g., Use Tailwind CSS, TypeScript, Server Components, specific libraries like shadcn/ui.
+   - **제약 조건 (Constraints)**: E.g., Use Tailwind CSS, TypeScript, shadcn/ui. 
+     - **CRITICAL**: If the requested UI requires interactivity or state (like forms, buttons, animations, fetching data client-side), explicitly add a constraint indicating that the component must be a Client Component using the \`"use client"\` directive.
    - **수락 기준 (Acceptance Criteria)**: How to verify the work is done successfully.
 
 Make the result sound professional, actionable, and ready to be fed directly into an execution pipeline.
