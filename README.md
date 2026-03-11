@@ -44,6 +44,7 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - **자기 수정 루프(Self-Correction Loop)**: 작업 중 에러 발생 시 `analyze_error_logs`를 호출하여 원인을 파악하고 스스로 수정을 시도
 - **상세 PR 설명 자동화**: 변경된 파일의 diff를 분석하여 전문적이고 상세한 PR 본문을 자동 생성
 - **지속적 잠금 메커니즘(Persistent Locking)**: DB 레벨의 잠금 장치를 통해 작업의 중복 실행을 방지하고 작업 안정성 확보
+- **Human-in-the-Loop (HITL)**: 파일 삭제, 주요 설정 변경 등 파괴적인 액션이 감지될 경우, 작업을 일시 정지하고 사용자의 승인(Approve) 또는 반려(Reject)를 대기하여 안전을 보장
 
 ### TeamOrchestrator
 
@@ -69,7 +70,8 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 - **환경변수 기반 설정** (`OLLAMA_BASE_URL`, 모델 오버라이드)
 - **SSE 스트리밍 모드** — `stream: true`로 Ollama API 호출 시 토큰 단위 실시간 전송 지원 (`generateCodeStream`, `generateJSONStream`)
 - **지능형 워크플로우 최적화**: 특정 예시(로그인 페이지 등)에 고착되지 않도록 가이드라인을 추상화하여 사용자 의도 정확도 향상
-- **App Router & SEO 준수**: Client Component 충돌 방지 및 `<title>`, `<meta>` 등 SEO 필수 요소 자동 포함
+- **App Router & SEO 준수**: Client Component 충돌 방지 및 `<title>`, `<meta>` 등 SEO 필수 요소 자동 포함. 특히 `useState`, `useEffect` 등의 훅 사용 시 `"use client"` 지시어를 100% 강제 삽입하도록 프롬프트가 대폭 강화되었습니다.
+- **안정적 JSON 파싱 메커니즘**: 모델의 스트리밍이 불완전하게 끊기거나(빈 `}` 부족 등) 잘못된 포맷이 들어와도 서버 크래시(`SyntaxError`)를 내지 않도록 안전한 파싱 보호막(`try-catch`)이 적용되어 있습니다.
 - **프로파일러 연동**: 프로젝트 구조 및 Barrel import 지원 여부를 감지하여 존재하지 않는 경로 임포트(할루시네이션) 방지
 - **지능적 컨텍스트 라우팅**: 스킬의 난이도에 따라 FAST(단순 경로/인자) 또는 SMART(추론/분석) 모델을 동적으로 선택하여 속도와 정확도 최적화
 
@@ -153,7 +155,7 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 |----------|--------|
 | `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독. SSE 기반 액션 스트리밍. 스켈레톤 로딩, 에러 토스트, 빈 상태 표시 |
 | `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR). `taskId` 기반 필터링 및 ID 기반 중복 제거 지원 |
-| `AgentDiscussion` | **Basalt Virtual Office**. 플로팅 카드 형태의 룸들과 점선 그리드 배경을 가진 2.5D 탑다운 가상 오피스. 에이전트들이 작업 상태에 따라 Boardroom, Patio, Engineering Hub 등으로 이동하며, 대기 중일 때는 자연스러운 배회(Wandering) 및 각자의 위치에서 배경 업무(Working Animation)를 수행합니다. 대화 발생 시 발화자와 청취자 간의 데이터 흐름(Data Flow Lines)과 시선 향함(Gaze) 레이아웃이 지원됩니다. |
+| `AgentDiscussion` | **Basalt Virtual Office**. 플로팅 카드 형태의 룸들과 점선 그리드 배경을 가진 2.5D 탑다운 가상 오피스. 에이전트들이 작업 상태에 따라 Boardroom, Patio, Engineering Hub 등으로 이동하며, 대기 중일 때는 자연스러운 배회(Wandering) 및 각자의 위치에서 배경 업무(Working Animation)를 수행합니다. 브레인스토밍 전 과정(시작/수립 결론 포함)을 누락 없이 실시간 스트리밍합니다. |
 | `OfficeLayout` | 점선 그리드(Dotted Grid) 배경 위에 각 공간(Boardroom, Patio, Hub)을 분리된 플로팅 카드로 세련되게 구현한 확장 가능한 오피스 레이아웃 |
 | `AgentAvatar` | 탑다운 시점에서 레고(Lego) 캐릭터 형태로 디자인된 전신 아바타. `framer-motion`을 통해 이동, 발화, 생각(Thought), 배경 업무(Working), 그리고 시선(Gaze) 애니메이션을 역동적으로 처리하는 심리스한 컴포넌트 |
 | `TaskDetailsModal` | 태스크 상세 모달. Details, Changes, Brainstorm, Live Logs 4개 탭 통합. 85vh 고정 높이 레이아웃으로 모든 뷰의 스크롤 안정성 확보 |
@@ -173,8 +175,9 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 |----------|--------|
 | `AnalyticsDashboard` | 분석 대시보드. 성공률, 에이전트 통계, 에러 분석 |
 | `AgentActivityChart` | Recharts 기반 에이전트 활동 바 차트 |
+| `AgentActionRadarChart` | 에이전트들의 액션 분포 및 전문성 영역(Topology)을 보여주는 방사형 차트 |
 | `ErrorRankingTable` | 빈도순 에러 랭킹 테이블 |
-| `StatCard` | 통계 카드 (아이콘, 값, 트렌드) |
+| `StatCard` | 통계 카드 (아이콘, 값, 트렌드). API 토큰 사용량 기반 **Cost Saved (비용 절감액)** 추정 기능 지원 |
 | `TeamActivityView` | 팀 활동 라이브 뷰 (3초 폴링) |
 | `ChatChannel` | 팀 에이전트 간 채팅 인터페이스 |
 
