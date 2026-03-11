@@ -102,8 +102,14 @@ export class AgentLoader {
                     try {
                         const filePath = path.join(skillsDir, entry.name, 'SKILL.md');
                         if (fs.existsSync(filePath)) {
+                            // Level 1: Meta-data loading only to save token processing
                             const fileContent = fs.readFileSync(filePath, 'utf-8');
-                            const { data } = matter(fileContent);
+                            
+                            // We only need the YAML frontmatter
+                            const endOfMatter = fileContent.indexOf('---', 3);
+                            const matterContent = endOfMatter !== -1 ? fileContent.substring(0, endOfMatter + 3) : fileContent;
+                            
+                            const { data } = matter(matterContent);
                             skillsBrief.push({
                                 name: data.name || entry.name,
                                 description: data.description || 'No description provided.'
@@ -123,11 +129,15 @@ export class AgentLoader {
 
     /**
      * Loads a Skill configuration from lib/skills/[skillName]/SKILL.md
+     * Progressively loads only basic metadata first, unless full loading is required by executor.
      */
     static loadSkill(skillName: string): SkillDefinition {
         try {
-            const filePath = path.join(BASE_DIR, 'lib', 'skills', skillName, 'SKILL.md');
-            if (!fs.existsSync(filePath)) {
+            // First check global/local directories
+            const localPath = path.join(BASE_DIR, 'lib', 'skills', skillName, 'SKILL.md');
+            // We can also check a global ~/.gemini/antigravity/skills path if needed later.
+            
+            if (!fs.existsSync(localPath)) {
                 console.warn(`Skill configuration not found for: ${skillName}, falling back to minimal config`);
                 return {
                     name: skillName,
@@ -136,7 +146,7 @@ export class AgentLoader {
                 };
             }
 
-            const fileContent = fs.readFileSync(filePath, 'utf-8');
+            const fileContent = fs.readFileSync(localPath, 'utf-8');
             const { data, content } = matter(fileContent);
 
             // Extract "Inputs" section if it exists
@@ -157,20 +167,19 @@ export class AgentLoader {
     /**
      * Helper to extract a full section content by header
      */
-    private static extractSection(markdown: string, header: string): string {
+    public static extractSection(markdown: string, sectionHeading: string): string | undefined {
+        const regex = new RegExp(`^##\\s+${sectionHeading}\\s*\\n([^#]*)(?:\\n#|$)`, 'im');
+        // Simple manual parsing since JS RegExp no-overlap can be tricky
         const lines = markdown.split('\n');
         let inSection = false;
         let content = '';
 
         for (const line of lines) {
-            // Check for header (e.g., "## Inputs")
-            if (line.match(new RegExp(`^#{1,3}\\s+${header}`))) {
+            if (line.match(new RegExp(`^#{1,3}\\s+${sectionHeading}`))) {
                 inSection = true;
                 continue;
             }
 
-            // If we hit another header that is same level or higher, stop
-            // Simple heuristic to stop at next ## or #
             if (inSection && line.match(/^#{1,3}\s/)) {
                 break;
             }
@@ -179,13 +188,13 @@ export class AgentLoader {
                 content += line + '\n';
             }
         }
-        return content.trim();
+        return content.trim() || undefined;
     }
 
     /**
      * Helper to extract bullet points from a markdown section
      */
-    private static extractListFromSection(markdown: string, header: string): string[] {
+    public static extractListFromSection(markdown: string, header: string): string[] {
         const lines = markdown.split('\n');
         let inSection = false;
         const items: string[] = [];

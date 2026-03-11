@@ -319,6 +319,33 @@ Task: ${prompt}
     }
 }
 
+export async function generateText(
+    systemPrompt: string,
+    userPrompt: string,
+    model: string = MODEL_CONFIG.SMART_MODEL,
+    emitter: any = null
+): Promise<string> {
+    validateModels();
+
+    const fullPrompt = `${systemPrompt}\n\nTask: ${userPrompt}`;
+
+    return withRetry(async () => {
+        let fullText = '';
+        await ollamaRequest(
+            `${OLLAMA_BASE_URL}/api/generate`,
+            { model, prompt: fullPrompt, stream: false },
+            TIMEOUT_MS.JSON, // using JSON timeout as it's a general text task
+            async (res) => {
+                const chunks: any[] = [];
+                for await (const chunk of res) chunks.push(chunk);
+                const data = JSON.parse(Buffer.concat(chunks).toString());
+                fullText = data.response;
+            }
+        );
+        return fullText.trim();
+    });
+}
+
 export async function generateJSON(
     systemPrompt: string,
     userPrompt: string,
