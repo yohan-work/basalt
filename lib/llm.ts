@@ -234,6 +234,12 @@ MANDATORY CODING RULES:
 - **NEXT.JS IMAGE COMPONENTS**:
   - If you need to use placeholder images from external URLs (e.g., \`via.placeholder.com\`, \`unsplash.com\`), **DO NOT** use the Next.js \`<Image>\` component (\`next/image\`). It will cause a runtime error because the hostname is not configured in \`next.config.js\`.
   - Instead, use a standard HTML \`<img>\` tag with appropriate styling for external placeholder images.
+
+🚨 CRITICAL OUTPUT FORMATTING RULES 🚨
+- DO NOT output any conversational text, greetings, explanations, or conclusions.
+- DO NOT say "Sure", "I can help", "Here is the code", or summarize your changes.
+- Your ENTIRE response MUST consist ONLY of the requested file format structure.
+- Failure to follow these rules will cause a fatal system failure.
 `.trim();
 
 const FILE_FORMAT_INSTRUCTIONS = `
@@ -265,12 +271,10 @@ export async function generateCode(
 ): Promise<LLMResponse> {
     validateModels();
 
-    const fullPrompt = `
-${CODE_GENERATION_SYSTEM_RULES}
-
+    const systemPromptText = `${CODE_GENERATION_SYSTEM_RULES}\n\n${FILE_FORMAT_INSTRUCTIONS}`;
+    
+    const userPromptText = `
 Task Context: The target tech stack is ${techStack}.
-
-${FILE_FORMAT_INSTRUCTIONS}
 
 Context:
 ${context}
@@ -284,7 +288,7 @@ Task: ${prompt}
         await withRetry(async () => {
             await ollamaRequest(
                 `${OLLAMA_BASE_URL}/api/generate`,
-                { model, prompt: fullPrompt, stream: false },
+                { model, system: systemPromptText, prompt: userPromptText, stream: false },
                 TIMEOUT_MS.CODE,
                 async (res) => {
                     const chunks: any[] = [];
@@ -327,13 +331,11 @@ export async function generateText(
 ): Promise<string> {
     validateModels();
 
-    const fullPrompt = `${systemPrompt}\n\nTask: ${userPrompt}`;
-
     return withRetry(async () => {
         let fullText = '';
         await ollamaRequest(
             `${OLLAMA_BASE_URL}/api/generate`,
-            { model, prompt: fullPrompt, stream: false },
+            { model, system: systemPrompt, prompt: userPrompt, stream: false },
             TIMEOUT_MS.JSON, // using JSON timeout as it's a general text task
             async (res) => {
                 const chunks: any[] = [];
@@ -354,14 +356,14 @@ export async function generateJSON(
 ): Promise<any> {
     validateModels();
 
-    const fullPrompt = `${systemPrompt}\n\nGoal: ${userPrompt}\n\nReturn the response in the following JSON format ONLY:\n${schemaDescription}`;
+    const userPromptText = `Goal: ${userPrompt}\n\nReturn the response in the following JSON format ONLY:\n${schemaDescription}`;
 
     return withRetry(async () => {
         let fullText = '';
         let tokens: { prompt_eval_count: number; eval_count: number } | undefined;
         await ollamaRequest(
             `${OLLAMA_BASE_URL}/api/generate`,
-            { model, prompt: fullPrompt, stream: false },
+            { model, system: systemPrompt, prompt: userPromptText, stream: false },
             TIMEOUT_MS.JSON,
             async (res) => {
                 const chunks: any[] = [];
@@ -436,12 +438,10 @@ export async function generateCodeStream(
 
     validateModels();
 
-    const fullPrompt = `
-${CODE_GENERATION_SYSTEM_RULES}
+    const systemPromptText = `${CODE_GENERATION_SYSTEM_RULES}\n\n${FILE_FORMAT_INSTRUCTIONS}`;
 
+    const userPromptText = `
 Task Context: The target tech stack is ${techStack}.
-
-${FILE_FORMAT_INSTRUCTIONS}
 
 Context:
 ${context}
@@ -455,7 +455,7 @@ Task: ${prompt}
         await withRetry(async () => {
             await ollamaStreamRequest(
                 `${OLLAMA_BASE_URL}/api/generate`,
-                { model, prompt: fullPrompt }, // NO format: 'json' here for speed
+                { model, system: systemPromptText, prompt: userPromptText }, // NO format: 'json' here for speed
                 TIMEOUT_MS.CODE,
                 (chunk) => {
                     const token = chunk.response || '';
@@ -504,7 +504,7 @@ export async function generateJSONStream(
 
     validateModels();
 
-    const fullPrompt = `${systemPrompt}\n\nGoal: ${userPrompt}\n\nReturn the response in the following JSON format ONLY:\n${schemaDescription}`;
+    const userPromptText = `Goal: ${userPrompt}\n\nReturn the response in the following JSON format ONLY:\n${schemaDescription}`;
 
     try {
         let fullText = '';
@@ -512,7 +512,7 @@ export async function generateJSONStream(
         await withRetry(async () => {
             await ollamaStreamRequest(
                 `${OLLAMA_BASE_URL}/api/generate`,
-                { model, prompt: fullPrompt },
+                { model, system: systemPrompt, prompt: userPromptText },
                 TIMEOUT_MS.JSON,
                 (chunk) => {
                     const token = chunk.response || '';
