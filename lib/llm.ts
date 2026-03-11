@@ -361,7 +361,7 @@ export async function generateJSON(
         let tokens: { prompt_eval_count: number; eval_count: number } | undefined;
         await ollamaRequest(
             `${OLLAMA_BASE_URL}/api/generate`,
-            { model, prompt: fullPrompt, stream: false, format: 'json' },
+            { model, prompt: fullPrompt, stream: false },
             TIMEOUT_MS.JSON,
             async (res) => {
                 const chunks: any[] = [];
@@ -512,7 +512,7 @@ export async function generateJSONStream(
         await withRetry(async () => {
             await ollamaStreamRequest(
                 `${OLLAMA_BASE_URL}/api/generate`,
-                { model, prompt: fullPrompt, format: 'json' },
+                { model, prompt: fullPrompt },
                 TIMEOUT_MS.JSON,
                 (chunk) => {
                     const token = chunk.response || '';

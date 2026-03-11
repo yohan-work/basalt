@@ -66,7 +66,7 @@ ${contextDiscussion}${targetedRule}
             MODEL_CONFIG.SMART_MODEL
         );
 
-        const thoughts = response.thoughts || [];
+        const thoughts = Array.isArray(response) ? response : (response.thoughts || []);
         console.log(`[Consultation] Generated ${thoughts.length} thoughts`);
         return thoughts;
     } catch (e) {
