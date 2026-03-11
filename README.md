@@ -103,7 +103,10 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 
 ### Skills
 
-에이전트가 실제로 "할 수 있는 것들"입니다. 재사용 가능한 함수 모듈.
+에이전트가 실제로 "할 수 있는 것들"입니다. 재사용 가능한 기능 모듈.
+**마크다운(SKILL.md) 기반의 동적 스킬 시스템**으로 아키텍처.
+- **점진적 로딩 (Progressive Disclosure)**: 시스템 부팅 시 스킬 문서의 YAML 메타데이터만 가볍게 파싱하여(Level 1), 수백 개의 커뮤니티 스킬이 등록되어도 컨텍스트 윈도우 폭발이나 토큰 누수가 발생하지 않습니다.
+- **범용 스킬 실행기 (Universal Skill Executor)**: 하드코딩된 TypeScript 함수 없이도, 에이전트가 스킬을 호출하면 런타임에 프롬프트를 동적으로 조립하여 실행합니다. 이를 통해 외부 생태계의 스킬을 드롭인(Drop-in) 방식으로 즉시 연동할 수 있습니다.
 
 | 스킬 | 하는 일 |
 |------|--------|
@@ -113,7 +116,8 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | `write_code` | 파일 생성/수정 |
 | `refactor_code` | 코드 리팩토링 |
 | `lint_code`, `typecheck` | 코드 품질 검사 |
-| `manage_git` | checkout, commit, push, PR 생성 (`gh` CLI 미설치 대응 및 상세 에러 로그) |
+| `deep_code_review` | 코드 성능, 보안, 유지보수성 측면의 심층 분석 (커뮤니티 스킬 연동 예시) |
+| `manage_git` | checkout, commit, push, PR 자동 생성 (변경점 없을 시 빈 커밋 허용, Bash 이스케이프 및 `gh` CLI 미설치 대응 안전성 보완) |
 | `run_shell_command` | 터미널 명령 실행 (`emitter` safe 호출 지원) |
 | `check_environment` | Node 버전 등 환경 체크 |
 | `generate_scss` | SCSS 파일 생성 |
