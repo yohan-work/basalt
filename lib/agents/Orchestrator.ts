@@ -113,7 +113,15 @@ export class Orchestrator {
     }
 
     private getSkillFunction(skillName: string) {
-        return (skills as any)[skillName];
+        if ((skills as any)[skillName]) {
+            return (skills as any)[skillName];
+        }
+        
+        // Fallback to the new Markdown-based Dynamic Skill Executor
+        // This allows seamlessly running community skills loaded from SKILL.md
+        return async (...args: any[]) => {
+            return await skills.execute_skill(skillName, { args }, await this.profiler.getContextString(), this.emitter);
+        };
     }
 
     // --- Phase 1: Planning ---
@@ -768,12 +776,22 @@ Use 'feat:', 'fix:', 'refactor:' conventions for commit messages.
                         await this.accumulateTokens(generated.__tokens.prompt_eval_count, generated.__tokens.eval_count);
                     }
 
-                    if (generated.commitMessage) {
-                        gitDetails = { ...gitDetails, ...generated };
+                    if (generated.commitMessage && generated.commitMessage.trim()) {
+                        gitDetails.commitMessage = generated.commitMessage.trim();
+                    }
+                    if (generated.prTitle && generated.prTitle.trim()) {
+                        gitDetails.prTitle = generated.prTitle.trim();
+                    }
+                    if (generated.prBody && generated.prBody.trim()) {
+                        gitDetails.prBody = generated.prBody.trim();
                     }
                 } catch (e) {
                     console.warn('Failed to generate dynamic git details, using defaults.');
                 }
+                
+                // Securely escape double quotes for Bash execution
+                const safeTitle = gitDetails.prTitle.replace(/"/g, '\\"');
+                const safeBody = gitDetails.prBody.replace(/"/g, '\\"');
 
                 try {
                     // Branch was already created in execute(), just commit, push and create PR
@@ -788,7 +806,7 @@ Use 'feat:', 'fix:', 'refactor:' conventions for commit messages.
 
                     await this.log(mainAgentName, 'Creating Pull Request...');
                     // Create PR from feature branch to main
-                    await skills.manage_git('create_pr', `--fill --title "${gitDetails.prTitle}" --body "${gitDetails.prBody}"`, projectPath);
+                    await skills.manage_git('create_pr', `--fill --title "${safeTitle}" --body "${safeBody}"`, projectPath);
 
                     await this.log(mainAgentName, `Git Automation Completed (Commit, Push, PR on branch ${branchName}).`);
                     this.emitter?.emit({ type: 'skill_result', skill: 'manage_git', summary: `PR created on ${branchName}` });
