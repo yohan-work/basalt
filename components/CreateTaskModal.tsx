@@ -16,21 +16,35 @@ import {
 import { TASK_TEMPLATES, type TaskTemplate } from '@/lib/task-templates';
 import {
     LayoutGrid, Globe, Bug, RefreshCw, FileText,
-    Paintbrush, TestTube, BookOpen, ChevronDown, ChevronUp, FileEdit, Wand2,
+    Paintbrush, TestTube, BookOpen, ChevronDown, ChevronUp, FileEdit, Wand2, Package,
 } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
     LayoutGrid, Globe, Bug, RefreshCw, FileText,
     Paintbrush, TestTube, BookOpen,
 };
 
+export interface CreateTaskPayload {
+    title: string;
+    description: string;
+    priority: string;
+    attachedComponentPaths?: string[];
+}
+
 interface CreateTaskModalProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    onSubmit: (task: { title: string; description: string; priority: string }) => void;
+    onSubmit: (task: CreateTaskPayload) => void;
+    selectedProjectId?: string | null;
 }
 
-export function CreateTaskModal({ open, onOpenChange, onSubmit }: CreateTaskModalProps) {
+interface ComponentItem {
+    filePath: string;
+    displayName: string;
+}
+
+export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectId }: CreateTaskModalProps) {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [priority, setPriority] = useState('Medium');
@@ -38,6 +52,26 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit }: CreateTaskModa
     const [isEnhancing, setIsEnhancing] = useState(false);
     const [showTemplates, setShowTemplates] = useState(true);
     const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+    const [components, setComponents] = useState<ComponentItem[]>([]);
+    const [selectedComponentPaths, setSelectedComponentPaths] = useState<string[]>([]);
+    const [componentsLoading, setComponentsLoading] = useState(false);
+
+    // Fetch components when project is selected
+    useEffect(() => {
+        if (!open || !selectedProjectId) {
+            setComponents([]);
+            setSelectedComponentPaths([]);
+            return;
+        }
+        setComponentsLoading(true);
+        fetch(`/api/project/components?projectId=${encodeURIComponent(selectedProjectId)}`)
+            .then((res) => res.json())
+            .then((data) => {
+                if (data.components) setComponents(data.components);
+            })
+            .catch(() => setComponents([]))
+            .finally(() => setComponentsLoading(false));
+    }, [open, selectedProjectId]);
 
     // 모달이 닫힐 때 폼 초기화
     useEffect(() => {
@@ -49,6 +83,7 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit }: CreateTaskModa
             setIsEnhancing(false);
             setSelectedTemplateId(null);
             setShowTemplates(true);
+            setSelectedComponentPaths([]);
         }
     }, [open]);
 
@@ -72,11 +107,22 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit }: CreateTaskModa
         if (!title.trim()) return;
         setIsSubmitting(true);
         try {
-            onSubmit({ title, description, priority });
+            const payload: CreateTaskPayload = { title, description, priority };
+            if (selectedComponentPaths.length > 0) {
+                payload.attachedComponentPaths = selectedComponentPaths;
+                payload.description = `다음 컴포넌트를 import해서 사용해줘: ${selectedComponentPaths.map(p => `@${p}`).join(', ')}.\n\n${description}`;
+            }
+            onSubmit(payload);
             onOpenChange(false);
         } finally {
             setIsSubmitting(false);
         }
+    };
+
+    const toggleComponent = (filePath: string) => {
+        setSelectedComponentPaths((prev) =>
+            prev.includes(filePath) ? prev.filter((p) => p !== filePath) : [...prev, filePath]
+        );
     };
 
     const handleEnhancePrompt = async () => {
@@ -225,6 +271,41 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit }: CreateTaskModa
                             <option value="High">High</option>
                         </select>
                     </div>
+
+                    {selectedProjectId && (
+                        <div className="grid gap-2">
+                            <Label className="flex items-center gap-2">
+                                <Package className="h-4 w-4 text-muted-foreground" />
+                                사용할 컴포넌트 (페이지 생성 시 import)
+                            </Label>
+                            {componentsLoading ? (
+                                <p className="text-xs text-muted-foreground">로딩 중...</p>
+                            ) : components.length === 0 ? (
+                                <p className="text-xs text-muted-foreground">프로젝트에 components 폴더가 없거나 .tsx/.jsx 파일이 없습니다.</p>
+                            ) : (
+                                <ScrollArea className="h-[120px] rounded-md border border-input bg-background px-3 py-2">
+                                    <div className="flex flex-wrap gap-2">
+                                        {components.map((c) => (
+                                            <label
+                                                key={c.filePath}
+                                                className="flex items-center gap-1.5 cursor-pointer text-xs"
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedComponentPaths.includes(c.filePath)}
+                                                    onChange={() => toggleComponent(c.filePath)}
+                                                    className="rounded border-input"
+                                                />
+                                                <span className="truncate max-w-[180px]" title={c.filePath}>
+                                                    {c.displayName}
+                                                </span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </ScrollArea>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 <DialogFooter>
