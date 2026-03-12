@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp } from 'lucide-react';
+import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp, Pencil, Search } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { StepProgress, type ProgressInfo } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
@@ -18,7 +18,11 @@ import {
     Dialog,
     DialogContent,
     DialogTitle,
+    DialogHeader,
+    DialogDescription,
+    DialogFooter,
 } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 
 interface TaskDetailsModalProps {
     task: {
@@ -39,10 +43,19 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
     const [isDeleting, setIsDeleting] = useState(false);
     const [isApproving, setIsApproving] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+    const [editInstructions, setEditInstructions] = useState('');
+    const [isEditing, setIsEditing] = useState(false);
+    const [modifyElementFilePath, setModifyElementFilePath] = useState('');
+    const [modifyElementDescriptor, setModifyElementDescriptor] = useState('');
+    const [modifyElementRequest, setModifyElementRequest] = useState('');
+    const [isModifyingElement, setIsModifyingElement] = useState(false);
+    const [isReviewing, setIsReviewing] = useState(false);
 
     if (!task) return null;
 
     const metadata = (task.metadata || {}) as Record<string, unknown>;
+    const reviewResult = metadata.reviewResult as string | undefined;
     const analysis = metadata.analysis as { complexity?: string; required_agents?: string[]; summary?: string } | undefined;
     const workflow = metadata.workflow as { steps: Array<{ action: string; agent: string }> } | undefined;
     const verification = metadata.verification as { verified: boolean; notes: string } | undefined;
@@ -50,7 +63,78 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
     const fileChanges = metadata.fileChanges as FileChange[] | undefined;
     const isFailed = task.status === 'failed';
     const isReview = task.status === 'review';
+    const canEditOrReview = ['testing', 'review', 'done'].includes(task.status);
     const hasChanges = fileChanges && fileChanges.length > 0;
+
+    const handleEditCompleted = async () => {
+        if (!editInstructions.trim()) return;
+        setIsEditing(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/edit-completed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id, instructions: editInstructions.trim() }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Edit request failed');
+            setIsEditModalOpen(false);
+            setEditInstructions('');
+            setView('changes');
+        } catch (error) {
+            console.error('Edit completed failed', error);
+            setActionError(error instanceof Error ? error.message : '코드 수정 요청에 실패했습니다.');
+        } finally {
+            setIsEditing(false);
+        }
+    };
+
+    const handleModifyElement = async () => {
+        if (!modifyElementRequest.trim()) return;
+        setIsModifyingElement(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/modify-element', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    taskId: task.id,
+                    filePath: modifyElementFilePath || undefined,
+                    elementDescriptor: modifyElementDescriptor.trim() || undefined,
+                    request: modifyElementRequest.trim(),
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Element modify request failed');
+            setModifyElementRequest('');
+            setModifyElementDescriptor('');
+        } catch (error) {
+            console.error('Modify element failed', error);
+            setActionError(error instanceof Error ? error.message : '요소 수정 요청에 실패했습니다.');
+        } finally {
+            setIsModifyingElement(false);
+        }
+    };
+
+    const handleRunReview = async () => {
+        setIsReviewing(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/review', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Review failed');
+            setView('details');
+        } catch (error) {
+            console.error('Review failed', error);
+            setActionError(error instanceof Error ? error.message : '코드 검토 실행에 실패했습니다.');
+        } finally {
+            setIsReviewing(false);
+        }
+    };
     const isStreaming = stream?.isActive;
     const hasBrainstorm = !!metadata.brainstorm; // Check if brainstorm data exists
 
@@ -125,6 +209,7 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
     };
 
     return (
+        <>
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
                 className={`sm:max-w-5xl h-[85vh] flex flex-col p-0 gap-0 transition-all duration-300 ${view === 'brainstorm' ? 'overflow-visible !translate-x-[calc(-50%-190px)]' : 'overflow-hidden !translate-x-[-50%]'}`}
@@ -227,7 +312,59 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                             </div>
                         ) : view === 'changes' && hasChanges ? (
                             <div className="flex-1 overflow-hidden flex flex-col">
-                                <CodeDiffViewer fileChanges={fileChanges!} />
+                                {canEditOrReview && (
+                                    <div className="shrink-0 p-4 border-b bg-muted/30 space-y-3">
+                                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">특정 요소 수정 요청</h4>
+                                        <div className="flex flex-wrap gap-2 items-end">
+                                            <div className="flex flex-col gap-1 min-w-[140px]">
+                                                <Label className="text-xs">파일</Label>
+                                                <select
+                                                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                                                    value={modifyElementFilePath}
+                                                    onChange={(e) => setModifyElementFilePath(e.target.value)}
+                                                    disabled={isModifyingElement}
+                                                >
+                                                    <option value="">첫 번째 파일</option>
+                                                    {fileChanges!.map((fc, idx) => (
+                                                        <option key={`${fc.filePath}-${fc.stepIndex ?? ''}-${idx}`} value={fc.filePath}>{fc.filePath}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div className="flex flex-col gap-1 min-w-[160px]">
+                                                <Label className="text-xs">요소 설명 (선택)</Label>
+                                                <input
+                                                    type="text"
+                                                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                                                    placeholder="예: 타이틀, HeroSection"
+                                                    value={modifyElementDescriptor}
+                                                    onChange={(e) => setModifyElementDescriptor(e.target.value)}
+                                                    disabled={isModifyingElement}
+                                                />
+                                            </div>
+                                            <div className="flex flex-col gap-1 flex-1 min-w-[180px]">
+                                                <Label className="text-xs">수정 요청</Label>
+                                                <input
+                                                    type="text"
+                                                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                                                    placeholder="EX) component 요소를 제거해줘"
+                                                    value={modifyElementRequest}
+                                                    onChange={(e) => setModifyElementRequest(e.target.value)}
+                                                    disabled={isModifyingElement}
+                                                />
+                                            </div>
+                                            <Button
+                                                size="sm"
+                                                onClick={handleModifyElement}
+                                                disabled={isModifyingElement || !modifyElementRequest.trim()}
+                                            >
+                                                {isModifyingElement ? '수정 중...' : '이 요소 수정 요청'}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
+                                <div className="flex-1 min-h-0 overflow-hidden">
+                                    <CodeDiffViewer fileChanges={fileChanges!} />
+                                </div>
                             </div>
                         ) : view === 'details' ? (
                             <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -367,6 +504,19 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                     </div>
                                 )}
 
+                                {/* Code Review Result */}
+                                {reviewResult && (
+                                    <div className="space-y-3">
+                                        <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                                            <Search className="w-4 h-4" />
+                                            코드 검토 결과
+                                        </h3>
+                                        <div className="p-4 rounded-md border bg-card text-sm whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+                                            {reviewResult}
+                                        </div>
+                                    </div>
+                                )}
+
                                 {!analysis && !workflow && (
                                     <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
                                         <Clock className="h-8 w-8 mb-2 opacity-20" />
@@ -412,6 +562,26 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                     {isApproving ? 'Approving...' : 'Approve'}
                                 </Button>
                             )}
+                            {canEditOrReview && hasChanges && (
+                                <Button
+                                    variant="outline"
+                                    onClick={() => setIsEditModalOpen(true)}
+                                    disabled={isEditing}
+                                >
+                                    <Pencil className="mr-2 h-4 w-4" />
+                                    Request Code Edit
+                                </Button>
+                            )}
+                            {canEditOrReview && (hasChanges || task.description) && (
+                                <Button
+                                    variant="outline"
+                                    onClick={handleRunReview}
+                                    disabled={isReviewing}
+                                >
+                                    <Search className={`mr-2 h-4 w-4 ${isReviewing ? 'animate-pulse' : ''}`} />
+                                    {isReviewing ? '검토 중...' : 'Code Review'}
+                                </Button>
+                            )}
                             <Button onClick={() => onOpenChange(false)}>Close</Button>
                         </div>
                     </div>
@@ -423,5 +593,39 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                 )}
             </DialogContent>
         </Dialog>
+
+            {/* Edit completed code modal (sibling to avoid nested dialog issues) */}
+            <Dialog open={isEditModalOpen} onOpenChange={setIsEditModalOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Request Code Edit</DialogTitle>
+                        <DialogDescription>
+                            완료된 결과물에 적용할 수정 지시사항을 입력하세요.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="grid gap-4 py-4">
+                        <div className="grid gap-2">
+                            <Label htmlFor="edit-instructions">수정 지시사항</Label>
+                            <textarea
+                                id="edit-instructions"
+                                className="flex min-h-[100px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                placeholder="EX) Increase the font size of the title"
+                                value={editInstructions}
+                                onChange={(e) => setEditInstructions(e.target.value)}
+                                disabled={isEditing}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsEditModalOpen(false)} disabled={isEditing}>
+                            취소
+                        </Button>
+                        <Button onClick={handleEditCompleted} disabled={isEditing || !editInstructions.trim()}>
+                            {isEditing ? '수정 중...' : '수정 요청'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
     );
 }
