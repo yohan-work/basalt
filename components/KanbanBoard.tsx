@@ -5,10 +5,11 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3, AlertTriangle, ThumbsUp, CheckCircle2 } from 'lucide-react';
+import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3, AlertTriangle, ThumbsUp, CheckCircle2, Monitor } from 'lucide-react';
 import Link from 'next/link';
 import { CreateTaskModal } from './CreateTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
+import { ProjectPreviewPanel } from './ProjectPreviewPanel';
 import { ProjectSelector } from './ProjectSelector';
 import { StepProgress } from './StepProgress';
 import { ThemeToggle } from './ThemeToggle';
@@ -54,6 +55,7 @@ export function KanbanBoard() {
     const [processingTaskIds, setProcessingTaskIds] = useState<Set<string>>(new Set());
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+    const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [actionError, setActionError] = useState<string | null>(null);
 
@@ -306,6 +308,17 @@ export function KanbanBoard() {
                 <div className="flex items-center gap-4">
                     <h1 className="text-2xl font-bold tracking-tight">AI Agent Kanban</h1>
                     <ProjectSelector selectedProjectId={selectedProjectId} onProjectSelect={setSelectedProjectId} />
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-none"
+                        disabled={!selectedProjectId}
+                        onClick={() => setIsPreviewOpen(true)}
+                        title={selectedProjectId ? '선택한 프로젝트 dev 서버 미리보기' : '프로젝트를 선택하세요'}
+                    >
+                        <Monitor className="mr-2 h-4 w-4" />
+                        Preview
+                    </Button>
                 </div>
                 <div className="flex items-center gap-2">
                     <ThemeToggle />
@@ -337,6 +350,12 @@ export function KanbanBoard() {
                 open={isDetailsOpen}
                 onOpenChange={setIsDetailsOpen}
                 stream={stream}
+            />
+
+            <ProjectPreviewPanel
+                projectId={selectedProjectId}
+                open={isPreviewOpen}
+                onOpenChange={setIsPreviewOpen}
             />
 
             <div className="flex-1 overflow-x-auto p-4">
