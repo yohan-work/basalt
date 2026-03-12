@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { FolderPlus, Folder } from 'lucide-react';
+import { FolderPlus, Folder, Trash2 } from 'lucide-react';
 
 interface Project {
     id: string;
@@ -94,6 +94,23 @@ export function ProjectSelector({ selectedProjectId, onProjectSelect }: ProjectS
         setNewProject({ name: '', path: '' });
     };
 
+    const handleDeleteProject = async () => {
+        if (!selectedProjectId) return;
+        const projectName = projects.find(p => p.id === selectedProjectId)?.name ?? '이 프로젝트';
+        if (!confirm(`"${projectName}"을(를) 목록에서 삭제할까요?\n연결된 태스크는 삭제되지 않습니다.`)) return;
+
+        const { error } = await supabase.from('Projects').delete().eq('id', selectedProjectId);
+        if (error) {
+            console.error('Error deleting project:', error);
+            alert('프로젝트 삭제 실패: ' + error.message);
+            return;
+        }
+
+        const remaining = projects.filter(p => p.id !== selectedProjectId);
+        setProjects(remaining);
+        onProjectSelect(remaining.length > 0 ? remaining[0].id : null);
+    };
+
     const handleBrowseFolder = async () => {
         try {
             const res = await fetch('/api/system/dialog', { method: 'POST' });
@@ -127,6 +144,20 @@ export function ProjectSelector({ selectedProjectId, onProjectSelect }: ProjectS
                     ))}
                 </SelectContent>
             </Select>
+
+            {selectedProjectId && (
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive hover:border-destructive/50"
+                    onClick={handleDeleteProject}
+                    title="선택한 프로젝트 삭제"
+                    aria-label="선택한 프로젝트 삭제"
+                >
+                    <Trash2 className="h-4 w-4" />
+                </Button>
+            )}
 
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>

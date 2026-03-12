@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
     Dialog,
     DialogContent,
@@ -42,18 +42,23 @@ export function ProjectPreviewPanel({ projectId, open, onOpenChange }: ProjectPr
     const [addressBarUrl, setAddressBarUrl] = useState('');
     /** URL actually loaded in the iframe (updated on API load, manual port apply, or 이동/Enter) */
     const [iframeSrc, setIframeSrc] = useState('');
+    const prevOpenRef = useRef(false);
 
     useEffect(() => {
         if (!open || !projectId) {
-            setInfo(null);
-            setFetchError(null);
-            setManualPort('');
-            setUseManualPort(false);
-            setAddressBarUrl('');
-            setIframeSrc('');
+            if (prevOpenRef.current) {
+                prevOpenRef.current = false;
+                setInfo(null);
+                setFetchError(null);
+                setManualPort('');
+                setUseManualPort(false);
+                setAddressBarUrl('');
+                setIframeSrc('');
+            }
             return;
         }
 
+        prevOpenRef.current = true;
         let cancelled = false;
         setLoading(true);
         setFetchError(null);
@@ -121,14 +126,14 @@ export function ProjectPreviewPanel({ projectId, open, onOpenChange }: ProjectPr
                 className="fixed left-auto right-0 top-0 h-full w-[min(90vw,800px)] max-w-full translate-x-0 translate-y-0 gap-0 rounded-l-lg rounded-r-none border-r p-0 pl-6 data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right"
                 onPointerDownOutside={(e) => e.preventDefault()}
             >
-                <DialogHeader className="space-y-2 border-b px-6 pb-2 pt-3">
-                    <DialogTitle className="flex items-center gap-2 text-lg">
-                        <Monitor className="h-5 w-5" />
-                        Project Preview
-                    </DialogTitle>
-                </DialogHeader>
 
                 <div className="flex flex-1 flex-col gap-2 overflow-hidden px-6 pt-2 pb-3">
+                    <DialogHeader className="space-y-2 border-b px-6 pb-2 pt-3">
+                        <DialogTitle className="flex items-center gap-2 text-lg">
+                            <Monitor className="h-5 w-5" />
+                            Project Preview
+                        </DialogTitle>
+                    </DialogHeader>
                     {loading && (
                         <div className="flex flex-1 items-center justify-center gap-2 text-muted-foreground">
                             <Loader2 className="h-5 w-5 animate-spin" />
