@@ -10,7 +10,7 @@ const execAsync = promisify(exec);
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const { skillName, args } = body;
+        const { skillName, args, projectPath } = body;
 
         if (!skillName || typeof skillName !== 'string') {
             return NextResponse.json({ error: 'Invalid skillName' }, { status: 400 });
@@ -21,12 +21,17 @@ export async function POST(req: NextRequest) {
         let result;
 
         if (skillFunction) {
-            // Execute the TS skill function
-            // Supports passing args as array (for spread) or single object/value
-            if (Array.isArray(args)) {
-                result = await skillFunction(...args);
+            // For write_code: if projectPath is provided and args has 2 elements [filePath, content], append projectPath as baseDir
+            let finalArgs = Array.isArray(args) ? [...args] : args;
+            if (skillName === 'write_code' && typeof projectPath === 'string' && projectPath.trim()) {
+                if (Array.isArray(finalArgs) && finalArgs.length === 2) {
+                    finalArgs = [finalArgs[0], finalArgs[1], projectPath.trim()];
+                }
+            }
+            if (Array.isArray(finalArgs)) {
+                result = await skillFunction(...finalArgs);
             } else {
-                result = await skillFunction(args);
+                result = await skillFunction(finalArgs);
             }
         } else {
             // Modular Asset Fallback: Check for scripts/run.sh
