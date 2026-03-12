@@ -5,17 +5,20 @@
  */
 export class FileExtractor {
     /**
-     * Extracts files from raw text which follows the "File: path\n```...\ncontent\n```" pattern.
+     * Extracts files from raw text which follows the "File: path\n```...content```" pattern.
+     * Handles many LLM output variations:
+     *  - Standard:      File: app/page.tsx\n```tsx\n...\n```
+     *  - Bold:          **File:** app/page.tsx\n```tsx\n...\n```
+     *  - Header:        ### File: app/page.tsx\n```tsx\n...\n```
+     *  - No blank line: File: app/page.tsx\n```tsx (path and block on consecutive lines)
      */
     static extractFromMarkdown(text: string): Array<{ path: string; content: string }> {
         const files: Array<{ path: string; content: string }> = [];
 
-        // Robust regex to handle:
-        // 1. Varied prefixes (File:, Path:, or none)
-        // 2. Optional markdown formatting around the path
-        // 3. Optional whitespace before/after triple backticks
-        // 4. Different languages in the code block
-        const fileRegex = /(?:^|\n)(?:[#*`\s]*File[:\s]*|[#*`\s]*Path[:\s]*)*\s*([^\n\r]+)[\r\n]+\s*```[a-z0-9]*[\r\n]+([\s\S]*?)[\r\n]+\s*```/gi;
+        // Primary pattern: explicit "File:" or "Path:" prefix (with optional markdown decorators)
+        // Handles: File:, **File:**, ### File:, `File:`, Path:, etc.
+        // Allows 0 or 1 blank lines between the path line and the code block.
+        const fileRegex = /(?:^|\n)[ \t]*(?:[#*`_~\s]*(?:File|Path)\s*:\s*[*_`]?\s*)([^\n\r`]+?)[ \t]*(?:\n[ \t]*){1,2}```[a-z0-9]*[ \t]*\n([\s\S]*?)\n[ \t]*```/gi;
 
         let match;
         while ((match = fileRegex.exec(text)) !== null) {
@@ -27,6 +30,19 @@ export class FileExtractor {
                     path: cleanPath,
                     content: match[2].trim()
                 });
+            }
+        }
+
+        // Fallback: some LLMs omit "File:" and just write the path then a code block.
+        // Pattern: a standalone path-like line followed immediately by ```
+        if (files.length === 0) {
+            const barePathRegex = /(?:^|\n)((?:[\w.-]+\/)+[\w.-]+\.[\w]{1,6})[ \t]*\n[ \t]*```[a-z0-9]*[ \t]*\n([\s\S]*?)\n[ \t]*```/gi;
+            while ((match = barePathRegex.exec(text)) !== null) {
+                const rawPath = match[1].trim();
+                const cleanPath = this.normalizePath(rawPath);
+                if (cleanPath) {
+                    files.push({ path: cleanPath, content: match[2].trim() });
+                }
             }
         }
 
@@ -78,11 +94,6 @@ export class FileExtractor {
             const openCount = (fileName.match(/\[/g) || []).length;
             const closeCount = (fileName.match(/\]/g) || []).length;
             if (closeCount > openCount) {
-                // If it's like [id].tsx, path is okay. If it's list].tsx, we should fix it to [list].tsx?
-                // Actually, let's just strip the stray ] if it's at the end.
-                // Or even better: prepend [ if it's very likely a mistake.
-                // But safest is to just strip debris or keep as is if it's valid.
-                // The user said "list].tsx 이런식으로 ] 가 붙는다" -> they want the ] GONE.
                 path = path.replace(/\](\.[a-z0-9]+)$/i, '$1');
             }
         }
@@ -119,6 +130,7 @@ export class FileExtractor {
 
     /**
      * Orchestrates the extraction process.
+     * Logs a warning with raw output preview when extraction fails to aid debugging.
      */
     static extractAll(text: string): Array<{ path: string; content: string }> {
         const markdownFiles = this.extractFromMarkdown(text);
@@ -126,6 +138,14 @@ export class FileExtractor {
 
         const jsonFiles = this.extractFromJSON(text);
         if (jsonFiles) return jsonFiles;
+
+        // Log the raw LLM output so developers can diagnose format mismatches
+        if (text && text.trim().length > 0) {
+            console.warn(
+                '[FileExtractor] Could not extract any files. Raw LLM output preview:\n' +
+                text.slice(0, 500)
+            );
+        }
 
         return [];
     }

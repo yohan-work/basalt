@@ -18,7 +18,7 @@ export default function DonePage() {
                         </Link>
                         <div className="flex items-center gap-2">
                             <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-                            <h1 className="text-2xl font-bold tracking-tight">완료된 태스크</h1>
+                            <h1 className="text-2xl font-bold tracking-tight">Completed Task</h1>
                         </div>
                     </div>
                 </div>

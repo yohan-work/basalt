@@ -476,7 +476,56 @@ Task: ${prompt}
             (emitter as any).emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'code_generation' });
         }
 
-        const files = extractFilesFromRaw(fullText);
+        let files = extractFilesFromRaw(fullText);
+
+        // --- Retry if no files were extracted ---
+        if (files.length === 0 && fullText.trim().length > 0) {
+            console.warn(
+                `[generateCodeStream] First pass produced no files. ` +
+                `Raw output (first 500 chars):\n${fullText.slice(0, 500)}\n` +
+                `Retrying with an explicit format reminder...`
+            );
+
+            const retryPrompt = `${userPromptText}
+
+IMPORTANT: Your previous response did not include any files in the required format.
+You MUST output every file using this EXACT format with NO exceptions:
+
+File: path/to/file.ext
+\`\`\`language
+// file content here
+\`\`\`
+
+Do NOT write any explanatory text. Only output files using the format above.`;
+
+            let retryText = '';
+            try {
+                await ollamaRequest(
+                    `${OLLAMA_BASE_URL}/api/generate`,
+                    { model, system: systemPromptText, prompt: retryPrompt, stream: false },
+                    TIMEOUT_MS.CODE,
+                    async (res) => {
+                        const chunks: any[] = [];
+                        for await (const chunk of res) chunks.push(chunk);
+                        const data = JSON.parse(Buffer.concat(chunks).toString());
+                        retryText = data.response || '';
+                    }
+                );
+                files = extractFilesFromRaw(retryText);
+                if (files.length > 0) {
+                    console.log(`[generateCodeStream] Retry succeeded: extracted ${files.length} file(s).`);
+                    fullText = retryText;
+                } else {
+                    console.warn(
+                        `[generateCodeStream] Retry also produced no files. ` +
+                        `Retry raw output (first 500 chars):\n${retryText.slice(0, 500)}`
+                    );
+                }
+            } catch (retryErr: any) {
+                console.error(`[generateCodeStream] Retry request failed: ${retryErr.message}`);
+            }
+        }
+
         return {
             content: fullText.split('File:')[0].trim(),
             files,
@@ -489,6 +538,7 @@ Task: ${prompt}
         return { content: error.message, files: [], error: true };
     }
 }
+
 
 export async function generateJSONStream(
     systemPrompt: string,
