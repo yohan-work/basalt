@@ -430,6 +430,22 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 this.contextManager.addLog('System', `Initial Directory Scan: ${JSON.stringify(initialDirList?.slice(0, 5))}...`);
             } catch (e: any) { }
 
+            // Attached components: pre-load into context for page/component tasks
+            const attachedPaths = task.metadata?.attachedComponentPaths as string[] | undefined;
+            if (Array.isArray(attachedPaths) && attachedPaths.length > 0) {
+                for (const filePath of attachedPaths) {
+                    try {
+                        const content = await skills.read_codebase(filePath, projectPath);
+                        if (content && typeof content === 'string' && !content.startsWith('File "')) {
+                            this.contextManager.addFile(filePath, content);
+                            await this.log(mainAgentName, `Attached component loaded: ${filePath}`, { type: 'System' });
+                        }
+                    } catch (e: any) {
+                        await this.log(mainAgentName, `Could not load attached component ${filePath}: ${e.message}`, { type: 'WARNING' });
+                    }
+                }
+            }
+
             // Initialize progress tracking
             const totalSteps = workflow.steps.length;
             const existingCompleted = task.metadata?.progress?.completedSteps || [];
