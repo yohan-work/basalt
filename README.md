@@ -144,10 +144,30 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | POST | `/api/agent/execute` | 워크플로우 순차 실행 |
 | POST | `/api/agent/verify` | 결과 검증 및 Git PR 생성 |
 | POST | `/api/agent/retry` | 실패한 태스크 재시도 (실패 step부터 재개) |
-| POST | `/api/agent/skills` | 스킬 동적 실행 (`skillName`, `args`) |
+| POST | `/api/agent/skills` | 스킬 동적 실행 (`skillName`, `args`, 선택 `projectPath`) |
 | GET | `/api/agent/stream` | SSE 실시간 진행 스트리밍 (`taskId`, `action` 쿼리 파라미터) |
+| POST | `/api/agent/edit-completed` | 완료/검토/테스트 단계 태스크의 코드에 사용자 지시사항 적용 (`taskId`, `instructions`) |
+| POST | `/api/agent/modify-element` | 완료 결과물의 특정 요소만 수정 (`taskId`, `filePath`, `elementDescriptor`, `request`) |
+| POST | `/api/agent/review` | 태스크 결과물 코드 검토 실행, 결과를 `metadata.reviewResult`에 저장 |
+| GET | `/api/project/components` | 프로젝트(및 선택 시 특정 태스크)의 컴포넌트 목록 (`projectId`, 선택 `taskId`) |
 | POST | `/api/system/dialog` | macOS 폴더 선택 다이얼로그 |
 | POST | `/api/team/execute` | 팀 협업 오케스트레이션 (최대 5분) |
+
+### 추가 기능 구현 내역
+
+**1. 완료된 코드 수정**  
+status가 `testing`, `review`, `done`인 태스크의 결과물(`metadata.fileChanges`)에 사용자 지시사항을 반영합니다. TaskDetailsModal에서 "코드 수정 요청" → 지시사항 입력 → `POST /api/agent/edit-completed`. 변경분은 `metadata.fileChanges`에 `agent: 'user-edit'`로 append됩니다. 동시 수정 방지를 위해 `metadata.editInProgress` 락을 사용합니다.
+
+**2. 특정 요소 수정 요청**  
+완료 결과물에서 "타이틀", "HeroSection" 등 특정 요소만 지정해 수정합니다. TaskDetailsModal → Changes 탭에서 파일 선택, 요소 설명, 수정 요청 입력 후 "이 요소 수정 요청" → `POST /api/agent/modify-element`. 변경분은 `metadata.fileChanges`에 `agent: 'user-edit-element'`로 append됩니다. 락: `metadata.modifyElementInProgress`.
+
+**3. 태스크 생성 시 컴포넌트 import**  
+새 태스크(특히 페이지 생성)에서 기존 컴포넌트를 지정해 에이전트가 해당 파일을 import해 사용하도록 유도합니다. CreateTaskModal에서 프로젝트 선택 시 "사용할 컴포넌트" 체크 → 생성 시 `metadata.attachedComponentPaths`와 설명 문구가 전달됩니다. Orchestrator 실행 초반에 해당 경로들을 `read_codebase`로 읽어 context에 주입합니다. 컴포넌트 목록은 `GET /api/project/components?projectId=...`로 조회합니다.
+
+**4. 코드 검토**  
+TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_code_review` 스킬로 태스크의 fileChanges(또는 프로젝트 코드)를 검토 → 결과를 `metadata.reviewResult`, `metadata.reviewAt`에 저장하고 Details 탭 "코드 검토 결과"에 표시합니다.
+
+**Tasks.metadata 추가 필드**: `attachedComponentPaths`(string[]), `editInProgress`/`modifyElementInProgress`(락 플래그), `reviewResult`/`reviewAt`(코드 검토 결과).
 
 ### Components
 
@@ -162,8 +182,8 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | `AgentDiscussion` | **Basalt Virtual Office**. 플로팅 카드 형태의 룸들과 점선 그리드 배경을 가진 2.5D 탑다운 가상 오피스. 에이전트들이 작업 상태에 따라 Boardroom, Patio, Engineering Hub 등으로 이동하며, 대기 중일 때는 자연스러운 배회(Wandering) 및 각자의 위치에서 배경 업무(Working Animation)를 수행합니다. 브레인스토밍 전 과정(시작/수립 결론 포함)을 누락 없이 실시간 스트리밍합니다. |
 | `OfficeLayout` | 점선 그리드(Dotted Grid) 배경 위에 각 공간(Boardroom, Patio, Hub)을 분리된 플로팅 카드로 세련되게 구현한 확장 가능한 오피스 레이아웃 |
 | `AgentAvatar` | 탑다운 시점에서 레고(Lego) 캐릭터 형태로 디자인된 전신 아바타. `framer-motion`을 통해 이동, 발화, 생각(Thought), 배경 업무(Working), 그리고 시선(Gaze) 애니메이션을 역동적으로 처리하는 심리스한 컴포넌트 |
-| `TaskDetailsModal` | 태스크 상세 모달. Details, Changes, Brainstorm, Live Logs 4개 탭 통합. 85vh 고정 높이 레이아웃으로 모든 뷰의 스크롤 안정성 확보 |
-| `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 8종 템플릿 선택 지원. 제목, 설명, 우선순위. Cmd+Enter 단축키, 폼 자동 초기화 |
+| `TaskDetailsModal` | 태스크 상세 모달. Details, Changes, Brainstorm, Live Logs 4개 탭 통합. 85vh 고정 높이 레이아웃. testing/review/done 시 **코드 수정 요청**, **특정 요소 수정 요청**(Changes 탭), **코드 검토 실행** 및 검토 결과 표시 |
+| `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 8종 템플릿 선택 지원. 제목, 설명, 우선순위. 프로젝트 선택 시 **사용할 컴포넌트 선택**(`components/` 목록, 생성 시 `metadata.attachedComponentPaths` 반영). Cmd+Enter 단축키, 폼 자동 초기화 |
 | `CodeDiffViewer` | 파일 변경 diff 뷰어. 사이드바 파일 목록 + split/unified diff. 신규/수정 파일 구분. 다크모드 지원 |
 | `LiveProgressPanel` | SSE 기반 실시간 진행 패널. 프로그레스 바, ETA 카운트다운, LLM 토큰 스트리밍, 완료 step 타이밍 |
 | `ProjectSelector` | 프로젝트 선택/생성. 폴더 브라우저 연동 |
@@ -259,7 +279,8 @@ basalt/
 ├── app/                          # Next.js App Router 기반의 웹 프론트엔드 및 API
 │   ├── analytics/                # 분석 대시보드 페이지 (에이전트 통계, 에러 랭킹 등)
 │   ├── api/                      # 서버측 API 엔드포인트
-│   │   ├── agent/                # 에이전트 제어 (plan, execute, verify, retry, skills, stream)
+│   │   ├── agent/                # 에이전트 제어 (plan, execute, verify, retry, skills, stream, edit-completed, modify-element, review)
+│   │   ├── project/              # 프로젝트 연동 (components)
 │   │   ├── system/               # 시스템 유틸리티 (macOS 다이얼로그 등)
 │   │   └── team/                 # 팀 협업 오케스트레이션 API
 │   ├── globals.css               # Tailwind CSS 4 기반의 스타일 시스템 (다크모드 지원)
@@ -272,7 +293,7 @@ basalt/
 │   ├── ui/                       # shadcn/ui 기반 원자적 컴포넌트 (버튼, 카드, 다이얼로그 등)
 │   ├── AgentStatusDashboard.tsx  # 에이전트별 실시간 상태(IDLE, ACTIVE, DONE) 시각화
 │   ├── CodeDiffViewer.tsx        # 파일 변경 사항을 보여주는 고해상도 Diff 뷰어
-│   ├── CreateTaskModal.tsx       # 태스크 생성 및 8종 템플릿 지원 모달
+│   ├── CreateTaskModal.tsx       # 태스크 생성, 8종 템플릿, 컴포넌트 선택 지원 모달
 │   ├── FileActivityTree.tsx      # 에이전트의 파일 접근/수정 내역을 트리 구조로 표현
 │   ├── KanbanBoard.tsx           # 프로젝트의 핵심 인터페이스. Supabase 실시간 연동
 │   ├── LiveProgressPanel.tsx     # SSE 기반 실시간 진행률 및 LLM 토큰 스트리밍 패널
