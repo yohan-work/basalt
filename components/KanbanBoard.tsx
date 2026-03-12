@@ -5,11 +5,12 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3, AlertTriangle, ThumbsUp, CheckCircle2 } from 'lucide-react';
+import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3, AlertTriangle, ThumbsUp, CheckCircle2, Github } from 'lucide-react';
 import Link from 'next/link';
 import { CreateTaskModal } from './CreateTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
 import { ProjectSelector } from './ProjectSelector';
+import { IssueListPanel } from './IssueListPanel';
 import { StepProgress } from './StepProgress';
 import { ThemeToggle } from './ThemeToggle';
 import { useEventStream } from '@/lib/hooks/useEventStream';
@@ -56,6 +57,7 @@ export function KanbanBoard() {
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [actionError, setActionError] = useState<string | null>(null);
+    const [isIssuesPanelOpen, setIsIssuesPanelOpen] = useState(false);
 
     // SSE stream for real-time progress
     const stream = useEventStream({
@@ -127,13 +129,16 @@ export function KanbanBoard() {
         setTimeout(() => setActionError(null), 5000);
     };
 
-    const handleCreateTask = async (taskData: { title: string; description: string; priority: string }) => {
-        const newTask = {
+    const handleCreateTask = async (taskData: { title: string; description: string; priority: string; attachedComponentPaths?: string[] }) => {
+        const newTask: Record<string, unknown> = {
             title: taskData.title,
             description: taskData.description,
             status: 'pending',
             project_id: selectedProjectId
         };
+        if (taskData.attachedComponentPaths?.length) {
+            newTask.metadata = { attachedComponentPaths: taskData.attachedComponentPaths };
+        }
 
         const { error } = await supabase.from('Tasks').insert(newTask);
         if (error) {
@@ -316,16 +321,27 @@ export function KanbanBoard() {
                             <BarChart3 className="mr-2 h-4 w-4" /> Analytics
                         </Button>
                     </Link>
+                    <Button variant="outline" onClick={() => setIsIssuesPanelOpen(true)} disabled={!selectedProjectId} className="rounded-none">
+                        <Github className="mr-2 h-4 w-4" /> GitHub 이슈
+                    </Button>
                     <Button onClick={() => setIsCreateModalOpen(true)} disabled={!selectedProjectId} className="rounded-none bg-primary text-primary-foreground hover:bg-primary/90">
                         <Plus className="mr-2 h-4 w-4" /> Request Work
                     </Button>
                 </div>
             </div>
 
+            <IssueListPanel
+                open={isIssuesPanelOpen}
+                onOpenChange={setIsIssuesPanelOpen}
+                projectId={selectedProjectId}
+                onTaskCreated={() => fetchTasks(false)}
+            />
+
             <CreateTaskModal
                 open={isCreateModalOpen}
                 onOpenChange={setIsCreateModalOpen}
                 onSubmit={handleCreateTask}
+                selectedProjectId={selectedProjectId}
             />
 
             <TaskDetailsModal
