@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp, Pencil, Search } from 'lucide-react';
+import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp, Pencil, Search, ClipboardPaste, ExternalLink } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { StepProgress, type ProgressInfo } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
@@ -23,6 +23,8 @@ import {
     DialogFooter,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { parseReactGrabClipboard } from '@/lib/parse-react-grab-clipboard';
+import { useIncomingReactGrab } from './IncomingReactGrabProvider';
 
 interface TaskDetailsModalProps {
     task: {
@@ -30,6 +32,7 @@ interface TaskDetailsModalProps {
         title: string;
         description: string;
         status: string;
+        project_id?: string;
         metadata?: Record<string, unknown>;
     } | null;
     open: boolean;
@@ -51,6 +54,22 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
     const [modifyElementRequest, setModifyElementRequest] = useState('');
     const [isModifyingElement, setIsModifyingElement] = useState(false);
     const [isReviewing, setIsReviewing] = useState(false);
+
+    const { payload: incomingReactGrabPayload, clearPayload: clearIncomingReactGrab } = useIncomingReactGrab();
+
+    useEffect(() => {
+        if (!incomingReactGrabPayload || !task || !open) return;
+        const allowed = ['testing', 'review', 'done'].includes(task.status);
+        if (!allowed) return;
+        const p = incomingReactGrabPayload;
+        if (p.filePath) setModifyElementFilePath(p.filePath);
+        const descriptor =
+            p.elementDescriptor ??
+            ([p.componentName, p.filePath && (p.line != null ? `${p.filePath}:${p.line}` : p.filePath)].filter(Boolean).join(' ').trim() || p.stackString || '');
+        setModifyElementDescriptor(descriptor);
+        setView('changes');
+        clearIncomingReactGrab();
+    }, [incomingReactGrabPayload, task, open, clearIncomingReactGrab]);
 
     if (!task) return null;
 
@@ -86,6 +105,42 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
             setActionError(error instanceof Error ? error.message : '코드 수정 요청에 실패했습니다.');
         } finally {
             setIsEditing(false);
+        }
+    };
+
+    const handlePasteElementContext = async () => {
+        setActionError(null);
+        try {
+            const text = await navigator.clipboard.readText();
+            const parsed = parseReactGrabClipboard(text);
+            if (!parsed) {
+                setActionError('react-grab으로 복사한 내용이 아닙니다. 미리보기에서 요소에 포커스 후 Cmd+C(또는 Ctrl+C)로 복사한 뒤 다시 시도하세요.');
+                return;
+            }
+            if (parsed.filePath) setModifyElementFilePath(parsed.filePath);
+            setModifyElementDescriptor(parsed.elementDescriptor);
+        } catch (e) {
+            console.error('Paste element context failed', e);
+            setActionError('클립보드를 읽을 수 없습니다. 브라우저에서 클립보드 접근을 허용해 주세요.');
+        }
+    };
+
+    const handleOpenPreviewForGrab = async () => {
+        const projectId = task?.project_id;
+        if (!projectId) {
+            setActionError('이 태스크에 연결된 프로젝트가 없어 미리보기를 열 수 없습니다.');
+            return;
+        }
+        setActionError(null);
+        try {
+            const res = await fetch(`/api/project/dev-server-info?projectId=${encodeURIComponent(projectId)}`);
+            const data = await res.json();
+            if (!res.ok || data.error) throw new Error(data.error || 'Failed to get dev server URL');
+            const url = data.url || `http://localhost:${data.port ?? 3001}`;
+            window.open(url, 'basalt-preview', 'noopener,noreferrer');
+        } catch (e) {
+            console.error('Open preview failed', e);
+            setActionError('미리보기 URL을 가져오지 못했습니다. 해당 프로젝트 dev 서버가 실행 중인지 확인하세요.');
         }
     };
 
@@ -315,7 +370,33 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                 {canEditOrReview && (
                                     <div className="shrink-0 p-4 border-b bg-muted/30 space-y-3">
                                         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">특정 요소 수정 요청</h4>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            미리보기에서 요소를 선택한 뒤 Cmd+C로 복사 후 붙여넣기하거나, 프로젝트에 react-grab 플러그인을 넣으면 &quot;Basalt로 보내기&quot;로 바로 전송할 수 있습니다.
+                                        </p>
                                         <div className="flex flex-wrap gap-2 items-end">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={handleOpenPreviewForGrab}
+                                                disabled={isModifyingElement || !task.project_id}
+                                                className="shrink-0"
+                                                title="프로젝트 미리보기를 새 창으로 엽니다. 해당 프로젝트에 react-grab + Basalt 플러그인을 넣으면 요소 선택 후 Basalt로 보내기를 사용할 수 있습니다."
+                                            >
+                                                <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                                                미리보기에서 요소 선택
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={handlePasteElementContext}
+                                                disabled={isModifyingElement}
+                                                className="shrink-0"
+                                            >
+                                                <ClipboardPaste className="w-3.5 h-3.5 mr-1.5" />
+                                                요소 컨텍스트 붙여넣기
+                                            </Button>
                                             <div className="flex flex-col gap-1 min-w-[140px]">
                                                 <Label className="text-xs">파일</Label>
                                                 <select
