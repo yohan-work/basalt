@@ -373,7 +373,7 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                         <p className="text-[11px] text-muted-foreground">
                                             미리보기에서 요소를 선택한 뒤 Cmd+C로 복사 후 붙여넣기하거나, 프로젝트에 react-grab 플러그인을 넣으면 &quot;Basalt로 보내기&quot;로 바로 전송할 수 있습니다.
                                         </p>
-                                        <div className="flex flex-wrap gap-2 items-end">
+                                        <div className="flex flex-wrap gap-3 items-end">
                                             <Button
                                                 type="button"
                                                 variant="outline"
@@ -384,7 +384,7 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                                 title="프로젝트 미리보기를 새 창으로 엽니다. 해당 프로젝트에 react-grab + Basalt 플러그인을 넣으면 요소 선택 후 Basalt로 보내기를 사용할 수 있습니다."
                                             >
                                                 <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
-                                                미리보기에서 요소 선택
+                                                Select Element Preview
                                             </Button>
                                             <Button
                                                 type="button"
@@ -395,10 +395,10 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                                 className="shrink-0"
                                             >
                                                 <ClipboardPaste className="w-3.5 h-3.5 mr-1.5" />
-                                                요소 컨텍스트 붙여넣기
+                                                Paste Context
                                             </Button>
                                             <div className="flex flex-col gap-1 min-w-[140px]">
-                                                <Label className="text-xs">파일</Label>
+                                                <Label className="text-xs">File</Label>
                                                 <select
                                                     className="h-9 rounded-md border border-input bg-background px-2 text-sm"
                                                     value={modifyElementFilePath}
@@ -412,7 +412,7 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                                 </select>
                                             </div>
                                             <div className="flex flex-col gap-1 min-w-[160px]">
-                                                <Label className="text-xs">요소 설명 (선택)</Label>
+                                                <Label className="text-xs">Element Description (optional)</Label>
                                                 <input
                                                     type="text"
                                                     className="h-9 rounded-md border border-input bg-background px-2 text-sm"
@@ -438,13 +438,16 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                                 onClick={handleModifyElement}
                                                 disabled={isModifyingElement || !modifyElementRequest.trim()}
                                             >
-                                                {isModifyingElement ? '수정 중...' : '이 요소 수정 요청'}
+                                                {isModifyingElement ? 'Modifying...' : 'Request Modify Element'}
                                             </Button>
                                         </div>
                                     </div>
                                 )}
                                 <div className="flex-1 min-h-0 overflow-hidden">
-                                    <CodeDiffViewer fileChanges={fileChanges!} />
+                                    <CodeDiffViewer
+                                        fileChanges={fileChanges!}
+                                        taskId={canEditOrReview ? task.id : null}
+                                    />
                                 </div>
                             </div>
                         ) : view === 'details' ? (

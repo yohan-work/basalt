@@ -3,8 +3,9 @@
 
 import { useState, useEffect } from 'react';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
-import { FileText, FilePlus, FileEdit as FileEditIcon, ChevronRight } from 'lucide-react';
+import { FileText, FilePlus, FileEdit as FileEditIcon, ChevronRight, Pencil, Check, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 export interface FileChange {
@@ -18,11 +19,19 @@ export interface FileChange {
 
 interface CodeDiffViewerProps {
     fileChanges: FileChange[];
+    /** When set, show "Edit" to apply direct text edits (no LLM). Simple text changes only. */
+    taskId?: string | null;
+    /** Called after a direct patch is applied (e.g. to refetch task). Optional if using realtime. */
+    onAppliedEdit?: () => void;
 }
 
-export function CodeDiffViewer({ fileChanges }: CodeDiffViewerProps) {
+export function CodeDiffViewer({ fileChanges, taskId, onAppliedEdit }: CodeDiffViewerProps) {
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [isDark, setIsDark] = useState(false);
+    const [editMode, setEditMode] = useState(false);
+    const [editContent, setEditContent] = useState('');
+    const [isPatching, setIsPatching] = useState(false);
+    const [patchError, setPatchError] = useState<string | null>(null);
 
     useEffect(() => {
         setIsDark(document.documentElement.classList.contains('dark'));
@@ -45,6 +54,47 @@ export function CodeDiffViewer({ fileChanges }: CodeDiffViewerProps) {
     const selected = fileChanges[selectedIndex];
     const newFilesCount = fileChanges.filter(f => f.isNew).length;
     const modifiedCount = fileChanges.filter(f => !f.isNew).length;
+
+    const canDirectEdit = Boolean(taskId);
+
+    const startEdit = () => {
+        setEditContent(selected.after);
+        setEditMode(true);
+        setPatchError(null);
+    };
+    const cancelEdit = () => {
+        setEditMode(false);
+        setPatchError(null);
+    };
+    const applyPatch = async () => {
+        if (!taskId) return;
+        setIsPatching(true);
+        setPatchError(null);
+        try {
+            const res = await fetch('/api/agent/patch-file', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    taskId,
+                    filePath: selected.filePath,
+                    content: editContent,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Patch failed');
+            setEditMode(false);
+            onAppliedEdit?.();
+        } catch (e) {
+            setPatchError(e instanceof Error ? e.message : 'Failed to apply edit');
+        } finally {
+            setIsPatching(false);
+        }
+    };
+
+    // When user switches to another file in the list while in edit mode, load that file's content
+    useEffect(() => {
+        if (editMode && selected) setEditContent(selected.after);
+    }, [editMode, selectedIndex]);
 
     // Extract file name from path
     const getFileName = (filePath: string) => {
@@ -181,22 +231,69 @@ export function CodeDiffViewer({ fileChanges }: CodeDiffViewerProps) {
                         )}
                         <span className="font-mono text-xs">{selected.filePath}</span>
                     </div>
-                    <span className="text-[10px] text-muted-foreground">
-                        by {selected.agent} &middot; step {selected.stepIndex + 1}
-                    </span>
+                    <div className="flex items-center gap-2">
+                        {canDirectEdit && !editMode && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={startEdit}
+                                title="간단한 텍스트/코드 수정을 직접 적용합니다. 스타일·구조 변경은 아래 '특정 요소 수정 요청'을 사용하세요."
+                            >
+                                <Pencil className="w-3 h-3 mr-1" />
+                                Edit in place
+                            </Button>
+                        )}
+                        {!editMode && (
+                            <span className="text-[10px] text-muted-foreground">
+                                by {selected.agent} &middot; step {selected.stepIndex + 1}
+                            </span>
+                        )}
+                    </div>
                 </div>
-                <div className="flex-1 overflow-y-auto custom-scrollbar">
-                    <ReactDiffViewer
-                        oldValue={selected.before || ''}
-                        newValue={selected.after}
-                        splitView={false}
-                        useDarkTheme={isDark}
-                        leftTitle={selected.isNew ? undefined : 'Before'}
-                        rightTitle={selected.isNew ? 'New File' : 'After'}
-                        compareMethod={DiffMethod.WORDS}
-                        styles={isDark ? darkStyles : lightStyles}
-                    />
-                </div>
+                {editMode ? (
+                    <div className="flex-1 flex flex-col min-h-0 p-2">
+                        <p className="text-[11px] text-muted-foreground mb-2">
+                            간단한 텍스트 수정만 적용됩니다. 스타일·구조 변경은 취소 후 &quot;특정 요소 수정 요청&quot;을 사용하세요.
+                        </p>
+                        {patchError && (
+                            <div className="mb-2 text-xs text-red-600 dark:text-red-400" role="alert">
+                                {patchError}
+                            </div>
+                        )}
+                        <textarea
+                            className="flex-1 min-h-[200px] w-full font-mono text-xs p-3 rounded-md border border-input bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            spellCheck={false}
+                            aria-label="Edit file content"
+                        />
+                        <div className="flex gap-2 mt-2 shrink-0">
+                            <Button size="sm" onClick={applyPatch} disabled={isPatching}>
+                                <Check className="w-3.5 h-3.5 mr-1" />
+                                {isPatching ? 'Applying...' : 'Save'}
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={cancelEdit} disabled={isPatching}>
+                                <X className="w-3.5 h-3.5 mr-1" />
+                                Cancel
+                            </Button>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                        <ReactDiffViewer
+                            oldValue={selected.before || ''}
+                            newValue={selected.after}
+                            splitView={false}
+                            useDarkTheme={isDark}
+                            leftTitle={selected.isNew ? undefined : 'Before'}
+                            rightTitle={selected.isNew ? 'New File' : 'After'}
+                            compareMethod={DiffMethod.WORDS}
+                            styles={isDark ? darkStyles : lightStyles}
+                        />
+                    </div>
+                )}
             </div>
         </div>
     );
