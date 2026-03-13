@@ -167,6 +167,10 @@ status가 `testing`, `review`, `done`인 태스크의 결과물(`metadata.fileCh
 **4. 코드 검토**  
 TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_code_review` 스킬로 태스크의 fileChanges(또는 프로젝트 코드)를 검토 → 결과를 `metadata.reviewResult`, `metadata.reviewAt`에 저장하고 Details 탭 "코드 검토 결과"에 표시합니다.
 
+**5. react-grab 연동 (요소 선택 → AI 수정)**  
+- **클립보드 붙여넣기**: 미리보기(에이전트가 만든 앱)에서 [react-grab](https://github.com/aidenybai/react-grab)으로 요소 선택 후 Cmd+C(또는 Ctrl+C)로 복사 → Basalt TaskDetailsModal Changes 탭에서 "요소 컨텍스트 붙여넣기"로 파일/요소 설명을 채운 뒤 수정 요청 입력 후 "이 요소 수정 요청"으로 전송.
+- **미리보기에서 바로 보내기**: Basalt에서 "미리보기에서 요소 선택"으로 프로젝트 미리보기를 새 창에 연 뒤, **해당 프로젝트**에 react-grab + Basalt용 플러그인을 넣으면, 요소 선택 후 컨텍스트 메뉴 "Basalt로 보내기"로 Basalt 쪽 수정 폼에 자동 반영됩니다. 플러그인 코드는 [docs/react-grab-basalt-plugin.md](docs/react-grab-basalt-plugin.md) 참고.
+
 **Tasks.metadata 추가 필드**: `attachedComponentPaths`(string[]), `editInProgress`/`modifyElementInProgress`(락 플래그), `reviewResult`/`reviewAt`(코드 검토 결과).
 
 ### Components
