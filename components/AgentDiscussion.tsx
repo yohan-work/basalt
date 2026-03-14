@@ -4,7 +4,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Badge } from '@/components/ui/badge';
-import { Sparkles, MessageSquare, Send } from 'lucide-react';
+import { Sparkles, MessageSquare, Send, Volume2, VolumeX, Square } from 'lucide-react';
+import { useTTS } from '@/lib/tts/useTTS';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -58,6 +59,9 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const [movingAgents, setMovingAgents] = useState<Set<string>>(new Set());
     const [idleOffsets, setIdleOffsets] = useState<Record<string, { dx: number, dy: number }>>({});
     const [workingAgents, setWorkingAgents] = useState<Set<string>>(new Set());
+
+    const tts = useTTS();
+    const lastSpokenIdRef = useRef<string | null>(null);
 
     // User Agency State
     const [userPos, setUserPos] = useState({ x: 50, y: 85 });
@@ -282,6 +286,16 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isUserFocused]);
 
+    // Auto-speak new visible thoughts via TTS
+    useEffect(() => {
+        if (!tts.enabled || visibleThoughts.length === 0) return;
+        const latest = visibleThoughts[visibleThoughts.length - 1];
+        if (latest && latest.agent !== 'user' && latest.id !== lastSpokenIdRef.current) {
+            lastSpokenIdRef.current = latest.id;
+            tts.speak(latest.thought, latest.agent);
+        }
+    }, [visibleThoughts, tts.enabled, tts.speak]);
+
     // Auto-scroll log
     useEffect(() => {
         if (scrollContainerRef.current) {
@@ -424,14 +438,39 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                             <p className="text-[10px] text-slate-500 font-medium">Session ID: {taskId?.slice(0, 8)}</p>
                         </div>
                     </div>
-                    <div className="text-right">
-                        <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Progress</div>
-                        <div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                            <motion.div
-                                className="h-full bg-emerald-400"
-                                initial={{ width: 0 }}
-                                animate={{ width: `${((currentThoughtIndex + 1) / allThoughts.length) * 100}%` }}
-                            />
+                    <div className="flex items-center gap-3">
+                        {/* TTS Controls */}
+                        <div className="flex items-center gap-1.5">
+                            <button
+                                onClick={() => tts.setEnabled(!tts.enabled)}
+                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-bold uppercase tracking-wider transition-all ${tts.enabled ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100' : 'bg-slate-50 border-slate-200 text-slate-400 hover:bg-slate-100'}`}
+                                title={tts.enabled ? 'TTS 끄기' : 'TTS 켜기'}
+                            >
+                                {tts.enabled ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
+                                TTS
+                            </button>
+                            {tts.isSpeaking && (
+                                <button
+                                    onClick={() => tts.stop()}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-full bg-red-50 border border-red-200 text-red-600 text-[10px] font-bold uppercase tracking-wider hover:bg-red-100 transition-all"
+                                    title="재생 중지"
+                                >
+                                    <Square className="w-2.5 h-2.5" />
+                                </button>
+                            )}
+                            {tts.isLoading && (
+                                <div className="w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
+                            )}
+                        </div>
+                        <div className="text-right">
+                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Progress</div>
+                            <div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <motion.div
+                                    className="h-full bg-emerald-400"
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${((currentThoughtIndex + 1) / allThoughts.length) * 100}%` }}
+                                />
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -748,8 +787,29 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                                                         {log.type}
                                                     </Badge>
                                                 )}
-                                                <div className={`text-[13px] leading-relaxed font-medium break-words w-full ${isUser ? 'text-emerald-900 bg-emerald-50 px-3 py-2 rounded-2xl rounded-tr-none text-right' : 'text-slate-700 bg-white px-3 py-2 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm'}`}>
+                                                <div className={`text-[13px] leading-relaxed font-medium break-words w-full relative group/msg ${isUser ? 'text-emerald-900 bg-emerald-50 px-3 py-2 rounded-2xl rounded-tr-none text-right' : 'text-slate-700 bg-white px-3 py-2 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm'}`}>
                                                     {log.thought}
+                                                    {!isUser && tts.enabled && (
+                                                        <button
+                                                            onClick={() => tts.speak(log.thought, log.agent)}
+                                                            className="absolute -right-1 -bottom-1 opacity-0 group-hover/msg:opacity-100 transition-opacity w-5 h-5 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center hover:bg-blue-200"
+                                                            title="이 메시지 재생"
+                                                        >
+                                                            <Volume2 className="w-2.5 h-2.5 text-blue-600" />
+                                                        </button>
+                                                    )}
+                                                    {tts.isSpeaking && tts.speakingAgent === log.agent && log.id === lastSpokenIdRef.current && (
+                                                        <span className="inline-flex items-center gap-[2px] ml-1.5 align-middle">
+                                                            {[0, 1, 2].map(i => (
+                                                                <motion.span
+                                                                    key={i}
+                                                                    className="inline-block w-[2px] bg-blue-500 rounded-full"
+                                                                    animate={{ height: ['4px', '10px', '4px'] }}
+                                                                    transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
+                                                                />
+                                                            ))}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </div>
                                         </motion.div>
