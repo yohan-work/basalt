@@ -151,6 +151,7 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | POST | `/api/agent/review` | 태스크 결과물 코드 검토 실행, 결과를 `metadata.reviewResult`에 저장 |
 | GET | `/api/project/components` | 프로젝트(및 선택 시 특정 태스크)의 컴포넌트 목록 (`projectId`, 선택 `taskId`) |
 | POST | `/api/system/dialog` | macOS 폴더 선택 다이얼로그 |
+| POST | `/api/tts` | 텍스트를 음성으로 변환 (edge-tts-universal). `{ text, voice, rate?, pitch? }` → `audio/mpeg` 스트림 반환 |
 | POST | `/api/team/execute` | 팀 협업 오케스트레이션 (최대 5분) |
 
 ### 추가 기능 구현 내역
@@ -171,6 +172,17 @@ TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_c
 - **클립보드 붙여넣기**: 미리보기(에이전트가 만든 앱)에서 [react-grab](https://github.com/aidenybai/react-grab)으로 요소 선택 후 Cmd+C(또는 Ctrl+C)로 복사 → Basalt TaskDetailsModal Changes 탭에서 "요소 컨텍스트 붙여넣기"로 파일/요소 설명을 채운 뒤 수정 요청 입력 후 "이 요소 수정 요청"으로 전송.
 - **미리보기에서 바로 보내기**: Basalt에서 "미리보기에서 요소 선택"으로 프로젝트 미리보기를 새 창에 연 뒤, **해당 프로젝트**에 react-grab + Basalt용 플러그인을 넣으면, 요소 선택 후 컨텍스트 메뉴 "Basalt로 보내기"로 Basalt 쪽 수정 폼에 자동 반영됩니다. 플러그인 코드는 [docs/react-grab-basalt-plugin.md](docs/react-grab-basalt-plugin.md) 참고.
 
+**6. 에이전트 음성 대화 (TTS)**  
+에이전트들의 브레인스토밍 및 팀 채팅 대화를 텍스트뿐 아니라 음성(TTS)으로도 들을 수 있습니다. `edge-tts-universal`(Microsoft Neural TTS)을 주력으로, Web Speech API를 폴백으로 사용하는 이중 구조입니다.
+- **에이전트별 고유 음성**: 각 에이전트 역할에 서로 다른 한국어 Neural 음성이 할당됩니다 (`lib/tts/voice-map.ts`). PM은 `ko-KR-SunHiNeural`(여성), Lead는 `ko-KR-HyunsuMultilingualNeural`(남성), Dev는 `ko-KR-InJoonNeural`(남성) 등.
+- **자동 재생**: Virtual Office(AgentDiscussion)와 Team Chat(ChatChannel)에서 새 메시지가 도착하면 해당 에이전트의 음성으로 자동 재생됩니다.
+- **FIFO 큐 기반 순차 재생**: 여러 메시지가 동시에 도착해도 순서대로 재생되어 겹치지 않습니다.
+- **TTS 토글**: 헤더의 TTS 버튼으로 켜기/끄기. 상태는 `localStorage`에 저장되어 새로고침 후에도 유지됩니다.
+- **개별 메시지 재생**: 각 메시지 버블에 호버 시 재생 버튼이 나타나 원하는 메시지를 재청취할 수 있습니다.
+- **시각 피드백**: 현재 발화 중인 메시지에 사운드 웨이브 애니메이션이 표시됩니다.
+- **자동 폴백**: edge-tts API 실패 시 브라우저 내장 Web Speech API로 자동 전환됩니다.
+- **서버 사이드 TTS**: `POST /api/tts` 엔드포인트에서 `edge-tts-universal`로 오디오를 생성하여 MP3 스트림으로 반환합니다. API 키 불필요, 완전 무료.
+
 **Tasks.metadata 추가 필드**: `attachedComponentPaths`(string[]), `editInProgress`/`modifyElementInProgress`(락 플래그), `reviewResult`/`reviewAt`(코드 검토 결과).
 
 ### Components
@@ -183,7 +195,7 @@ TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_c
 |----------|--------|
 | `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독. SSE 기반 액션 스트리밍. 스켈레톤 로딩, 에러 토스트, 빈 상태 표시 |
 | `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR). `taskId` 기반 필터링 및 ID 기반 중복 제거 지원 |
-| `AgentDiscussion` | **Basalt Virtual Office**. 플로팅 카드 형태의 룸들과 점선 그리드 배경을 가진 2.5D 탑다운 가상 오피스. 에이전트들이 작업 상태에 따라 Boardroom, Patio, Engineering Hub 등으로 이동하며, 대기 중일 때는 자연스러운 배회(Wandering) 및 각자의 위치에서 배경 업무(Working Animation)를 수행합니다. 브레인스토밍 전 과정(시작/수립 결론 포함)을 누락 없이 실시간 스트리밍합니다. |
+| `AgentDiscussion` | **Basalt Virtual Office**. 플로팅 카드 형태의 룸들과 점선 그리드 배경을 가진 2.5D 탑다운 가상 오피스. 에이전트들이 작업 상태에 따라 Boardroom, Patio, Engineering Hub 등으로 이동하며, 대기 중일 때는 자연스러운 배회(Wandering) 및 각자의 위치에서 배경 업무(Working Animation)를 수행합니다. 브레인스토밍 전 과정(시작/수립 결론 포함)을 누락 없이 실시간 스트리밍합니다. **TTS 토글**로 에이전트별 고유 음성 자동 재생, 메시지별 개별 재생 버튼, 발화 중 사운드 웨이브 시각 효과 지원 |
 | `OfficeLayout` | 점선 그리드(Dotted Grid) 배경 위에 각 공간(Boardroom, Patio, Hub)을 분리된 플로팅 카드로 세련되게 구현한 확장 가능한 오피스 레이아웃 |
 | `AgentAvatar` | 탑다운 시점에서 레고(Lego) 캐릭터 형태로 디자인된 전신 아바타. `framer-motion`을 통해 이동, 발화, 생각(Thought), 배경 업무(Working), 그리고 시선(Gaze) 애니메이션을 역동적으로 처리하는 심리스한 컴포넌트 |
 | `TaskDetailsModal` | 태스크 상세 모달. Details, Changes, Brainstorm, Live Logs 4개 탭 통합. 85vh 고정 높이 레이아웃. testing/review/done 시 **코드 수정 요청**, **특정 요소 수정 요청**(Changes 탭), **코드 검토 실행** 및 검토 결과 표시 |
@@ -207,7 +219,7 @@ TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_c
 | `ErrorRankingTable` | 빈도순 에러 랭킹 테이블 |
 | `StatCard` | 통계 카드 (아이콘, 값, 트렌드). API 토큰 사용량 기반 **Cost Saved (비용 절감액)** 추정 기능 지원 |
 | `TeamActivityView` | 팀 활동 라이브 뷰 (3초 폴링) |
-| `ChatChannel` | 팀 에이전트 간 채팅 인터페이스 |
+| `ChatChannel` | 팀 에이전트 간 채팅 인터페이스. TTS 토글, 메시지별 음성 재생 버튼, 새 메시지 자동 TTS 재생, 사운드 웨이브 표시 |
 
 **UI 컴포넌트 (shadcn/ui):**
 
@@ -225,6 +237,7 @@ TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_c
 - **Flowchart**: @xyflow/react (React Flow)
 - **Database**: Supabase
 - **LLM**: Ollama (로컬, 환경변수로 설정 가능)
+- **TTS**: edge-tts-universal (Microsoft Neural TTS, 한국어 지원, API 키 불필요) + Web Speech API (폴백)
 - **Diff Viewer**: react-diff-viewer-continued
 - **Utilities**: gray-matter (마크다운 파싱)
 - **Theming**: 다크/라이트 모드 (시스템 감지 + 수동 토글, FOUC 방지)
@@ -286,7 +299,8 @@ basalt/
 │   │   ├── agent/                # 에이전트 제어 (plan, execute, verify, retry, skills, stream, edit-completed, modify-element, review)
 │   │   ├── project/              # 프로젝트 연동 (components)
 │   │   ├── system/               # 시스템 유틸리티 (macOS 다이얼로그 등)
-│   │   └── team/                 # 팀 협업 오케스트레이션 API
+│   │   ├── team/                 # 팀 협업 오케스트레이션 API
+│   │   └── tts/                  # TTS 음성 생성 API (edge-tts-universal → MP3 스트림)
 │   ├── globals.css               # Tailwind CSS 4 기반의 스타일 시스템 (다크모드 지원)
 │   ├── layout.tsx                # 루트 레이아웃 및 테마 관리
 │   └── page.tsx                  # 메인 대시보드 (칸반 보드 및 로그 뷰어 통합)
@@ -311,6 +325,9 @@ basalt/
 │   │   └── TeamOrchestrator.ts   # 멀티 에이전트 협업 및 라운드-로빈 실행 엔진
 │   ├── skills/                   # 에이전트가 실행하는 실무 기능 (Git, 코드 생성, 분석 등)
 │   │   └── index.ts              # 20여 종의 핵심 스킬 런타임 구현부
+│   ├── tts/                      # TTS 모듈
+│   │   ├── voice-map.ts          # 에이전트 역할별 음성 매핑 (ko-KR Neural Voices)
+│   │   └── useTTS.ts             # React Hook: 큐 기반 순차 재생, 폴백, 볼륨/속도 제어
 │   ├── agent-loader.ts           # 마크다운 기반의 에이전트/스킬 설정 동적 로더
 │   ├── analytics.ts              # Supabase 연동 분석 데이터 집계 로직
 │   ├── context-manager.ts        # LLM을 위한 지능적 컨텍스트 최적화 및 저장/복원
@@ -340,7 +357,13 @@ basalt/
 - **고해상도 레이아웃**: 모든 상세 뷰는 85vh 고정 높이와 최적화된 스크롤 시스템을 갖추어, 대량의 로그나 코드 변경 사항도 끊김 없이 확인할 수 있습니다.
 - **시각적 워크플로우**: `WorkflowFlowchart`를 통해 에이전트 간의 작업 흐름을 한눈에 파악할 수 있습니다.
 
-#### 4. 강력한 에이전트 스킬셋 (`lib/skills/`)
+#### 4. 에이전트 음성 대화 TTS (`lib/tts/`, `app/api/tts/`)
+- **이중 TTS 아키텍처**: 서버 사이드 `edge-tts-universal`(Microsoft Neural TTS)을 주력으로, 클라이언트 Web Speech API를 폴백으로 사용합니다. API 키 없이 완전 무료로 고품질 한국어 음성을 생성합니다.
+- **에이전트별 고유 음성**: `voice-map.ts`에서 9개 에이전트 역할에 각각 다른 한국어 Neural 음성(SunHi, Hyunsu, InJoon)을 할당하고, rate/pitch 조정으로 개성을 부여합니다.
+- **`useTTS` React Hook**: FIFO 큐 기반 순차 재생, `AbortController` 기반 중지, localStorage 상태 영속화, 볼륨/재생속도 제어, `isSpeaking`/`speakingAgent` 상태 노출 등 통합적인 TTS 제어를 제공합니다.
+- **실시간 시각 피드백**: 현재 TTS로 발화 중인 메시지에 사운드 웨이브 애니메이션이 표시되어, 어떤 에이전트가 말하고 있는지 직관적으로 확인할 수 있습니다.
+
+#### 5. 강력한 에이전트 스킬셋 (`lib/skills/`)
 - **Git 자동화**: 커밋 메시지 생성부터 브랜치 생성, 푸시, PR 생성까지 Git 전체 과정을 자동 처리합니다.
 - **코드 품질 관리**: `lint_code`, `typecheck` 스킬을 통해 생성된 코드의 기초적인 오류를 자동으로 검증합니다.
 - **프로젝트 스캔**: 기존 코드 패턴을 추출(`extract_patterns`)하고 유사 컴포넌트를 검색(`find_similar_components`)하여 일관성 있는 코드를 작성합니다.
