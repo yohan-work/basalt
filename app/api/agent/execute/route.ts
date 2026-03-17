@@ -6,6 +6,7 @@ type ExecuteOptions = {
     discussionMode?: 'off' | 'step_handoff' | 'roundtable';
     maxDiscussionThoughts?: number;
     carryDiscussionToPrompt?: boolean;
+    strategyPreset?: 'quality_first' | 'balanced' | 'speed_first' | 'cost_saver';
 };
 
 export async function POST(req: NextRequest) {

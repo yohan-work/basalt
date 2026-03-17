@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
     const discussionModeParam = req.nextUrl.searchParams.get('discussionMode');
     const maxDiscussionThoughtsParam = req.nextUrl.searchParams.get('maxDiscussionThoughts');
     const carryDiscussionToPromptParam = req.nextUrl.searchParams.get('carryDiscussionToPrompt');
+    const strategyPresetParam = req.nextUrl.searchParams.get('strategyPreset');
 
     if (!taskId || !action) {
         return new Response(
@@ -47,6 +48,7 @@ export async function GET(req: NextRequest) {
                 carryDiscussionToPrompt: carryDiscussionToPromptParam
                     ? carryDiscussionToPromptParam === 'true'
                     : undefined,
+                strategyPreset: (strategyPresetParam as 'quality_first' | 'balanced' | 'speed_first' | 'cost_saver' | null) || undefined,
             };
 
             // Set up heartbeat to keep connection alive

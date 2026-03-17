@@ -69,6 +69,10 @@ export async function POST(req: NextRequest) {
 
         const reviewText = typeof reviewResult === 'string'
             ? reviewResult
+            : (reviewResult && typeof (reviewResult as { content?: string }).content === 'string')
+                ? (reviewResult as { content: string }).content
+                : (reviewResult && typeof (reviewResult as { result?: unknown }).result === 'string')
+                    ? (reviewResult as { result: string }).result
             : (reviewResult && typeof (reviewResult as { message?: string }).message === 'string')
                 ? (reviewResult as { message: string }).message
                 : JSON.stringify(reviewResult);
