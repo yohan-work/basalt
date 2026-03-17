@@ -6,9 +6,11 @@ import {
     getAgentPerformanceStats,
     getTaskSuccessMetrics,
     getErrorAnalysis,
+    getBenchmarkComparison,
     AgentPerformance,
     TaskSuccessMetrics,
-    ErrorStats
+    ErrorStats,
+    BenchmarkComparison
 } from '@/lib/analytics';
 import { StatCard } from './StatCard';
 import { AgentActivityChart } from './AgentActivityChart';
@@ -24,6 +26,7 @@ import { addDays, startOfDay, endOfDay } from 'date-fns';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TeamActivityView } from './team/TeamActivityView';
+import { PerformanceBenchmarkPanel } from './PerformanceBenchmarkPanel';
 
 export function AnalyticsDashboard() {
     const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -37,6 +40,7 @@ export function AnalyticsDashboard() {
     const [resourceMetrics, setResourceMetrics] = useState<any>(null);
     const [dailyTokens, setDailyTokens] = useState<DailyTokenData[]>([]);
     const [radarData, setRadarData] = useState<any[]>([]);
+    const [benchmark, setBenchmark] = useState<BenchmarkComparison | null>(null);
     const [loading, setLoading] = useState(true);
 
     const fetchData = async () => {
@@ -48,13 +52,14 @@ export function AnalyticsDashboard() {
                 to: dateRange.to ? endOfDay(dateRange.to) : endOfDay(new Date())
             } : undefined;
 
-            const [agents, tasks, errors, resources, trends, radar] = await Promise.all([
+            const [agents, tasks, errors, resources, trends, radar, comparison] = await Promise.all([
                 getAgentPerformanceStats(fetchRange),
                 getTaskSuccessMetrics(fetchRange),
                 getErrorAnalysis(fetchRange),
                 import('@/lib/analytics').then(m => m.getSystemResourceMetrics(fetchRange)),
                 import('@/lib/analytics').then(m => m.getDailyTokenTrends(fetchRange)),
-                import('@/lib/analytics').then(m => m.getAgentActionDistribution(fetchRange))
+                import('@/lib/analytics').then(m => m.getAgentActionDistribution(fetchRange)),
+                fetchRange ? getBenchmarkComparison(fetchRange) : Promise.resolve(null)
             ]);
             setAgentStats(agents);
             setTaskMetrics(tasks);
@@ -62,6 +67,7 @@ export function AnalyticsDashboard() {
             setResourceMetrics(resources);
             setDailyTokens(trends);
             setRadarData(radar);
+            setBenchmark(comparison);
         } catch (e) {
             console.error('Failed to fetch analytics data', e);
         } finally {
@@ -92,7 +98,7 @@ export function AnalyticsDashboard() {
             <Tabs defaultValue="overview" className="space-y-4">
                 <TabsList>
                     <TabsTrigger value="overview">Overview</TabsTrigger>
-                    <TabsTrigger value="team-activity">Team Activity 🔴 Live</TabsTrigger>
+                    <TabsTrigger value="team-activity">LIVE</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="overview" className="space-y-4">
@@ -134,6 +140,8 @@ export function AnalyticsDashboard() {
                         />
                         <div className="col-span-3"></div>
                     </div>
+
+                    <PerformanceBenchmarkPanel benchmark={benchmark} loading={loading} />
 
                     {/* Charts & Tables */}
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">

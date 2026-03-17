@@ -180,12 +180,12 @@ export function CodeDiffViewer({ fileChanges, taskId, onAppliedEdit }: CodeDiffV
                     </h4>
                     <div className="flex gap-2 mt-1.5">
                         {newFilesCount > 0 && (
-                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-green-600 border-green-300">
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-green-700 border-green-300 dark:text-green-300 dark:border-green-700">
                                 +{newFilesCount} new
                             </Badge>
                         )}
                         {modifiedCount > 0 && (
-                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-amber-600 border-amber-300">
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-amber-700 border-amber-300 dark:text-amber-300 dark:border-amber-700">
                                 ~{modifiedCount} modified
                             </Badge>
                         )}
@@ -225,9 +225,9 @@ export function CodeDiffViewer({ fileChanges, taskId, onAppliedEdit }: CodeDiffV
                 <div className="px-4 py-2 border-b border-border bg-muted/30 flex items-center justify-between">
                     <div className="flex items-center gap-2 text-sm">
                         {selected.isNew ? (
-                            <Badge variant="outline" className="text-[10px] text-green-600 border-green-300">NEW</Badge>
+                            <Badge variant="outline" className="text-[10px] text-green-700 border-green-300 dark:text-green-300 dark:border-green-700">NEW</Badge>
                         ) : (
-                            <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">MODIFIED</Badge>
+                            <Badge variant="outline" className="text-[10px] text-amber-700 border-amber-300 dark:text-amber-300 dark:border-amber-700">MODIFIED</Badge>
                         )}
                         <span className="font-mono text-xs">{selected.filePath}</span>
                     </div>

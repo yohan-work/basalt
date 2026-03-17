@@ -197,7 +197,7 @@ export function LogViewer({ taskId }: { taskId?: string }) {
                 </div>
             )}
 
-            <div className="flex-1 w-full rounded-none border border-border p-4 font-mono text-sm bg-black/5 overflow-y-auto custom-scrollbar">
+            <div className="flex-1 w-full rounded-none border border-border p-4 font-mono text-sm bg-muted/40 overflow-y-auto custom-scrollbar">
                 {isLoading && (
                     <div className="flex items-center justify-center py-8 text-muted-foreground">
                         <Loader2 className="h-5 w-5 animate-spin mr-2" />
@@ -254,9 +254,9 @@ export function LogViewer({ taskId }: { taskId?: string }) {
                                         {log.metadata && Object.keys(log.metadata).length > 0 && (
                                             <div className="mt-1">
                                                 {log.metadata.args != null && (
-                                                    <div className="bg-black/10 overflow-hidden text-xs rounded-sm p-2 mb-1">
-                                                        <span className="opacity-50 block mb-1">Input Arguments:</span>
-                                                        <pre className="overflow-x-auto">{JSON.stringify(log.metadata.args, null, 2)}</pre>
+                                                    <div className="bg-muted/60 border border-border/60 overflow-hidden text-xs rounded-sm p-2 mb-1">
+                                                        <span className="text-muted-foreground block mb-1">Input Arguments:</span>
+                                                        <pre className="overflow-x-auto text-foreground/90">{JSON.stringify(log.metadata.args, null, 2)}</pre>
                                                     </div>
                                                 )}
                                                 {log.metadata.result != null && (
@@ -286,9 +286,9 @@ export function LogViewer({ taskId }: { taskId?: string }) {
                                 {log.metadata && type !== 'ACTION' && ( // Only render metadata here if not ACTION type, as ACTION type handles its own metadata
                                     <div className="mt-1">
                                         {log.metadata.args != null && (
-                                            <div className="bg-black/10 overflow-hidden text-xs rounded-sm p-2 mb-1">
-                                                <span className="opacity-50 block mb-1">Input Arguments:</span>
-                                                <pre className="overflow-x-auto">{JSON.stringify(log.metadata.args, null, 2)}</pre>
+                                            <div className="bg-muted/60 border border-border/60 overflow-hidden text-xs rounded-sm p-2 mb-1">
+                                                <span className="text-muted-foreground block mb-1">Input Arguments:</span>
+                                                <pre className="overflow-x-auto text-foreground/90">{JSON.stringify(log.metadata.args, null, 2)}</pre>
                                             </div>
                                         )}
                                         {log.metadata.result != null && (

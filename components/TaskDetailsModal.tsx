@@ -28,6 +28,7 @@ import { useIncomingReactGrab } from './IncomingReactGrabProvider';
 import { Badge } from '@/components/ui/badge';
 import { ExecutionDiscussionTimeline } from './ExecutionDiscussionTimeline';
 import { CollaborationMatrix } from './analytics/team/CollaborationMatrix';
+import { getTaskPerformanceBenchmark, type TaskPerformanceBenchmark } from '@/lib/analytics';
 import type {
     ExecuteStreamOptions,
     ExecutionDiscussionEntry,
@@ -59,6 +60,7 @@ const DEFAULT_EXECUTION_OPTIONS: Required<ExecuteStreamOptions> = {
     discussionMode: 'step_handoff',
     maxDiscussionThoughts: 3,
     carryDiscussionToPrompt: true,
+    strategyPreset: 'balanced',
 };
 
 function normalizeExecutionOptions(raw?: ExecuteStreamOptions): Required<ExecuteStreamOptions> {
@@ -74,11 +76,19 @@ function normalizeExecutionOptions(raw?: ExecuteStreamOptions): Required<Execute
         typeof raw?.carryDiscussionToPrompt === 'boolean'
             ? raw.carryDiscussionToPrompt
             : DEFAULT_EXECUTION_OPTIONS.carryDiscussionToPrompt;
+    const strategyPreset =
+        raw?.strategyPreset === 'quality_first'
+            || raw?.strategyPreset === 'balanced'
+            || raw?.strategyPreset === 'speed_first'
+            || raw?.strategyPreset === 'cost_saver'
+            ? raw.strategyPreset
+            : DEFAULT_EXECUTION_OPTIONS.strategyPreset;
 
     return {
         discussionMode,
         maxDiscussionThoughts,
         carryDiscussionToPrompt,
+        strategyPreset,
     };
 }
 
@@ -105,6 +115,8 @@ export function TaskDetailsModal({
     const [isModifyingElement, setIsModifyingElement] = useState(false);
     const [isReviewing, setIsReviewing] = useState(false);
     const [isDiscussionAccordionOpen, setIsDiscussionAccordionOpen] = useState(false);
+    const [isBenchmarkLoading, setIsBenchmarkLoading] = useState(false);
+    const [taskBenchmark, setTaskBenchmark] = useState<TaskPerformanceBenchmark | null>(null);
     const [draftExecutionOptions, setDraftExecutionOptions] = useState<Required<ExecuteStreamOptions>>(
         DEFAULT_EXECUTION_OPTIONS
     );
@@ -142,6 +154,32 @@ export function TaskDetailsModal({
         setIsDiscussionAccordionOpen(false);
     }, [open, task?.id]);
 
+    useEffect(() => {
+        if (!open || !task?.id) return;
+
+        let active = true;
+        setIsBenchmarkLoading(true);
+
+        void getTaskPerformanceBenchmark(task.id, task.project_id ?? null)
+            .then((result) => {
+                if (!active) return;
+                setTaskBenchmark(result);
+            })
+            .catch((error) => {
+                console.error('Failed to load task benchmark:', error);
+                if (!active) return;
+                setTaskBenchmark(null);
+            })
+            .finally(() => {
+                if (!active) return;
+                setIsBenchmarkLoading(false);
+            });
+
+        return () => {
+            active = false;
+        };
+    }, [open, task?.id, task?.project_id]);
+
     if (!task) return null;
 
     const metadata = (task.metadata || {}) as Record<string, unknown> & {
@@ -164,7 +202,10 @@ export function TaskDetailsModal({
         ? metadata.executionDiscussions
         : [];
     const collaboration = metadata.agentCollaboration;
-    const canRunExecuteFromModal = task.status === 'planning' || task.status === 'working';
+    const canRunExecuteFromModal =
+        (task.status === 'planning' || task.status === 'working')
+        && Array.isArray(workflow?.steps)
+        && workflow.steps.length > 0;
 
     const handleEditCompleted = async () => {
         if (!editInstructions.trim()) return;
@@ -383,6 +424,9 @@ export function TaskDetailsModal({
                                 </p>
                                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                     <Badge variant="outline" className="text-[10px]">
+                                        Preset: {draftExecutionOptions.strategyPreset}
+                                    </Badge>
+                                    <Badge variant="outline" className="text-[10px]">
                                         Discussion: {draftExecutionOptions.discussionMode}
                                     </Badge>
                                     <Badge variant="outline" className="text-[10px]">
@@ -458,7 +502,7 @@ export function TaskDetailsModal({
                                 <LiveProgressPanel stream={stream} />
                             </div>
                         ) : view === 'brainstorm' ? (
-                            <div className="flex-1 flex flex-col p-4 bg-[#020617] rounded-b-lg" style={{ overflow: 'visible' }}>
+                            <div className="flex-1 flex flex-col p-4 bg-slate-950 rounded-b-lg" style={{ overflow: 'visible' }}>
                                 <div className="flex-1 relative" style={{ overflow: 'visible' }}>
                                     <AgentDiscussion
                                         taskId={task.id}
@@ -466,13 +510,13 @@ export function TaskDetailsModal({
                                     />
                                 </div>
 
-                                <div className="mt-3 p-3 bg-[#0f172a] border border-slate-800 shrink-0">
-                                    <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                                <div className="mt-3 p-3 bg-slate-900 border border-slate-700/70 shrink-0">
+                                    <h4 className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
                                         <div className="w-0.5 h-2.5 bg-[#3b9eff]" />
                                         Analysis Summary
                                     </h4>
                                     <ScrollArea className="max-h-[80px]">
-                                        <p className="text-[11px] text-slate-400 leading-relaxed font-medium">
+                                        <p className="text-[11px] text-slate-100/90 leading-relaxed font-medium">
                                             {typeof metadata.analysis === 'object' &&
                                             metadata.analysis !== null &&
                                             'summary' in metadata.analysis
@@ -577,11 +621,108 @@ export function TaskDetailsModal({
                                     </div>
                                 </div>
 
+                                {/* Task Performance Benchmark */}
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-medium text-muted-foreground">Task Performance Trend</h3>
+                                    <div className="rounded-md border bg-card p-4 space-y-3">
+                                        <p className="text-xs text-muted-foreground">
+                                            현재 태스크 실행 지표를 같은 프로젝트의 최근 완료/실패 태스크 평균과 비교합니다.
+                                        </p>
+                                        {isBenchmarkLoading ? (
+                                            <div className="text-xs text-muted-foreground">비교 지표를 불러오는 중...</div>
+                                        ) : !taskBenchmark ? (
+                                            <div className="text-xs text-muted-foreground">비교 가능한 baseline 데이터가 아직 충분하지 않습니다.</div>
+                                        ) : (
+                                            <>
+                                                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                                    <div className="rounded-md border p-3">
+                                                        <div className="text-[11px] text-muted-foreground">Tokens</div>
+                                                        <div className="text-sm font-semibold">
+                                                            {taskBenchmark.current.totalTokens.toLocaleString()}
+                                                            <span className="ml-1 text-xs text-muted-foreground">
+                                                                vs {taskBenchmark.baseline.totalTokens.toLocaleString()}
+                                                            </span>
+                                                        </div>
+                                                        <div className={`text-xs mt-1 ${taskBenchmark.deltaPct.totalTokens <= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                                            {taskBenchmark.deltaPct.totalTokens > 0 ? '+' : ''}
+                                                            {taskBenchmark.deltaPct.totalTokens.toFixed(1)}%
+                                                        </div>
+                                                    </div>
+                                                    <div className="rounded-md border p-3">
+                                                        <div className="text-[11px] text-muted-foreground">Lead Time</div>
+                                                        <div className="text-sm font-semibold">
+                                                            {taskBenchmark.current.leadTimeSeconds}s
+                                                            <span className="ml-1 text-xs text-muted-foreground">
+                                                                vs {taskBenchmark.baseline.leadTimeSeconds}s
+                                                            </span>
+                                                        </div>
+                                                        <div className={`text-xs mt-1 ${taskBenchmark.deltaPct.leadTimeSeconds <= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                                            {taskBenchmark.deltaPct.leadTimeSeconds > 0 ? '+' : ''}
+                                                            {taskBenchmark.deltaPct.leadTimeSeconds.toFixed(1)}%
+                                                        </div>
+                                                    </div>
+                                                    <div className="rounded-md border p-3">
+                                                        <div className="text-[11px] text-muted-foreground">Discussion Calls</div>
+                                                        <div className="text-sm font-semibold">
+                                                            {taskBenchmark.current.discussionCalls}
+                                                            <span className="ml-1 text-xs text-muted-foreground">
+                                                                vs {taskBenchmark.baseline.discussionCalls}
+                                                            </span>
+                                                        </div>
+                                                        <div className={`text-xs mt-1 ${taskBenchmark.deltaPct.discussionCalls <= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                                            {taskBenchmark.deltaPct.discussionCalls > 0 ? '+' : ''}
+                                                            {taskBenchmark.deltaPct.discussionCalls.toFixed(1)}%
+                                                        </div>
+                                                    </div>
+                                                    <div className="rounded-md border p-3">
+                                                        <div className="text-[11px] text-muted-foreground">LLM Calls</div>
+                                                        <div className="text-sm font-semibold">
+                                                            {taskBenchmark.current.llmCalls}
+                                                            <span className="ml-1 text-xs text-muted-foreground">
+                                                                vs {taskBenchmark.baseline.llmCalls}
+                                                            </span>
+                                                        </div>
+                                                        <div className={`text-xs mt-1 ${taskBenchmark.deltaPct.llmCalls <= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                                            {taskBenchmark.deltaPct.llmCalls > 0 ? '+' : ''}
+                                                            {taskBenchmark.deltaPct.llmCalls.toFixed(1)}%
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                                    <Badge variant="outline" className="text-[10px]">
+                                                        Current: {taskBenchmark.current.status}
+                                                    </Badge>
+                                                    <Badge variant="outline" className="text-[10px]">
+                                                        Baseline Sample: {taskBenchmark.sampleSize}
+                                                    </Badge>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+
                                 {/* Discussion Controls */}
                                 <div className="space-y-3">
                                     <h3 className="text-sm font-medium text-muted-foreground">Discussion Controls</h3>
                                     <div className="rounded-md border bg-card p-4 space-y-4">
-                                        <div className="grid gap-3 md:grid-cols-3">
+                                        <div className="grid gap-3 md:grid-cols-4">
+                                            <div className="space-y-1">
+                                                <Label className="text-xs text-muted-foreground">Preset</Label>
+                                                <select
+                                                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                                    value={draftExecutionOptions.strategyPreset}
+                                                    onChange={(e) =>
+                                                        updateExecutionOptions({
+                                                            strategyPreset: e.target.value as ExecuteStreamOptions['strategyPreset'],
+                                                        })
+                                                    }
+                                                >
+                                                    <option value="quality_first">quality_first</option>
+                                                    <option value="balanced">balanced</option>
+                                                    <option value="speed_first">speed_first</option>
+                                                    <option value="cost_saver">cost_saver</option>
+                                                </select>
+                                            </div>
                                             <div className="space-y-1">
                                                 <Label className="text-xs text-muted-foreground">Mode</Label>
                                                 <select
@@ -634,6 +775,9 @@ export function TaskDetailsModal({
                                             </div>
                                         </div>
                                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                            <Badge variant="outline" className="text-[10px]">
+                                                Saved Preset: {persistedExecutionOptions.strategyPreset}
+                                            </Badge>
                                             <Badge variant="outline" className="text-[10px]">
                                                 Saved: {persistedExecutionOptions.discussionMode}
                                             </Badge>

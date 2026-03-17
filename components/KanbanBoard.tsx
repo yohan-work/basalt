@@ -161,6 +161,7 @@ export function KanbanBoard() {
         const discussionMode = raw?.discussionMode;
         const maxDiscussionThoughts = raw?.maxDiscussionThoughts;
         const carryDiscussionToPrompt = raw?.carryDiscussionToPrompt;
+        const strategyPreset = raw?.strategyPreset;
 
         return {
             discussionMode:
@@ -173,6 +174,13 @@ export function KanbanBoard() {
                     : 3,
             carryDiscussionToPrompt:
                 typeof carryDiscussionToPrompt === 'boolean' ? carryDiscussionToPrompt : true,
+            strategyPreset:
+                strategyPreset === 'quality_first'
+                || strategyPreset === 'balanced'
+                || strategyPreset === 'speed_first'
+                || strategyPreset === 'cost_saver'
+                    ? strategyPreset
+                    : 'balanced',
         };
     };
 
