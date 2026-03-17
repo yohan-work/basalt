@@ -63,6 +63,14 @@ export function KanbanBoard() {
     const [actionError, setActionError] = useState<string | null>(null);
     const [executionOptionsByTask, setExecutionOptionsByTask] = useState<Record<string, ExecuteStreamOptions>>({});
 
+    const upsertTask = (prevTasks: Task[], nextTask: Task): Task[] => {
+        const index = prevTasks.findIndex((task) => task.id === nextTask.id);
+        if (index === -1) return [...prevTasks, nextTask];
+        const nextTasks = [...prevTasks];
+        nextTasks[index] = nextTask;
+        return nextTasks;
+    };
+
     // SSE stream for real-time progress
     const stream = useEventStream({
         onError: (msg) => {
@@ -85,7 +93,7 @@ export function KanbanBoard() {
                 { event: '*', schema: 'public', table: 'Tasks' },
                 (payload) => {
                     if (payload.eventType === 'INSERT') {
-                        setTasks(prev => [...prev, payload.new as Task]);
+                        setTasks(prev => upsertTask(prev, payload.new as Task));
                     } else if (payload.eventType === 'UPDATE') {
                         setTasks(prev => prev.map(t => t.id === payload.new.id ? payload.new as Task : t));
                         setSelectedTask(prev =>
@@ -161,12 +169,7 @@ export function KanbanBoard() {
         }
 
         if (createdTask) {
-            setTasks(prev => {
-                if (prev.some(task => task.id === createdTask.id)) {
-                    return prev;
-                }
-                return [...prev, createdTask as Task];
-            });
+            setTasks(prev => upsertTask(prev, createdTask as Task));
         }
     };
 
