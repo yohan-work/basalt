@@ -2,11 +2,12 @@
 import { supabase } from '@/lib/supabase';
 import * as skills from '@/lib/skills';
 import * as llm from '@/lib/llm';
-import { AgentLoader, AgentDefinition } from '../agent-loader';
+import { AgentLoader } from '../agent-loader';
 import { ContextManager } from '../context-manager';
-import { TeamState, TaskBoard, TeamMessage, AgentAction } from '../team-types';
+import { TeamState, AgentAction } from '../team-types';
 // import { v4 as uuidv4 } from 'uuid'; // Removed unused import to avoid dependency issues
 const generateId = () => Math.random().toString(36).substring(2, 9);
+type CollaborationMap = Record<string, Record<string, number>>;
 
 export class TeamOrchestrator {
     private taskId: string;
@@ -27,8 +28,102 @@ export class TeamOrchestrator {
                 review: [],
                 done: []
             },
-            metadata: { round: 0 }
+            metadata: {
+                round: 0,
+                discussionMode: 'enabled',
+                collaboration: {},
+                roundSummaries: []
+            }
         };
+    }
+
+    private normalizeAgentKey(agent: string): string {
+        return String(agent || '')
+            .toLowerCase()
+            .replace(/[\s_]+/g, '-')
+            .trim();
+    }
+
+    private ensureTeamMetadataDefaults() {
+        this.teamState.metadata = this.teamState.metadata || {};
+        if (typeof this.teamState.metadata.round !== 'number') this.teamState.metadata.round = 0;
+        if (!this.teamState.metadata.discussionMode) this.teamState.metadata.discussionMode = 'enabled';
+        if (!this.teamState.metadata.collaboration) this.teamState.metadata.collaboration = {};
+        if (!Array.isArray(this.teamState.metadata.roundSummaries)) this.teamState.metadata.roundSummaries = [];
+    }
+
+    private parseMentions(content: string): string[] {
+        if (!content) return [];
+        const matches = content.match(/@[a-z0-9-_]+/gi) || [];
+        return Array.from(new Set(matches.map(m => this.normalizeAgentKey(m.slice(1)))));
+    }
+
+    private recordCollaboration(from: string, to: string, weight = 1) {
+        const src = this.normalizeAgentKey(from);
+        const dst = this.normalizeAgentKey(to);
+        if (!src || !dst || src === dst) return;
+
+        const collaboration = (this.teamState.metadata.collaboration || {}) as CollaborationMap;
+        if (!collaboration[src]) collaboration[src] = {};
+        collaboration[src][dst] = (collaboration[src][dst] || 0) + weight;
+        this.teamState.metadata.collaboration = collaboration;
+    }
+
+    private async runDiscussionRound(round: number) {
+        if (this.teamState.metadata.discussionMode !== 'enabled') return;
+
+        try {
+            const availableAgents = AgentLoader.listAgents().filter(a =>
+                this.teamState.members.includes(a.role) || this.teamState.members.includes(a.name)
+            );
+            const boardSnapshot = {
+                todo: this.teamState.board.todo.map(t => ({ id: t.id, description: t.description, assignee: t.assignee })),
+                in_progress: this.teamState.board.in_progress.map(t => ({ id: t.id, description: t.description, assignee: t.assignee })),
+                review: this.teamState.board.review.map(t => ({ id: t.id, description: t.description, assignee: t.assignee })),
+            };
+            const recentMessages = this.teamState.messages.slice(-8).map(m => ({
+                agent: m.sender,
+                thought: m.content
+            }));
+
+            const thoughts = await skills.consult_agents(
+                {
+                    summary: `팀 라운드 ${round} 조율 토론`,
+                    required_agents: this.teamState.members,
+                    round,
+                    board: boardSnapshot
+                },
+                availableAgents.length > 0 ? availableAgents : AgentLoader.listAgents(),
+                JSON.stringify(boardSnapshot, null, 2),
+                null,
+                recentMessages
+            );
+
+            const selected = Array.isArray(thoughts) ? thoughts.slice(0, 5) : [];
+            if (selected.length === 0) return;
+
+            let prevSpeaker = this.teamState.leader;
+            for (const thought of selected) {
+                if (!thought?.agent || !thought?.thought) continue;
+                this.teamState.messages.push({
+                    id: generateId(),
+                    sender: thought.agent,
+                    content: `[라운드 ${round}] ${thought.thought}`,
+                    timestamp: Date.now(),
+                    messageType: 'discussion'
+                });
+                this.recordCollaboration(prevSpeaker, thought.agent, 1);
+                prevSpeaker = thought.agent;
+            }
+
+            this.teamState.metadata.roundSummaries.push({
+                round,
+                createdAt: Date.now(),
+                thoughts: selected
+            });
+        } catch (e) {
+            console.error('Discussion round failed:', e);
+        }
     }
 
     /**
@@ -45,6 +140,7 @@ export class TeamOrchestrator {
             console.log('Initializing New Team');
             // If no members, maybe dynamic loading? For now use defaults or from constructor
         }
+        this.ensureTeamMetadataDefaults();
 
         // Initialize Context Managers for each member
         for (const member of this.teamState.members) {
@@ -78,6 +174,7 @@ export class TeamOrchestrator {
         for (let i = 0; i < maxRounds; i++) {
             this.teamState.metadata.round = i;
             console.log(`--- Round ${i} ---`);
+            await this.runDiscussionRound(i);
 
             // Check termination condition: All items done? Leader says stop? 
             // Simplified: If todo and in_progress are empty and we have at least 1 done item, stop.
@@ -119,13 +216,15 @@ AVAILABLE ACTIONS (JSON):
 3. claim_task: { "type": "claim_task", "payload": { "taskId": "..." } }
 4. submit_task: { "type": "submit_task", "payload": { "taskId": "...", "result": "..." } }
 5. review_task: { "type": "review_task", "payload": { "taskId": "..." } }
-6. call_skill: { "type": "call_skill", "payload": { "skill": "skill_name", "args": [...] } }
+6. handoff_task: { "type": "handoff_task", "payload": { "taskId": "...", "to": "agent_role" } }
+7. call_skill: { "type": "call_skill", "payload": { "skill": "skill_name", "args": [...] } }
 
 RULES:
 - Be proactive. If there are tasks in TODO, claim them.
 - If you claimed a task, use 'call_skill' to do the work.
 - After work is done, use 'submit_task'.
 - Communicate via 'send_message' to coordinate.
+- If blocked, use @mentions in send_message to ask another agent for help.
 - Output a SINGLE JSON object with "thought" and "actions" (array).
 
 Context:
@@ -161,12 +260,18 @@ ${teamContext}
 
         switch (action.type) {
             case 'send_message':
+                const mentions = this.parseMentions(action.payload.content || '');
                 this.teamState.messages.push({
                     id: generateId(),
                     sender: agentName,
                     content: action.payload.content,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    mentions,
+                    messageType: 'chat'
                 });
+                for (const mention of mentions) {
+                    this.recordCollaboration(agentName, mention, 1);
+                }
                 break;
 
             case 'create_task':
@@ -179,6 +284,9 @@ ${teamContext}
                     created_at: Date.now(),
                     updated_at: Date.now()
                 });
+                if (action.payload.assignee) {
+                    this.recordCollaboration(agentName, action.payload.assignee, 1);
+                }
                 break;
 
             case 'claim_task':
@@ -190,6 +298,7 @@ ${teamContext}
                     task.assignee = agentName;
                     task.updated_at = Date.now();
                     this.teamState.board.in_progress.push(task);
+                    this.recordCollaboration(task.creator, agentName, 2);
                 }
                 break;
 
@@ -202,13 +311,15 @@ ${teamContext}
                     task.result = action.payload.result;
                     task.updated_at = Date.now();
                     this.teamState.board.done.push(task);
+                    this.recordCollaboration(agentName, this.teamState.leader, 1);
 
                     // Auto-notify
                     this.teamState.messages.push({
                         id: generateId(),
                         sender: 'system',
                         content: `Task ${task.description} completed by ${agentName}.`,
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        messageType: 'system'
                     });
                 }
                 break;
@@ -221,39 +332,80 @@ ${teamContext}
                     task.status = 'review';
                     task.updated_at = Date.now();
                     this.teamState.board.review.push(task);
+                    this.recordCollaboration(agentName, this.teamState.leader, 1);
 
                     this.teamState.messages.push({
                         id: generateId(),
                         sender: 'system',
                         content: `Task "${task.description}" moved to review by ${agentName}.`,
-                        timestamp: Date.now()
+                        timestamp: Date.now(),
+                        messageType: 'system'
                     });
+                }
+                break;
+
+            case 'handoff_task':
+                const handoffIndex = this.teamState.board.in_progress.findIndex(t => t.id === action.payload.taskId);
+                if (handoffIndex !== -1) {
+                    const handoffTask = this.teamState.board.in_progress[handoffIndex];
+                    const nextAssignee = this.normalizeAgentKey(action.payload.to || '');
+                    if (nextAssignee) {
+                        handoffTask.assignee = nextAssignee;
+                        handoffTask.updated_at = Date.now();
+                        this.recordCollaboration(agentName, nextAssignee, 2);
+                        this.teamState.messages.push({
+                            id: generateId(),
+                            sender: 'system',
+                            content: `Task "${handoffTask.description}"가 ${agentName}에서 ${nextAssignee}에게 핸드오프되었습니다.`,
+                            timestamp: Date.now(),
+                            messageType: 'system'
+                        });
+                    }
                 }
                 break;
 
             case 'call_skill':
                 const { skill, args } = action.payload;
                 try {
-                    const skillFunc = (skills as any)[skill];
+                    const normalizedArgs = Array.isArray(args) ? args : [];
+                    const skillRegistry = skills as unknown as Record<string, (...skillArgs: unknown[]) => Promise<unknown> | unknown>;
+                    const skillFunc = skillRegistry[skill]
+                        || ((...dynamicArgs: unknown[]) =>
+                            skills.execute_skill(
+                                skill,
+                                { args: dynamicArgs },
+                                ctxManager.getOptimizedContext(4000),
+                                null
+                            ));
+
                     if (skillFunc) {
-                        const result = await skillFunc(...args);
+                        const result = await skillFunc(...normalizedArgs);
+                        const resultWithContent =
+                            typeof result === 'object' &&
+                            result !== null &&
+                            'content' in result &&
+                            typeof (result as { content?: unknown }).content === 'string'
+                                ? (result as { content: string })
+                                : null;
 
                         // Capture result in context
                         ctxManager.addLog(agentName, `Called skill ${skill}`, result);
 
                         // If reading file, cache it
                         if (skill === 'read_codebase' && typeof result === 'string') {
-                            ctxManager.addFile(args[0], result);
-                        } else if (skill === 'read_codebase' && result.content) {
-                            ctxManager.addFile(args[0], result.content);
+                            ctxManager.addFile(normalizedArgs[0], result);
+                        } else if (skill === 'read_codebase' && resultWithContent) {
+                            ctxManager.addFile(normalizedArgs[0], resultWithContent.content);
                         }
+                        this.recordCollaboration(agentName, this.teamState.leader, 1);
 
                     } else {
                         console.error(`Skill ${skill} not found`);
                     }
-                } catch (e: any) {
-                    console.error(`Skill execution failed: ${e.message}`);
-                    ctxManager.addLog(agentName, `Skill ${skill} failed`, e.message);
+                } catch (e: unknown) {
+                    const message = e instanceof Error ? e.message : String(e);
+                    console.error(`Skill execution failed: ${message}`);
+                    ctxManager.addLog(agentName, `Skill ${skill} failed`, message);
                 }
                 break;
         }

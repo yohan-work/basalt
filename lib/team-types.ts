@@ -6,6 +6,7 @@ export interface TeamMessage {
     content: string;
     timestamp: number;
     mentions?: string[]; // e.g., ['@security-specialist']
+    messageType?: 'chat' | 'discussion' | 'system';
 }
 
 export interface TaskBoardItem {
@@ -38,7 +39,7 @@ export interface TeamState {
 }
 
 export interface AgentAction {
-    type: 'send_message' | 'create_task' | 'claim_task' | 'submit_task' | 'review_task' | 'call_skill';
+    type: 'send_message' | 'create_task' | 'claim_task' | 'submit_task' | 'review_task' | 'handoff_task' | 'call_skill';
     payload: any;
     thought?: string;
 }
