@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { StreamEvent } from '@/lib/stream-emitter';
+import type { ExecuteStreamOptions } from '@/lib/types/agent-visualization';
 
 export interface StepInfo {
     step: number;
@@ -48,7 +49,7 @@ interface UseEventStreamOptions {
  * Hook to consume an SSE stream from /api/agent/stream.
  *
  * Returns a start() function and the current state.
- * Call start(taskId, action) to begin streaming.
+ * Call start(taskId, action, executeOptions?) to begin streaming.
  * The stream auto-closes on 'done' event or error.
  */
 export function useEventStream(options: UseEventStreamOptions = {}) {
@@ -66,14 +67,17 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
 
     const abortRef = useRef<AbortController | null>(null);
     const optionsRef = useRef(options);
-    optionsRef.current = options;
+
+    useEffect(() => {
+        optionsRef.current = options;
+    }, [options]);
 
     const stop = useCallback(() => {
         abortRef.current?.abort();
         abortRef.current = null;
     }, []);
 
-    const start = useCallback((taskId: string, action: string) => {
+    const start = useCallback((taskId: string, action: string, executeOptions?: ExecuteStreamOptions) => {
         // Cancel any existing stream
         stop();
 
@@ -94,7 +98,20 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
         });
 
         // Use fetch instead of EventSource for better abort control
-        const url = `/api/agent/stream?taskId=${encodeURIComponent(taskId)}&action=${encodeURIComponent(action)}`;
+        const params = new URLSearchParams({
+            taskId,
+            action,
+        });
+        if (executeOptions?.discussionMode) {
+            params.set('discussionMode', executeOptions.discussionMode);
+        }
+        if (typeof executeOptions?.maxDiscussionThoughts === 'number') {
+            params.set('maxDiscussionThoughts', String(executeOptions.maxDiscussionThoughts));
+        }
+        if (typeof executeOptions?.carryDiscussionToPrompt === 'boolean') {
+            params.set('carryDiscussionToPrompt', String(executeOptions.carryDiscussionToPrompt));
+        }
+        const url = `/api/agent/stream?${params.toString()}`;
 
         (async () => {
             try {
@@ -155,21 +172,22 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
                     return prev;
                 });
 
-            } catch (err: any) {
-                if (err.name === 'AbortError') return; // Intentional abort
+            } catch (err: unknown) {
+                if (err instanceof DOMException && err.name === 'AbortError') return; // Intentional abort
+                const message = err instanceof Error ? err.message : 'Unknown stream error';
                 setState(prev => ({
                     ...prev,
                     status: 'error',
-                    errorMessage: err.message,
+                    errorMessage: message,
                 }));
-                optionsRef.current.onError?.(err.message);
+                optionsRef.current.onError?.(message);
             }
         })();
 
         function processEvent(event: StreamEvent) {
             setState(prev => {
                 const newEvents = [...prev.events, event];
-                let newState = { ...prev, events: newEvents };
+                const newState = { ...prev, events: newEvents };
 
                 switch (event.type) {
                     case 'step_start':

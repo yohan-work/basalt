@@ -4,10 +4,9 @@ import * as skills from '@/lib/skills';
 import * as llm from '@/lib/llm';
 import { AgentLoader } from '../agent-loader';
 import { ContextManager } from '../context-manager';
-import { TeamState, AgentAction } from '../team-types';
+import { TeamState, AgentAction, TeamMetadata, TeamCollaborationMap } from '../team-types';
 // import { v4 as uuidv4 } from 'uuid'; // Removed unused import to avoid dependency issues
 const generateId = () => Math.random().toString(36).substring(2, 9);
-type CollaborationMap = Record<string, Record<string, number>>;
 
 export class TeamOrchestrator {
     private taskId: string;
@@ -45,11 +44,18 @@ export class TeamOrchestrator {
     }
 
     private ensureTeamMetadataDefaults() {
-        this.teamState.metadata = this.teamState.metadata || {};
-        if (typeof this.teamState.metadata.round !== 'number') this.teamState.metadata.round = 0;
-        if (!this.teamState.metadata.discussionMode) this.teamState.metadata.discussionMode = 'enabled';
-        if (!this.teamState.metadata.collaboration) this.teamState.metadata.collaboration = {};
-        if (!Array.isArray(this.teamState.metadata.roundSummaries)) this.teamState.metadata.roundSummaries = [];
+        const metadata = (this.teamState.metadata || {}) as Partial<TeamMetadata> & Record<string, unknown>;
+        if (typeof metadata.round !== 'number') metadata.round = 0;
+        if (metadata.discussionMode !== 'enabled' && metadata.discussionMode !== 'disabled') {
+            metadata.discussionMode = 'enabled';
+        }
+        if (!metadata.collaboration || typeof metadata.collaboration !== 'object') {
+            metadata.collaboration = {};
+        }
+        if (!Array.isArray(metadata.roundSummaries)) {
+            metadata.roundSummaries = [];
+        }
+        this.teamState.metadata = metadata as TeamMetadata;
     }
 
     private parseMentions(content: string): string[] {
@@ -63,7 +69,7 @@ export class TeamOrchestrator {
         const dst = this.normalizeAgentKey(to);
         if (!src || !dst || src === dst) return;
 
-        const collaboration = (this.teamState.metadata.collaboration || {}) as CollaborationMap;
+        const collaboration = (this.teamState.metadata.collaboration || {}) as TeamCollaborationMap;
         if (!collaboration[src]) collaboration[src] = {};
         collaboration[src][dst] = (collaboration[src][dst] || 0) + weight;
         this.teamState.metadata.collaboration = collaboration;
@@ -116,11 +122,15 @@ export class TeamOrchestrator {
                 prevSpeaker = thought.agent;
             }
 
-            this.teamState.metadata.roundSummaries.push({
+            const roundSummaries = Array.isArray(this.teamState.metadata.roundSummaries)
+                ? this.teamState.metadata.roundSummaries
+                : [];
+            roundSummaries.push({
                 round,
                 createdAt: Date.now(),
                 thoughts: selected
             });
+            this.teamState.metadata.roundSummaries = roundSummaries;
         } catch (e) {
             console.error('Discussion round failed:', e);
         }
@@ -392,10 +402,13 @@ ${teamContext}
                         ctxManager.addLog(agentName, `Called skill ${skill}`, result);
 
                         // If reading file, cache it
-                        if (skill === 'read_codebase' && typeof result === 'string') {
-                            ctxManager.addFile(normalizedArgs[0], result);
-                        } else if (skill === 'read_codebase' && resultWithContent) {
-                            ctxManager.addFile(normalizedArgs[0], resultWithContent.content);
+                        if (skill === 'read_codebase') {
+                            const targetPath = typeof normalizedArgs[0] === 'string' ? normalizedArgs[0] : null;
+                            if (targetPath && typeof result === 'string') {
+                                ctxManager.addFile(targetPath, result);
+                            } else if (targetPath && resultWithContent) {
+                                ctxManager.addFile(targetPath, resultWithContent.content);
+                            }
                         }
                         this.recordCollaboration(agentName, this.teamState.leader, 1);
 

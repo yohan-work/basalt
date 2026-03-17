@@ -28,18 +28,71 @@ export interface TaskBoard {
     done: TaskBoardItem[];
 }
 
+export type TeamDiscussionMode = 'enabled' | 'disabled';
+export type TeamCollaborationMap = Record<string, Record<string, number>>;
+
+export interface TeamRoundThought {
+    agent: string;
+    thought: string;
+    type?: string;
+}
+
+export interface TeamRoundSummary {
+    round: number;
+    createdAt: number;
+    thoughts: TeamRoundThought[];
+}
+
+export interface TeamMetadata {
+    round: number;
+    discussionMode: TeamDiscussionMode;
+    collaboration: TeamCollaborationMap;
+    roundSummaries: TeamRoundSummary[];
+    [key: string]: unknown;
+}
+
 export interface TeamState {
     name: string;
     leader: string;
     members: string[]; // list of agent roles/names
     messages: TeamMessage[];
     board: TaskBoard;
-    // Metadata can store round info, etc.
-    metadata: Record<string, any>;
+    metadata: Partial<TeamMetadata> & Record<string, unknown>;
 }
 
-export interface AgentAction {
-    type: 'send_message' | 'create_task' | 'claim_task' | 'submit_task' | 'review_task' | 'handoff_task' | 'call_skill';
-    payload: any;
-    thought?: string;
-}
+export type AgentAction =
+    | {
+        type: 'send_message';
+        payload: { content: string };
+        thought?: string;
+    }
+    | {
+        type: 'create_task';
+        payload: { description: string; assignee?: string | null };
+        thought?: string;
+    }
+    | {
+        type: 'claim_task';
+        payload: { taskId: string };
+        thought?: string;
+    }
+    | {
+        type: 'submit_task';
+        payload: { taskId: string; result: string };
+        thought?: string;
+    }
+    | {
+        type: 'review_task';
+        payload: { taskId: string };
+        thought?: string;
+    }
+    | {
+        type: 'handoff_task';
+        payload: { taskId: string; to: string };
+        thought?: string;
+    }
+    | {
+        type: 'call_skill';
+        payload: { skill: string; args?: unknown[] };
+        thought?: string;
+    };
