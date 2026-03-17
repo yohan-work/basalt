@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp, Pencil, Search, ClipboardPaste, ExternalLink } from 'lucide-react';
+import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp, Pencil, Search, ClipboardPaste, ExternalLink, ChevronDown } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { StepProgress, type ProgressInfo } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
@@ -25,6 +25,14 @@ import {
 import { Label } from '@/components/ui/label';
 import { parseReactGrabClipboard } from '@/lib/parse-react-grab-clipboard';
 import { useIncomingReactGrab } from './IncomingReactGrabProvider';
+import { Badge } from '@/components/ui/badge';
+import { ExecutionDiscussionTimeline } from './ExecutionDiscussionTimeline';
+import { CollaborationMatrix } from './analytics/team/CollaborationMatrix';
+import type {
+    ExecuteStreamOptions,
+    ExecutionDiscussionEntry,
+    OrchestratorCollaborationMap,
+} from '@/lib/types/agent-visualization';
 
 interface TaskDetailsModalProps {
     task: {
@@ -37,10 +45,52 @@ interface TaskDetailsModalProps {
     } | null;
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    stream?: EventStreamState & { start: (taskId: string, action: string) => void; stop: () => void; isActive: boolean };
+    stream?: EventStreamState & {
+        start: (taskId: string, action: string, executeOptions?: ExecuteStreamOptions) => void;
+        stop: () => void;
+        isActive: boolean;
+    };
+    executionOptions?: ExecuteStreamOptions;
+    onExecutionOptionsChange?: (taskId: string, options: ExecuteStreamOptions) => void;
+    onExecute?: (taskId: string, options: ExecuteStreamOptions) => void;
 }
 
-export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetailsModalProps) {
+const DEFAULT_EXECUTION_OPTIONS: Required<ExecuteStreamOptions> = {
+    discussionMode: 'step_handoff',
+    maxDiscussionThoughts: 3,
+    carryDiscussionToPrompt: true,
+};
+
+function normalizeExecutionOptions(raw?: ExecuteStreamOptions): Required<ExecuteStreamOptions> {
+    const discussionMode =
+        raw?.discussionMode === 'off' || raw?.discussionMode === 'step_handoff' || raw?.discussionMode === 'roundtable'
+            ? raw.discussionMode
+            : DEFAULT_EXECUTION_OPTIONS.discussionMode;
+    const maxDiscussionThoughts =
+        typeof raw?.maxDiscussionThoughts === 'number' && Number.isFinite(raw.maxDiscussionThoughts)
+            ? Math.min(6, Math.max(1, Math.round(raw.maxDiscussionThoughts)))
+            : DEFAULT_EXECUTION_OPTIONS.maxDiscussionThoughts;
+    const carryDiscussionToPrompt =
+        typeof raw?.carryDiscussionToPrompt === 'boolean'
+            ? raw.carryDiscussionToPrompt
+            : DEFAULT_EXECUTION_OPTIONS.carryDiscussionToPrompt;
+
+    return {
+        discussionMode,
+        maxDiscussionThoughts,
+        carryDiscussionToPrompt,
+    };
+}
+
+export function TaskDetailsModal({
+    task,
+    open,
+    onOpenChange,
+    stream,
+    executionOptions,
+    onExecutionOptionsChange,
+    onExecute,
+}: TaskDetailsModalProps) {
     const [view, setView] = useState<'details' | 'logs' | 'changes' | 'live' | 'brainstorm'>('details'); // Updated state type
     const [isRetrying, setIsRetrying] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -54,6 +104,10 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
     const [modifyElementRequest, setModifyElementRequest] = useState('');
     const [isModifyingElement, setIsModifyingElement] = useState(false);
     const [isReviewing, setIsReviewing] = useState(false);
+    const [isDiscussionAccordionOpen, setIsDiscussionAccordionOpen] = useState(false);
+    const [draftExecutionOptions, setDraftExecutionOptions] = useState<Required<ExecuteStreamOptions>>(
+        DEFAULT_EXECUTION_OPTIONS
+    );
 
     const { payload: incomingReactGrabPayload, clearPayload: clearIncomingReactGrab } = useIncomingReactGrab();
 
@@ -71,9 +125,30 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
         clearIncomingReactGrab();
     }, [incomingReactGrabPayload, task, open, clearIncomingReactGrab]);
 
+    useEffect(() => {
+        if (!task) return;
+
+        const metadataExecutionOptions =
+            typeof task.metadata === 'object' && task.metadata !== null
+                ? ((task.metadata as Record<string, unknown>).executionOptions as ExecuteStreamOptions | undefined)
+                : undefined;
+
+        const next = normalizeExecutionOptions(executionOptions || metadataExecutionOptions);
+        setDraftExecutionOptions(next);
+    }, [task, executionOptions, open]);
+
+    useEffect(() => {
+        if (!open) return;
+        setIsDiscussionAccordionOpen(false);
+    }, [open, task?.id]);
+
     if (!task) return null;
 
-    const metadata = (task.metadata || {}) as Record<string, unknown>;
+    const metadata = (task.metadata || {}) as Record<string, unknown> & {
+        executionOptions?: ExecuteStreamOptions;
+        executionDiscussions?: ExecutionDiscussionEntry[];
+        agentCollaboration?: OrchestratorCollaborationMap;
+    };
     const reviewResult = metadata.reviewResult as string | undefined;
     const analysis = metadata.analysis as { complexity?: string; required_agents?: string[]; summary?: string } | undefined;
     const workflow = metadata.workflow as { steps: Array<{ action: string; agent: string }> } | undefined;
@@ -84,6 +159,12 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
     const isReview = task.status === 'review';
     const canEditOrReview = ['testing', 'review', 'done'].includes(task.status);
     const hasChanges = fileChanges && fileChanges.length > 0;
+    const persistedExecutionOptions = normalizeExecutionOptions(metadata.executionOptions);
+    const executionDiscussions = Array.isArray(metadata.executionDiscussions)
+        ? metadata.executionDiscussions
+        : [];
+    const collaboration = metadata.agentCollaboration;
+    const canRunExecuteFromModal = task.status === 'planning' || task.status === 'working';
 
     const handleEditCompleted = async () => {
         if (!editInstructions.trim()) return;
@@ -190,8 +271,26 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
             setIsReviewing(false);
         }
     };
+
+    const updateExecutionOptions = (patch: Partial<ExecuteStreamOptions>) => {
+        if (!task) return;
+        const next = normalizeExecutionOptions({ ...draftExecutionOptions, ...patch });
+        setDraftExecutionOptions(next);
+        onExecutionOptionsChange?.(task.id, next);
+    };
+
+    const handleExecuteWithOptions = () => {
+        if (!task) return;
+
+        if (onExecute) {
+            onExecute(task.id, draftExecutionOptions);
+        } else {
+            stream?.start(task.id, 'execute', draftExecutionOptions);
+        }
+        setView('live');
+    };
+
     const isStreaming = stream?.isActive;
-    const hasBrainstorm = !!metadata.brainstorm; // Check if brainstorm data exists
 
     const handleRetry = async () => {
         setIsRetrying(true);
@@ -282,6 +381,20 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                     Status: <span className={`uppercase font-bold ${isFailed ? 'text-red-500' : 'text-primary'}`}>{task.status}</span>
                                     {metadata.retryCount ? <span className="text-xs ml-2">(Retry #{String(metadata.retryCount)})</span> : ''}
                                 </p>
+                                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                    <Badge variant="outline" className="text-[10px]">
+                                        Discussion: {draftExecutionOptions.discussionMode}
+                                    </Badge>
+                                    <Badge variant="outline" className="text-[10px]">
+                                        Thoughts: {draftExecutionOptions.maxDiscussionThoughts}
+                                    </Badge>
+                                    <Badge
+                                        variant={draftExecutionOptions.carryDiscussionToPrompt ? 'default' : 'secondary'}
+                                        className="text-[10px]"
+                                    >
+                                        {draftExecutionOptions.carryDiscussionToPrompt ? 'Prompt Carry On' : 'Prompt Carry Off'}
+                                    </Badge>
+                                </div>
                             </div>
                             <div className="flex bg-muted rounded-md p-1 gap-1 ml-4">
                                 <button
@@ -360,7 +473,11 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                     </h4>
                                     <ScrollArea className="max-h-[80px]">
                                         <p className="text-[11px] text-slate-400 leading-relaxed font-medium">
-                                            {metadata.analysis ? (metadata.analysis as any).summary : '에이전트들이 현재 요구사항을 분석하고 최적의 구현 방법을 논의 중입니다.'}
+                                            {typeof metadata.analysis === 'object' &&
+                                            metadata.analysis !== null &&
+                                            'summary' in metadata.analysis
+                                                ? String((metadata.analysis as { summary?: unknown }).summary ?? '')
+                                                : '에이전트들이 현재 요구사항을 분석하고 최적의 구현 방법을 논의 중입니다.'}
                                         </p>
                                     </ScrollArea>
                                 </div>
@@ -458,6 +575,124 @@ export function TaskDetailsModal({ task, open, onOpenChange, stream }: TaskDetai
                                     <div className="p-3 bg-muted/40 rounded-md text-sm whitespace-pre-wrap">
                                         {task.description}
                                     </div>
+                                </div>
+
+                                {/* Discussion Controls */}
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-medium text-muted-foreground">Discussion Controls</h3>
+                                    <div className="rounded-md border bg-card p-4 space-y-4">
+                                        <div className="grid gap-3 md:grid-cols-3">
+                                            <div className="space-y-1">
+                                                <Label className="text-xs text-muted-foreground">Mode</Label>
+                                                <select
+                                                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                                    value={draftExecutionOptions.discussionMode}
+                                                    onChange={(e) =>
+                                                        updateExecutionOptions({
+                                                            discussionMode: e.target.value as ExecuteStreamOptions['discussionMode'],
+                                                        })
+                                                    }
+                                                >
+                                                    <option value="off">off</option>
+                                                    <option value="step_handoff">step_handoff</option>
+                                                    <option value="roundtable">roundtable</option>
+                                                </select>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-xs text-muted-foreground">Max Thoughts</Label>
+                                                <input
+                                                    type="number"
+                                                    min={1}
+                                                    max={6}
+                                                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                                    value={draftExecutionOptions.maxDiscussionThoughts}
+                                                    onChange={(e) =>
+                                                        updateExecutionOptions({
+                                                            maxDiscussionThoughts: Number(e.target.value),
+                                                        })
+                                                    }
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-xs text-muted-foreground">Prompt Carry</Label>
+                                                <button
+                                                    type="button"
+                                                    className={`h-9 w-full rounded-md border px-2 text-sm transition-colors ${
+                                                        draftExecutionOptions.carryDiscussionToPrompt
+                                                            ? 'border-emerald-500/50 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+                                                            : 'border-input bg-background text-muted-foreground'
+                                                    }`}
+                                                    onClick={() =>
+                                                        updateExecutionOptions({
+                                                            carryDiscussionToPrompt:
+                                                                !draftExecutionOptions.carryDiscussionToPrompt,
+                                                        })
+                                                    }
+                                                >
+                                                    {draftExecutionOptions.carryDiscussionToPrompt ? 'enabled' : 'disabled'}
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                            <Badge variant="outline" className="text-[10px]">
+                                                Saved: {persistedExecutionOptions.discussionMode}
+                                            </Badge>
+                                            <Badge variant="outline" className="text-[10px]">
+                                                Saved Thoughts: {persistedExecutionOptions.maxDiscussionThoughts}
+                                            </Badge>
+                                            <Badge variant="outline" className="text-[10px]">
+                                                Saved Carry: {persistedExecutionOptions.carryDiscussionToPrompt ? 'on' : 'off'}
+                                            </Badge>
+                                        </div>
+                                        {canRunExecuteFromModal && (
+                                            <div className="flex justify-end">
+                                                <Button size="sm" onClick={handleExecuteWithOptions}>
+                                                    Execute With Discussion Options
+                                                </Button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Discussion Timeline */}
+                                <div className="space-y-3">
+                                    <button
+                                        type="button"
+                                        className="flex w-full items-center justify-between rounded-md border bg-card px-3 py-2 text-left transition-colors hover:bg-muted/30"
+                                        aria-expanded={isDiscussionAccordionOpen}
+                                        aria-controls="execution-discussions-panel"
+                                        onClick={() => setIsDiscussionAccordionOpen((prev) => !prev)}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-sm font-medium text-muted-foreground">Execution Discussions</span>
+                                            <Badge variant="outline" className="text-[10px]">
+                                                {executionDiscussions.length} entries
+                                            </Badge>
+                                        </div>
+                                        <ChevronDown
+                                            className={`h-4 w-4 text-muted-foreground transition-transform ${
+                                                isDiscussionAccordionOpen ? 'rotate-180' : ''
+                                            }`}
+                                        />
+                                    </button>
+                                    {isDiscussionAccordionOpen && (
+                                        <div id="execution-discussions-panel">
+                                            <ExecutionDiscussionTimeline
+                                                entries={executionDiscussions}
+                                                carryDiscussionToPrompt={draftExecutionOptions.carryDiscussionToPrompt}
+                                            />
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Collaboration Matrix */}
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-medium text-muted-foreground">Agent Collaboration</h3>
+                                    <CollaborationMatrix
+                                        title="Execution Collaboration Matrix"
+                                        collaboration={collaboration}
+                                        emptyMessage="협업 그래프 데이터가 아직 저장되지 않았습니다."
+                                    />
                                 </div>
 
                                 {/* Error Information Section (If Failed) */}

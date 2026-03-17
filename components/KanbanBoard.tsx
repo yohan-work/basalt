@@ -14,6 +14,7 @@ import { ProjectSelector } from './ProjectSelector';
 import { StepProgress } from './StepProgress';
 import { ThemeToggle } from './ThemeToggle';
 import { useEventStream } from '@/lib/hooks/useEventStream';
+import type { ExecuteStreamOptions } from '@/lib/types/agent-visualization';
 
 interface Task {
     id: string;
@@ -36,6 +37,8 @@ interface Task {
             startedAt?: string;
             stepStatus: 'pending' | 'running' | 'completed' | 'failed';
         };
+        executionOptions?: ExecuteStreamOptions;
+        [key: string]: unknown;
     };
 }
 
@@ -58,6 +61,7 @@ export function KanbanBoard() {
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [actionError, setActionError] = useState<string | null>(null);
+    const [executionOptionsByTask, setExecutionOptionsByTask] = useState<Record<string, ExecuteStreamOptions>>({});
 
     // SSE stream for real-time progress
     const stream = useEventStream({
@@ -149,14 +153,42 @@ export function KanbanBoard() {
 
     // --- Action Handlers (SSE-based) ---
 
-    const startStreamAction = (e: React.MouseEvent, task: Task, action: string) => {
+    const getTaskExecutionOptions = (task: Task): ExecuteStreamOptions => {
+        const draft = executionOptionsByTask[task.id];
+        if (draft) return draft;
+
+        const raw = task.metadata?.executionOptions;
+        const discussionMode = raw?.discussionMode;
+        const maxDiscussionThoughts = raw?.maxDiscussionThoughts;
+        const carryDiscussionToPrompt = raw?.carryDiscussionToPrompt;
+
+        return {
+            discussionMode:
+                discussionMode === 'off' || discussionMode === 'step_handoff' || discussionMode === 'roundtable'
+                    ? discussionMode
+                    : 'step_handoff',
+            maxDiscussionThoughts:
+                typeof maxDiscussionThoughts === 'number' && Number.isFinite(maxDiscussionThoughts)
+                    ? Math.min(6, Math.max(1, Math.round(maxDiscussionThoughts)))
+                    : 3,
+            carryDiscussionToPrompt:
+                typeof carryDiscussionToPrompt === 'boolean' ? carryDiscussionToPrompt : true,
+        };
+    };
+
+    const startStreamAction = (
+        e: React.MouseEvent,
+        task: Task,
+        action: string,
+        executeOptions?: ExecuteStreamOptions
+    ) => {
         e.stopPropagation();
         setProcessingTaskIds(prev => new Set(prev).add(task.id));
         // Open task details modal to show live progress
         setSelectedTask(task);
         setIsDetailsOpen(true);
         // Start SSE stream
-        stream.start(task.id, action);
+        stream.start(task.id, action, action === 'execute' ? executeOptions : undefined);
     };
 
     const handleConfirmPlan = (e: React.MouseEvent, task: Task) => {
@@ -164,7 +196,8 @@ export function KanbanBoard() {
     };
 
     const handleStartDev = (e: React.MouseEvent, task: Task) => {
-        startStreamAction(e, task, 'execute');
+        const options = getTaskExecutionOptions(task);
+        startStreamAction(e, task, 'execute', options);
     };
 
     const handleRunTests = (e: React.MouseEvent, task: Task) => {
@@ -178,6 +211,25 @@ export function KanbanBoard() {
 
     const handleRetry = (e: React.MouseEvent, task: Task) => {
         startStreamAction(e, task, 'retry');
+    };
+
+    const handleExecutionOptionsChange = (taskId: string, options: ExecuteStreamOptions) => {
+        setExecutionOptionsByTask(prev => ({
+            ...prev,
+            [taskId]: options,
+        }));
+    };
+
+    const handleExecuteFromModal = (taskId: string, options: ExecuteStreamOptions) => {
+        const task = tasks.find((item) => item.id === taskId);
+        if (!task) return;
+
+        setExecutionOptionsByTask(prev => ({
+            ...prev,
+            [taskId]: options,
+        }));
+        setProcessingTaskIds(prev => new Set(prev).add(taskId));
+        stream.start(taskId, 'execute', options);
     };
 
     const handleApprove = async (e: React.MouseEvent, task: Task) => {
@@ -350,6 +402,9 @@ export function KanbanBoard() {
                 open={isDetailsOpen}
                 onOpenChange={setIsDetailsOpen}
                 stream={stream}
+                executionOptions={selectedTask ? getTaskExecutionOptions(selectedTask) : undefined}
+                onExecutionOptionsChange={handleExecutionOptionsChange}
+                onExecute={handleExecuteFromModal}
             />
 
             <ProjectPreviewPanel
