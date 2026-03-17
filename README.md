@@ -45,6 +45,9 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - **상세 PR 설명 자동화**: 변경된 파일의 diff를 분석하여 전문적이고 상세한 PR 본문을 자동 생성
 - **지속적 잠금 메커니즘(Persistent Locking)**: DB 레벨의 잠금 장치를 통해 작업의 중복 실행을 방지하고 작업 안정성 확보
 - **Human-in-the-Loop (HITL)**: 파일 삭제, 주요 설정 변경 등 파괴적인 액션이 감지될 경우, 작업을 일시 정지하고 사용자의 승인(Approve) 또는 반려(Reject)를 대기하여 안전을 보장
+- **Step 사전 토론 모드**: 실행 단계에서 step마다 `consult_agents` 토론을 수행해 리스크/핸드오프 인사이트를 생성
+- **실행 옵션 제어**: `discussionMode`(`off`/`step_handoff`/`roundtable`), `maxDiscussionThoughts`, `carryDiscussionToPrompt`를 실행 시점에 제어
+- **토론/협업 메타데이터 영속화**: `metadata.executionOptions`, `metadata.executionDiscussions`, `metadata.agentCollaboration`를 저장해 실행 과정을 추적
 
 ### TeamOrchestrator
 
@@ -56,6 +59,10 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - 에이전트별 독립 컨텍스트 매니저 운영
 - 상태를 Supabase에 영속화하여 중단 후 재개 가능
 - 액션 기반 통신 (메시지 전송, 태스크 생성/인수/리뷰/제출, 스킬 호출)
+- 라운드 시작 시 사전 토론(`discussion round`) 실행 및 `metadata.roundSummaries` 저장
+- 명시적 핸드오프 액션(`handoff_task`) 지원으로 in-progress 태스크 전달
+- 팀 메시지 타입(`chat`/`discussion`/`system`) 분류 저장 및 시각화 연동
+- 팀 협업 강도(`metadata.collaboration`) 누적 저장
 
 ### LLM
 
@@ -141,18 +148,18 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | 메서드 | 경로 | 하는 일 |
 |--------|------|--------|
 | POST | `/api/agent/plan` | 태스크 분석 및 워크플로우 생성 |
-| POST | `/api/agent/execute` | 워크플로우 순차 실행 |
+| POST | `/api/agent/execute` | 워크플로우 순차 실행 (`options`: `discussionMode`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`) |
 | POST | `/api/agent/verify` | 결과 검증 및 Git PR 생성 |
 | POST | `/api/agent/retry` | 실패한 태스크 재시도 (실패 step부터 재개) |
 | POST | `/api/agent/skills` | 스킬 동적 실행 (`skillName`, `args`, 선택 `projectPath`) |
-| GET | `/api/agent/stream` | SSE 실시간 진행 스트리밍 (`taskId`, `action` 쿼리 파라미터) |
+| GET | `/api/agent/stream` | SSE 실시간 진행 스트리밍 (`taskId`, `action`, 선택: `discussionMode`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`) |
 | POST | `/api/agent/edit-completed` | 완료/검토/테스트 단계 태스크의 코드에 사용자 지시사항 적용 (`taskId`, `instructions`) |
 | POST | `/api/agent/modify-element` | 완료 결과물의 특정 요소만 수정 (`taskId`, `filePath`, `elementDescriptor`, `request`) |
 | POST | `/api/agent/review` | 태스크 결과물 코드 검토 실행, 결과를 `metadata.reviewResult`에 저장 |
 | GET | `/api/project/components` | 프로젝트(및 선택 시 특정 태스크)의 컴포넌트 목록 (`projectId`, 선택 `taskId`) |
 | POST | `/api/system/dialog` | macOS 폴더 선택 다이얼로그 |
 | POST | `/api/tts` | 텍스트를 음성으로 변환 (edge-tts-universal). `{ text, voice, rate?, pitch? }` → `audio/mpeg` 스트림 반환 |
-| POST | `/api/team/execute` | 팀 협업 오케스트레이션 (최대 5분) |
+| POST | `/api/team/execute` | 팀 협업 오케스트레이션 (최대 5분, 선택: `discussionMode`) |
 
 ### 추가 기능 구현 내역
 
@@ -183,7 +190,16 @@ TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_c
 - **자동 폴백**: edge-tts API 실패 시 브라우저 내장 Web Speech API로 자동 전환됩니다.
 - **서버 사이드 TTS**: `POST /api/tts` 엔드포인트에서 `edge-tts-universal`로 오디오를 생성하여 MP3 스트림으로 반환합니다. API 키 불필요, 완전 무료.
 
-**Tasks.metadata 추가 필드**: `attachedComponentPaths`(string[]), `editInProgress`/`modifyElementInProgress`(락 플래그), `reviewResult`/`reviewAt`(코드 검토 결과).
+**7. 실행 토론 시각화 (Execution Discussions)**  
+Orchestrator가 각 step 실행 전에 생성한 토론 인사이트(`metadata.executionDiscussions`)를 `TaskDetailsModal`에서 확인할 수 있습니다.  
+step/action/participants/thoughts/createdAt 정보를 카드 형태로 표시하며, 아코디언 UI(기본 닫힘)로 필요할 때만 확장해 볼 수 있습니다.
+
+**8. 협업 관계 시각화 (Agent Collaboration Matrix)**  
+에이전트 간 협업 강도(`metadata.agentCollaboration`, 팀 모드의 경우 `teamState.metadata.collaboration`)를 매트릭스로 시각화합니다.  
+`From -> To` 가중치, row/col 합계를 통해 협업 흐름을 정량적으로 파악할 수 있습니다.
+
+**Tasks.metadata 추가 필드**:  
+`attachedComponentPaths`(string[]), `editInProgress`/`modifyElementInProgress`(락 플래그), `reviewResult`/`reviewAt`(코드 검토 결과), `executionOptions`, `executionDiscussions`, `agentCollaboration`.
 
 ### Components
 
@@ -198,7 +214,8 @@ TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_c
 | `AgentDiscussion` | **Basalt Virtual Office**. 플로팅 카드 형태의 룸들과 점선 그리드 배경을 가진 2.5D 탑다운 가상 오피스. 에이전트들이 작업 상태에 따라 Boardroom, Patio, Engineering Hub 등으로 이동하며, 대기 중일 때는 자연스러운 배회(Wandering) 및 각자의 위치에서 배경 업무(Working Animation)를 수행합니다. 브레인스토밍 전 과정(시작/수립 결론 포함)을 누락 없이 실시간 스트리밍합니다. **TTS 토글**로 에이전트별 고유 음성 자동 재생, 메시지별 개별 재생 버튼, 발화 중 사운드 웨이브 시각 효과 지원 |
 | `OfficeLayout` | 점선 그리드(Dotted Grid) 배경 위에 각 공간(Boardroom, Patio, Hub)을 분리된 플로팅 카드로 세련되게 구현한 확장 가능한 오피스 레이아웃 |
 | `AgentAvatar` | 탑다운 시점에서 레고(Lego) 캐릭터 형태로 디자인된 전신 아바타. `framer-motion`을 통해 이동, 발화, 생각(Thought), 배경 업무(Working), 그리고 시선(Gaze) 애니메이션을 역동적으로 처리하는 심리스한 컴포넌트 |
-| `TaskDetailsModal` | 태스크 상세 모달. Details, Changes, Brainstorm, Live Logs 4개 탭 통합. 85vh 고정 높이 레이아웃. testing/review/done 시 **코드 수정 요청**, **특정 요소 수정 요청**(Changes 탭), **코드 검토 실행** 및 검토 결과 표시 |
+| `TaskDetailsModal` | 태스크 상세 모달. Details/Live/Changes/Brainstorm/Live Logs 탭 통합. 85vh 고정 높이 레이아웃. **Discussion Controls**(토론 모드/thought 수/prompt 반영), **Execution Discussions**(아코디언), **Agent Collaboration Matrix** 시각화 지원. testing/review/done 시 **코드 수정 요청**, **특정 요소 수정 요청**(Changes 탭), **코드 검토 실행** 및 검토 결과 표시 |
+| `ExecutionDiscussionTimeline` | step별 실행 토론 기록(`executionDiscussions`)을 타임라인 카드로 표시 (참여자, thought type, 생성 시각) |
 | `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 8종 템플릿 선택 지원. 제목, 설명, 우선순위. 프로젝트 선택 시 **사용할 컴포넌트 선택**(`components/` 목록, 생성 시 `metadata.attachedComponentPaths` 반영). Cmd+Enter 단축키, 폼 자동 초기화 |
 | `CodeDiffViewer` | 파일 변경 diff 뷰어. 사이드바 파일 목록 + split/unified diff. 신규/수정 파일 구분. 다크모드 지원 |
 | `LiveProgressPanel` | SSE 기반 실시간 진행 패널. 프로그레스 바, ETA 카운트다운, LLM 토큰 스트리밍, 완료 step 타이밍 |
@@ -218,8 +235,9 @@ TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_c
 | `AgentActionRadarChart` | 에이전트들의 액션 분포 및 전문성 영역(Topology)을 보여주는 방사형 차트 |
 | `ErrorRankingTable` | 빈도순 에러 랭킹 테이블 |
 | `StatCard` | 통계 카드 (아이콘, 값, 트렌드). API 토큰 사용량 기반 **Cost Saved (비용 절감액)** 추정 기능 지원 |
-| `TeamActivityView` | 팀 활동 라이브 뷰 (3초 폴링) |
-| `ChatChannel` | 팀 에이전트 간 채팅 인터페이스. TTS 토글, 메시지별 음성 재생 버튼, 새 메시지 자동 TTS 재생, 사운드 웨이브 표시 |
+| `TeamActivityView` | 팀 활동 라이브 뷰 (3초 폴링). Board / Rounds / Collaboration 탭으로 팀 보드, 라운드 요약(`roundSummaries`), 협업 매트릭스 표시 |
+| `ChatChannel` | 팀 에이전트 간 채팅 인터페이스. 메시지 타입(`chat`/`discussion`/`system`) 필터, handoff 시스템 메시지 강조, TTS 토글/자동 재생/개별 재생 지원 |
+| `CollaborationMatrix` | 협업 데이터를 agent x agent 매트릭스로 표시 (`From -> To` 가중치, row/col 합계) |
 
 **UI 컴포넌트 (shadcn/ui):**
 
