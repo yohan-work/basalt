@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { ExecutionDiscussionTimeline } from './ExecutionDiscussionTimeline';
 import { CollaborationMatrix } from './analytics/team/CollaborationMatrix';
 import { getTaskPerformanceBenchmark, type TaskPerformanceBenchmark } from '@/lib/analytics';
+import type { ReviewSuggestionSet } from '@/lib/types/review-actions';
 import type {
     ExecuteStreamOptions,
     ExecutionDiscussionEntry,
@@ -92,6 +93,30 @@ function normalizeExecutionOptions(raw?: ExecuteStreamOptions): Required<Execute
     };
 }
 
+function normalizeReviewSuggestionSet(raw: unknown): ReviewSuggestionSet | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const row = raw as Record<string, unknown>;
+    const filesRaw = Array.isArray(row.files) ? row.files : [];
+    const files: ReviewSuggestionSet['files'] = [];
+    for (const item of filesRaw) {
+        if (!item || typeof item !== 'object') continue;
+        const file = item as Record<string, unknown>;
+        const filePath = typeof file.filePath === 'string' ? file.filePath.trim() : '';
+        const before = typeof file.before === 'string' ? file.before : null;
+        const after = typeof file.after === 'string' ? file.after : '';
+        const reason = typeof file.reason === 'string' ? file.reason : undefined;
+        if (!filePath || !after) continue;
+        files.push({ filePath, before, after, reason });
+    }
+
+    if (files.length === 0) return null;
+    return {
+        createdAt: typeof row.createdAt === 'string' ? row.createdAt : new Date().toISOString(),
+        sourceReviewHash: typeof row.sourceReviewHash === 'string' ? row.sourceReviewHash : '',
+        files,
+    };
+}
+
 export function TaskDetailsModal({
     task,
     open,
@@ -114,6 +139,8 @@ export function TaskDetailsModal({
     const [modifyElementRequest, setModifyElementRequest] = useState('');
     const [isModifyingElement, setIsModifyingElement] = useState(false);
     const [isReviewing, setIsReviewing] = useState(false);
+    const [isGeneratingReviewSuggestions, setIsGeneratingReviewSuggestions] = useState(false);
+    const [isApplyingReviewSuggestions, setIsApplyingReviewSuggestions] = useState(false);
     const [isDiscussionAccordionOpen, setIsDiscussionAccordionOpen] = useState(false);
     const [isBenchmarkLoading, setIsBenchmarkLoading] = useState(false);
     const [taskBenchmark, setTaskBenchmark] = useState<TaskPerformanceBenchmark | null>(null);
@@ -186,8 +213,27 @@ export function TaskDetailsModal({
         executionOptions?: ExecuteStreamOptions;
         executionDiscussions?: ExecutionDiscussionEntry[];
         agentCollaboration?: OrchestratorCollaborationMap;
+        reviewSuggestions?: ReviewSuggestionSet;
+        reviewSuggestionsAt?: string;
+        reviewSuggestionsAppliedAt?: string;
     };
     const reviewResult = metadata.reviewResult as string | undefined;
+    const reviewSuggestionSet = normalizeReviewSuggestionSet(metadata.reviewSuggestions);
+    const reviewSuggestionFileChanges: FileChange[] = reviewSuggestionSet
+        ? reviewSuggestionSet.files.map((file) => ({
+            filePath: file.filePath,
+            before: file.before,
+            after: file.after,
+            isNew: file.before === null,
+            agent: 'review-suggestion',
+            stepIndex: -1,
+        }))
+        : [];
+    const hasReviewSuggestions = reviewSuggestionFileChanges.length > 0;
+    const reviewSuggestionsAt = typeof metadata.reviewSuggestionsAt === 'string' ? metadata.reviewSuggestionsAt : null;
+    const reviewSuggestionsAppliedAt = typeof metadata.reviewSuggestionsAppliedAt === 'string'
+        ? metadata.reviewSuggestionsAppliedAt
+        : null;
     const analysis = metadata.analysis as { complexity?: string; required_agents?: string[]; summary?: string } | undefined;
     const workflow = metadata.workflow as { steps: Array<{ action: string; agent: string }> } | undefined;
     const verification = metadata.verification as { verified: boolean; notes: string } | undefined;
@@ -310,6 +356,45 @@ export function TaskDetailsModal({
             setActionError(error instanceof Error ? error.message : '코드 검토 실행에 실패했습니다.');
         } finally {
             setIsReviewing(false);
+        }
+    };
+
+    const handleGenerateReviewSuggestions = async () => {
+        setIsGeneratingReviewSuggestions(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/review/suggestions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to generate review suggestions');
+        } catch (error) {
+            console.error('Generate review suggestions failed', error);
+            setActionError(error instanceof Error ? error.message : '리뷰 반영안 생성에 실패했습니다.');
+        } finally {
+            setIsGeneratingReviewSuggestions(false);
+        }
+    };
+
+    const handleApplyReviewSuggestions = async () => {
+        setIsApplyingReviewSuggestions(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/review/apply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Failed to apply review suggestions');
+            setView('changes');
+        } catch (error) {
+            console.error('Apply review suggestions failed', error);
+            setActionError(error instanceof Error ? error.message : '리뷰 반영안 적용에 실패했습니다.');
+        } finally {
+            setIsApplyingReviewSuggestions(false);
         }
     };
 
@@ -976,6 +1061,59 @@ export function TaskDetailsModal({
                                         </h3>
                                         <div className="p-4 rounded-md border bg-card text-sm whitespace-pre-wrap max-h-[300px] overflow-y-auto">
                                             {reviewResult}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {(reviewResult || hasReviewSuggestions) && (
+                                    <div className="space-y-3">
+                                        <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                                            <CheckCircle2 className="w-4 h-4" />
+                                            리뷰 반영 (미리보기 + 승인)
+                                        </h3>
+                                        <div className="rounded-md border bg-card p-4 space-y-3">
+                                            <p className="text-xs text-muted-foreground">
+                                                코드 리뷰 결과를 기준으로 수정안을 생성하고, diff를 확인한 뒤 승인 시 실제 파일에 반영합니다.
+                                            </p>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <Button
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={handleGenerateReviewSuggestions}
+                                                    disabled={isGeneratingReviewSuggestions || !reviewResult || !canEditOrReview}
+                                                >
+                                                    {isGeneratingReviewSuggestions ? '반영안 생성 중...' : '반영안 생성'}
+                                                </Button>
+                                                <Button
+                                                    size="sm"
+                                                    onClick={handleApplyReviewSuggestions}
+                                                    disabled={isApplyingReviewSuggestions || !hasReviewSuggestions || !canEditOrReview}
+                                                >
+                                                    {isApplyingReviewSuggestions ? '반영 적용 중...' : '승인 후 반영'}
+                                                </Button>
+                                                <Badge variant="outline" className="text-[10px]">
+                                                    Suggestions: {reviewSuggestionFileChanges.length}
+                                                </Badge>
+                                                {reviewSuggestionsAt && (
+                                                    <Badge variant="outline" className="text-[10px]">
+                                                        Generated: {new Date(reviewSuggestionsAt).toLocaleString()}
+                                                    </Badge>
+                                                )}
+                                                {reviewSuggestionsAppliedAt && (
+                                                    <Badge variant="outline" className="text-[10px]">
+                                                        Last Applied: {new Date(reviewSuggestionsAppliedAt).toLocaleString()}
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                            {hasReviewSuggestions ? (
+                                                <div className="rounded-md border overflow-hidden h-[360px]">
+                                                    <CodeDiffViewer fileChanges={reviewSuggestionFileChanges} />
+                                                </div>
+                                            ) : (
+                                                <div className="text-xs text-muted-foreground">
+                                                    아직 생성된 반영안이 없습니다. 먼저 `반영안 생성`을 눌러주세요.
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 )}
