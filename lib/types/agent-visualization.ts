@@ -1,9 +1,11 @@
 export type DiscussionMode = 'off' | 'step_handoff' | 'roundtable';
+export type StrategyPreset = 'quality_first' | 'balanced' | 'speed_first' | 'cost_saver';
 
 export interface ExecuteStreamOptions {
     discussionMode?: DiscussionMode;
     maxDiscussionThoughts?: number;
     carryDiscussionToPrompt?: boolean;
+    strategyPreset?: StrategyPreset;
 }
 
 export interface DiscussionThought {

@@ -9,6 +9,7 @@ export interface SkillDefinition {
     description: string;
     instructions: string;
     inputs?: any;
+    inputParams?: string[];
     outputs?: any;
     // We keep the runtime function reference separately or lookup map
 }
@@ -151,17 +152,32 @@ export class AgentLoader {
 
             // Extract "Inputs" section if it exists
             const inputsSection = this.extractSection(content, 'Inputs');
+            const inputParams = this.extractInputParams(inputsSection);
 
             return {
                 name: data.name || skillName,
                 description: data.description || '',
                 instructions: content.trim(),
-                inputs: inputsSection
+                inputs: inputsSection,
+                inputParams,
             };
         } catch (error: any) {
             console.error(`Failed to load skill ${skillName}:`, error);
             throw error;
         }
+    }
+
+    /**
+     * Extract bullet-style input names from "Inputs" section.
+     * Example: - `taskDescription`: ...
+     */
+    public static extractInputParams(inputsSection?: string): string[] {
+        if (!inputsSection) return [];
+        return inputsSection
+            .split('\n')
+            .filter((line) => !/\(optional\)|선택/i.test(line))
+            .map((line) => line.match(/^\s*-\s*`([^`]+)`/)?.[1]?.trim() || '')
+            .filter(Boolean);
     }
 
     /**

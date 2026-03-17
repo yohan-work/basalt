@@ -18,6 +18,10 @@ export class ContextManager {
     private logs: ExecutionLog[] = [];
     private fileCache: Map<string, FileContext> = new Map();
     private taskId: string;
+    private logsDirty = false;
+    private filesDirty = false;
+    private lastSavedAt = 0;
+    private readonly SAVE_INTERVAL_MS = 10_000;
 
     constructor(taskId: string) {
         this.taskId = taskId;
@@ -33,6 +37,7 @@ export class ContextManager {
             metadata,
             timestamp: Date.now()
         });
+        this.logsDirty = true;
     }
 
     /**
@@ -44,6 +49,7 @@ export class ContextManager {
             content,
             lastAccessed: Date.now()
         });
+        this.filesDirty = true;
     }
 
     /**
@@ -122,8 +128,18 @@ export class ContextManager {
      * Sync state to Supabase metadata for persistence across restarts.
      * Merges with existing metadata to avoid overwriting other fields (workflow, progress, etc.)
      */
-    public async saveState() {
+    private compressContent(content: string, maxChars: number = 4000): string {
+        if (!content || content.length <= maxChars) return content;
+        const head = content.slice(0, Math.floor(maxChars * 0.7));
+        const tail = content.slice(-Math.floor(maxChars * 0.2));
+        return `${head}\n\n... (content truncated for persistence) ...\n\n${tail}`;
+    }
+
+    public async saveState(force: boolean = false) {
         try {
+            if (!force && !this.logsDirty && !this.filesDirty) return;
+            if (!force && Date.now() - this.lastSavedAt < this.SAVE_INTERVAL_MS) return;
+
             const { data: current } = await supabase
                 .from('Tasks')
                 .select('metadata')
@@ -132,7 +148,13 @@ export class ContextManager {
 
             const contextState = {
                 contextLogs: this.logs,
-                contextFiles: Array.from(this.fileCache.entries())
+                contextFiles: Array.from(this.fileCache.entries()).map(([key, value]) => [
+                    key,
+                    {
+                        ...value,
+                        content: this.compressContent(value.content),
+                    },
+                ])
             };
 
             const newMetadata = {
@@ -141,6 +163,9 @@ export class ContextManager {
             };
 
             await supabase.from('Tasks').update({ metadata: newMetadata }).eq('id', this.taskId);
+            this.logsDirty = false;
+            this.filesDirty = false;
+            this.lastSavedAt = Date.now();
         } catch (e) {
             console.error('Failed to save context state:', e);
         }
@@ -179,6 +204,8 @@ export class ContextManager {
                 }
                 console.log(`Restored ${this.fileCache.size} cached files.`);
             }
+            this.logsDirty = false;
+            this.filesDirty = false;
         } catch (e) {
             console.error('Failed to restore context state:', e);
         }

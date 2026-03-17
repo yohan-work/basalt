@@ -5,6 +5,11 @@ import * as llm from '@/lib/llm';
 import { AgentLoader } from '../agent-loader';
 import { ContextManager } from '../context-manager';
 import { TeamState, AgentAction, TeamMetadata, TeamCollaborationMap } from '../team-types';
+import {
+    DEFAULT_BUDGET_POLICY,
+    ExecutionBudgetPolicy,
+    TeamExecutionMetrics,
+} from '../orchestration/metrics';
 // import { v4 as uuidv4 } from 'uuid'; // Removed unused import to avoid dependency issues
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
@@ -12,6 +17,23 @@ export class TeamOrchestrator {
     private taskId: string;
     private contextManagers: Map<string, ContextManager> = new Map(); // AgentName -> ContextManager
     private teamState: TeamState;
+    private mutationQueue: Promise<void> = Promise.resolve();
+    private readonly TURN_PARALLELISM = 2;
+    private budgetPolicy: ExecutionBudgetPolicy = { ...DEFAULT_BUDGET_POLICY };
+    private executionMetrics: TeamExecutionMetrics = {
+        startedAt: Date.now(),
+        rounds: 0,
+        discussionRounds: 0,
+        agentTurns: 0,
+        llmCalls: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        actionsProcessed: 0,
+        skillCalls: 0,
+        skillLatencyMs: 0,
+        dbUpdates: 0,
+    };
 
     constructor(taskId: string, initialTeamState?: TeamState) {
         this.taskId = taskId;
@@ -43,6 +65,59 @@ export class TeamOrchestrator {
             .trim();
     }
 
+    private incrementDbUpdate() {
+        this.executionMetrics.dbUpdates += 1;
+    }
+
+    private resolveBudgetPolicy(raw: unknown): ExecutionBudgetPolicy {
+        const policy = (raw && typeof raw === 'object') ? (raw as Record<string, unknown>) : {};
+        return {
+            maxTokensPerTask: Math.max(1000, Number(policy.maxTokensPerTask) || DEFAULT_BUDGET_POLICY.maxTokensPerTask),
+            maxDiscussionCalls: Math.max(0, Number(policy.maxDiscussionCalls) || DEFAULT_BUDGET_POLICY.maxDiscussionCalls),
+            maxSkillRetries: Math.max(0, Math.min(3, Number(policy.maxSkillRetries) || DEFAULT_BUDGET_POLICY.maxSkillRetries)),
+            maxDbWritesPerTask: Math.max(20, Number(policy.maxDbWritesPerTask) || DEFAULT_BUDGET_POLICY.maxDbWritesPerTask),
+        };
+    }
+
+    private llmTelemetry(): llm.LLMTelemetryHooks {
+        return {
+            onRequestStart: () => {
+                this.executionMetrics.llmCalls += 1;
+            },
+            onTokenUsage: ({ promptTokens, completionTokens }) => {
+                this.executionMetrics.promptTokens += promptTokens;
+                this.executionMetrics.completionTokens += completionTokens;
+                this.executionMetrics.totalTokens += promptTokens + completionTokens;
+            },
+        };
+    }
+
+    private async persistExecutionMetrics() {
+        this.teamState.metadata.teamExecutionMetrics = this.executionMetrics;
+        this.teamState.metadata.budgetPolicy = this.budgetPolicy;
+        await this.saveState();
+    }
+
+    private enqueueMutation(mutator: () => void | Promise<void>): Promise<void> {
+        this.mutationQueue = this.mutationQueue.then(async () => {
+            await mutator();
+        });
+        return this.mutationQueue;
+    }
+
+    private shouldRunDiscussionRound(round: number): boolean {
+        if (round === 0) return true;
+        const recentMessages = this.teamState.messages.slice(-12);
+        const hasRecentHandoff = recentMessages.some((msg) =>
+            msg.messageType === 'system' && msg.content.includes('핸드오프')
+        );
+        const hasBlockedTasks = this.teamState.board.in_progress.some((task) =>
+            Date.now() - task.updated_at > 2 * 60 * 1000
+        );
+        const backlogPressure = this.teamState.board.todo.length > this.teamState.members.length;
+        return hasRecentHandoff || hasBlockedTasks || backlogPressure;
+    }
+
     private ensureTeamMetadataDefaults() {
         const metadata = (this.teamState.metadata || {}) as Partial<TeamMetadata> & Record<string, unknown>;
         if (typeof metadata.round !== 'number') metadata.round = 0;
@@ -55,6 +130,25 @@ export class TeamOrchestrator {
         if (!Array.isArray(metadata.roundSummaries)) {
             metadata.roundSummaries = [];
         }
+        this.budgetPolicy = this.resolveBudgetPolicy(metadata.budgetPolicy);
+        const savedMetrics = (metadata.teamExecutionMetrics && typeof metadata.teamExecutionMetrics === 'object')
+            ? (metadata.teamExecutionMetrics as Partial<TeamExecutionMetrics>)
+            : {};
+        this.executionMetrics = {
+            startedAt: Number(savedMetrics.startedAt) || Date.now(),
+            endedAt: Number(savedMetrics.endedAt) || undefined,
+            rounds: Number(savedMetrics.rounds) || 0,
+            discussionRounds: Number(savedMetrics.discussionRounds) || 0,
+            agentTurns: Number(savedMetrics.agentTurns) || 0,
+            llmCalls: Number(savedMetrics.llmCalls) || 0,
+            promptTokens: Number(savedMetrics.promptTokens) || 0,
+            completionTokens: Number(savedMetrics.completionTokens) || 0,
+            totalTokens: Number(savedMetrics.totalTokens) || 0,
+            actionsProcessed: Number(savedMetrics.actionsProcessed) || 0,
+            skillCalls: Number(savedMetrics.skillCalls) || 0,
+            skillLatencyMs: Number(savedMetrics.skillLatencyMs) || 0,
+            dbUpdates: Number(savedMetrics.dbUpdates) || 0,
+        };
         this.teamState.metadata = metadata as TeamMetadata;
     }
 
@@ -77,8 +171,10 @@ export class TeamOrchestrator {
 
     private async runDiscussionRound(round: number) {
         if (this.teamState.metadata.discussionMode !== 'enabled') return;
+        if (this.executionMetrics.discussionRounds >= this.budgetPolicy.maxDiscussionCalls) return;
 
         try {
+            this.executionMetrics.discussionRounds += 1;
             const availableAgents = AgentLoader.listAgents().filter(a =>
                 this.teamState.members.includes(a.role) || this.teamState.members.includes(a.name)
             );
@@ -164,11 +260,14 @@ export class TeamOrchestrator {
         try {
             // We save the entire team state into metadata.teamState
             const { data: current } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+            this.teamState.metadata.teamExecutionMetrics = this.executionMetrics;
+            this.teamState.metadata.budgetPolicy = this.budgetPolicy;
             const newMetadata = {
                 ...(current?.metadata || {}),
                 teamState: this.teamState
             };
 
+            this.incrementDbUpdate();
             await supabase.from('Tasks').update({ metadata: newMetadata }).eq('id', this.taskId);
         } catch (e) {
             console.error('Failed to save team state:', e);
@@ -180,11 +279,16 @@ export class TeamOrchestrator {
      */
     public async runTeamLoop(maxRounds: number = 20) {
         await this.initialize();
+        skills.reset_runtime_caches();
+        this.executionMetrics.startedAt = this.executionMetrics.startedAt || Date.now();
 
         for (let i = 0; i < maxRounds; i++) {
             this.teamState.metadata.round = i;
+            this.executionMetrics.rounds = i + 1;
             console.log(`--- Round ${i} ---`);
-            await this.runDiscussionRound(i);
+            if (this.shouldRunDiscussionRound(i)) {
+                await this.runDiscussionRound(i);
+            }
 
             // Check termination condition: All items done? Leader says stop? 
             // Simplified: If todo and in_progress are empty and we have at least 1 done item, stop.
@@ -195,16 +299,20 @@ export class TeamOrchestrator {
                 break;
             }
 
-            for (const agentName of this.teamState.members) {
-                await this.executeAgentTurn(agentName);
+            for (let memberIndex = 0; memberIndex < this.teamState.members.length; memberIndex += this.TURN_PARALLELISM) {
+                const chunk = this.teamState.members.slice(memberIndex, memberIndex + this.TURN_PARALLELISM);
+                await Promise.all(chunk.map((agentName) => this.executeAgentTurn(agentName)));
             }
 
             await this.saveState();
         }
+        this.executionMetrics.endedAt = Date.now();
+        await this.persistExecutionMetrics();
     }
 
     private async executeAgentTurn(agentName: string) {
         console.log(`[${agentName}] is thinking...`);
+        this.executionMetrics.agentTurns += 1;
         const agentDef = AgentLoader.loadAgent(agentName); // Assumes folder name matches agent name for simplification
         const ctxManager = this.contextManagers.get(agentName)!;
 
@@ -243,10 +351,16 @@ ${teamContext}
 
         // 2. LLM Call
         try {
+            if (this.executionMetrics.totalTokens >= this.budgetPolicy.maxTokensPerTask) {
+                console.warn(`[${agentName}] token budget reached, skipping turn`);
+                return;
+            }
             const response = await llm.generateJSON(
                 systemPrompt,
                 "Analyze the situation and decide your next move.",
-                `{ "thought": "...", "actions": [] }`
+                `{ "thought": "...", "actions": [] }`,
+                undefined,
+                this.llmTelemetry()
             );
 
             // 3. Process Actions
@@ -255,6 +369,7 @@ ${teamContext}
             }
 
             if (Array.isArray(response.actions)) {
+                this.executionMetrics.actionsProcessed += response.actions.length;
                 for (const action of response.actions) {
                     await this.processAction(agentName, action, ctxManager);
                 }
@@ -270,113 +385,127 @@ ${teamContext}
 
         switch (action.type) {
             case 'send_message':
-                const mentions = this.parseMentions(action.payload.content || '');
-                this.teamState.messages.push({
-                    id: generateId(),
-                    sender: agentName,
-                    content: action.payload.content,
-                    timestamp: Date.now(),
-                    mentions,
-                    messageType: 'chat'
+                await this.enqueueMutation(async () => {
+                    const mentions = this.parseMentions(action.payload.content || '');
+                    this.teamState.messages.push({
+                        id: generateId(),
+                        sender: agentName,
+                        content: action.payload.content,
+                        timestamp: Date.now(),
+                        mentions,
+                        messageType: 'chat'
+                    });
+                    for (const mention of mentions) {
+                        this.recordCollaboration(agentName, mention, 1);
+                    }
                 });
-                for (const mention of mentions) {
-                    this.recordCollaboration(agentName, mention, 1);
-                }
                 break;
 
             case 'create_task':
-                this.teamState.board.todo.push({
-                    id: generateId(),
-                    description: action.payload.description,
-                    assignee: action.payload.assignee || null,
-                    status: 'todo',
-                    creator: agentName,
-                    created_at: Date.now(),
-                    updated_at: Date.now()
+                await this.enqueueMutation(async () => {
+                    this.teamState.board.todo.push({
+                        id: generateId(),
+                        description: action.payload.description,
+                        assignee: action.payload.assignee || null,
+                        status: 'todo',
+                        creator: agentName,
+                        created_at: Date.now(),
+                        updated_at: Date.now()
+                    });
+                    if (action.payload.assignee) {
+                        this.recordCollaboration(agentName, action.payload.assignee, 1);
+                    }
                 });
-                if (action.payload.assignee) {
-                    this.recordCollaboration(agentName, action.payload.assignee, 1);
-                }
                 break;
 
             case 'claim_task':
-                // Find task in todo
-                const taskIndex = this.teamState.board.todo.findIndex(t => t.id === action.payload.taskId);
-                if (taskIndex !== -1) {
-                    const task = this.teamState.board.todo.splice(taskIndex, 1)[0];
-                    task.status = 'in_progress';
-                    task.assignee = agentName;
-                    task.updated_at = Date.now();
-                    this.teamState.board.in_progress.push(task);
-                    this.recordCollaboration(task.creator, agentName, 2);
-                }
+                await this.enqueueMutation(async () => {
+                    // Find task in todo
+                    const taskIndex = this.teamState.board.todo.findIndex(t => t.id === action.payload.taskId);
+                    if (taskIndex !== -1) {
+                        const task = this.teamState.board.todo.splice(taskIndex, 1)[0];
+                        task.status = 'in_progress';
+                        task.assignee = agentName;
+                        task.updated_at = Date.now();
+                        this.teamState.board.in_progress.push(task);
+                        this.recordCollaboration(task.creator, agentName, 2);
+                    }
+                });
                 break;
 
             case 'submit_task':
-                // Find in in_progress
-                const progIndex = this.teamState.board.in_progress.findIndex(t => t.id === action.payload.taskId);
-                if (progIndex !== -1) {
-                    const task = this.teamState.board.in_progress.splice(progIndex, 1)[0];
-                    task.status = 'done'; // Skip review for simplicity in v1
-                    task.result = action.payload.result;
-                    task.updated_at = Date.now();
-                    this.teamState.board.done.push(task);
-                    this.recordCollaboration(agentName, this.teamState.leader, 1);
+                await this.enqueueMutation(async () => {
+                    // Find in in_progress
+                    const progIndex = this.teamState.board.in_progress.findIndex(t => t.id === action.payload.taskId);
+                    if (progIndex !== -1) {
+                        const task = this.teamState.board.in_progress.splice(progIndex, 1)[0];
+                        task.status = 'done'; // Skip review for simplicity in v1
+                        task.result = action.payload.result;
+                        task.updated_at = Date.now();
+                        this.teamState.board.done.push(task);
+                        this.recordCollaboration(agentName, this.teamState.leader, 1);
 
-                    // Auto-notify
-                    this.teamState.messages.push({
-                        id: generateId(),
-                        sender: 'system',
-                        content: `Task ${task.description} completed by ${agentName}.`,
-                        timestamp: Date.now(),
-                        messageType: 'system'
-                    });
-                }
-                break;
-
-            case 'review_task':
-                // Find task in in_progress and move to review
-                const reviewIndex = this.teamState.board.in_progress.findIndex(t => t.id === action.payload.taskId);
-                if (reviewIndex !== -1) {
-                    const task = this.teamState.board.in_progress.splice(reviewIndex, 1)[0];
-                    task.status = 'review';
-                    task.updated_at = Date.now();
-                    this.teamState.board.review.push(task);
-                    this.recordCollaboration(agentName, this.teamState.leader, 1);
-
-                    this.teamState.messages.push({
-                        id: generateId(),
-                        sender: 'system',
-                        content: `Task "${task.description}" moved to review by ${agentName}.`,
-                        timestamp: Date.now(),
-                        messageType: 'system'
-                    });
-                }
-                break;
-
-            case 'handoff_task':
-                const handoffIndex = this.teamState.board.in_progress.findIndex(t => t.id === action.payload.taskId);
-                if (handoffIndex !== -1) {
-                    const handoffTask = this.teamState.board.in_progress[handoffIndex];
-                    const nextAssignee = this.normalizeAgentKey(action.payload.to || '');
-                    if (nextAssignee) {
-                        handoffTask.assignee = nextAssignee;
-                        handoffTask.updated_at = Date.now();
-                        this.recordCollaboration(agentName, nextAssignee, 2);
+                        // Auto-notify
                         this.teamState.messages.push({
                             id: generateId(),
                             sender: 'system',
-                            content: `Task "${handoffTask.description}"가 ${agentName}에서 ${nextAssignee}에게 핸드오프되었습니다.`,
+                            content: `Task ${task.description} completed by ${agentName}.`,
                             timestamp: Date.now(),
                             messageType: 'system'
                         });
                     }
-                }
+                });
+                break;
+
+            case 'review_task':
+                await this.enqueueMutation(async () => {
+                    // Find task in in_progress and move to review
+                    const reviewIndex = this.teamState.board.in_progress.findIndex(t => t.id === action.payload.taskId);
+                    if (reviewIndex !== -1) {
+                        const task = this.teamState.board.in_progress.splice(reviewIndex, 1)[0];
+                        task.status = 'review';
+                        task.updated_at = Date.now();
+                        this.teamState.board.review.push(task);
+                        this.recordCollaboration(agentName, this.teamState.leader, 1);
+
+                        this.teamState.messages.push({
+                            id: generateId(),
+                            sender: 'system',
+                            content: `Task "${task.description}" moved to review by ${agentName}.`,
+                            timestamp: Date.now(),
+                            messageType: 'system'
+                        });
+                    }
+                });
+                break;
+
+            case 'handoff_task':
+                await this.enqueueMutation(async () => {
+                    const handoffIndex = this.teamState.board.in_progress.findIndex(t => t.id === action.payload.taskId);
+                    if (handoffIndex !== -1) {
+                        const handoffTask = this.teamState.board.in_progress[handoffIndex];
+                        const nextAssignee = this.normalizeAgentKey(action.payload.to || '');
+                        if (nextAssignee) {
+                            handoffTask.assignee = nextAssignee;
+                            handoffTask.updated_at = Date.now();
+                            this.recordCollaboration(agentName, nextAssignee, 2);
+                            this.teamState.messages.push({
+                                id: generateId(),
+                                sender: 'system',
+                                content: `Task "${handoffTask.description}"가 ${agentName}에서 ${nextAssignee}에게 핸드오프되었습니다.`,
+                                timestamp: Date.now(),
+                                messageType: 'system'
+                            });
+                        }
+                    }
+                });
                 break;
 
             case 'call_skill':
                 const { skill, args } = action.payload;
+                const skillStartedAt = Date.now();
                 try {
+                    this.executionMetrics.skillCalls += 1;
                     const normalizedArgs = Array.isArray(args) ? args : [];
                     const skillRegistry = skills as unknown as Record<string, (...skillArgs: unknown[]) => Promise<unknown> | unknown>;
                     const skillFunc = skillRegistry[skill]
@@ -410,15 +539,20 @@ ${teamContext}
                                 ctxManager.addFile(targetPath, resultWithContent.content);
                             }
                         }
-                        this.recordCollaboration(agentName, this.teamState.leader, 1);
+                        await this.enqueueMutation(async () => {
+                            this.recordCollaboration(agentName, this.teamState.leader, 1);
+                        });
+                        this.executionMetrics.skillLatencyMs += Date.now() - skillStartedAt;
 
                     } else {
                         console.error(`Skill ${skill} not found`);
+                        this.executionMetrics.skillLatencyMs += Date.now() - skillStartedAt;
                     }
                 } catch (e: unknown) {
                     const message = e instanceof Error ? e.message : String(e);
                     console.error(`Skill execution failed: ${message}`);
                     ctxManager.addLog(agentName, `Skill ${skill} failed`, message);
+                    this.executionMetrics.skillLatencyMs += Date.now() - skillStartedAt;
                 }
                 break;
         }

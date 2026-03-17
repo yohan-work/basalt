@@ -196,6 +196,264 @@ export interface ResourceMetrics {
     avgLeadTimeSeconds: number;
 }
 
+export interface BenchmarkSnapshot {
+    totalTasks: number;
+    completedTasks: number;
+    failedTasks: number;
+    successRate: number;
+    failureRate: number;
+    avgTokensPerTask: number;
+    avgLeadTimeSeconds: number;
+}
+
+export interface BenchmarkComparison {
+    currentRange: DateRange;
+    baselineRange: DateRange;
+    current: BenchmarkSnapshot;
+    baseline: BenchmarkSnapshot;
+    delta: {
+        successRatePp: number;
+        failureRatePp: number;
+        avgTokensPerTaskPct: number;
+        avgLeadTimeSecondsPct: number;
+    };
+}
+
+export interface TaskPerformanceSnapshot {
+    totalTokens: number;
+    leadTimeSeconds: number;
+    discussionCalls: number;
+    llmCalls: number;
+    dbUpdates: number;
+    status: 'success' | 'failed' | 'in_progress';
+}
+
+export interface TaskPerformanceBenchmark {
+    current: TaskPerformanceSnapshot;
+    baseline: TaskPerformanceSnapshot;
+    sampleSize: number;
+    deltaPct: {
+        totalTokens: number;
+        leadTimeSeconds: number;
+        discussionCalls: number;
+        llmCalls: number;
+    };
+}
+
+interface AnalyticsTaskRow {
+    id: string;
+    status: string;
+    project_id?: string | null;
+    created_at: string;
+    updated_at?: string | null;
+    metadata?: Record<string, unknown> | null;
+}
+
+function roundTo(value: number, digits: number = 1): number {
+    const factor = 10 ** digits;
+    return Math.round(value * factor) / factor;
+}
+
+function percentChange(current: number, baseline: number): number {
+    if (baseline === 0) {
+        if (current === 0) return 0;
+        return 100;
+    }
+    return ((current - baseline) / baseline) * 100;
+}
+
+function toFailureRate(metrics: TaskSuccessMetrics): number {
+    const finished = metrics.completedTasks + metrics.failedTasks;
+    if (finished === 0) return 0;
+    return (metrics.failedTasks / finished) * 100;
+}
+
+export function getPreviousComparableRange(range: DateRange): DateRange {
+    const currentFrom = range.from.getTime();
+    const currentTo = (range.to || new Date()).getTime();
+    const durationMs = Math.max(24 * 60 * 60 * 1000, currentTo - currentFrom + 1);
+
+    const baselineTo = new Date(currentFrom - 1);
+    const baselineFrom = new Date(currentFrom - durationMs);
+
+    return { from: baselineFrom, to: baselineTo };
+}
+
+export async function getBenchmarkComparison(currentRange: DateRange): Promise<BenchmarkComparison> {
+    const baselineRange = getPreviousComparableRange(currentRange);
+
+    const [
+        currentTaskMetrics,
+        baselineTaskMetrics,
+        currentResourceMetrics,
+        baselineResourceMetrics,
+    ] = await Promise.all([
+        getTaskSuccessMetrics(currentRange),
+        getTaskSuccessMetrics(baselineRange),
+        getSystemResourceMetrics(currentRange),
+        getSystemResourceMetrics(baselineRange),
+    ]);
+
+    const currentSnapshot: BenchmarkSnapshot = {
+        totalTasks: currentTaskMetrics.totalTasks,
+        completedTasks: currentTaskMetrics.completedTasks,
+        failedTasks: currentTaskMetrics.failedTasks,
+        successRate: currentTaskMetrics.successRate,
+        failureRate: roundTo(toFailureRate(currentTaskMetrics), 1),
+        avgTokensPerTask: currentResourceMetrics.avgTokensPerTask,
+        avgLeadTimeSeconds: currentResourceMetrics.avgLeadTimeSeconds,
+    };
+
+    const baselineSnapshot: BenchmarkSnapshot = {
+        totalTasks: baselineTaskMetrics.totalTasks,
+        completedTasks: baselineTaskMetrics.completedTasks,
+        failedTasks: baselineTaskMetrics.failedTasks,
+        successRate: baselineTaskMetrics.successRate,
+        failureRate: roundTo(toFailureRate(baselineTaskMetrics), 1),
+        avgTokensPerTask: baselineResourceMetrics.avgTokensPerTask,
+        avgLeadTimeSeconds: baselineResourceMetrics.avgLeadTimeSeconds,
+    };
+
+    return {
+        currentRange,
+        baselineRange,
+        current: currentSnapshot,
+        baseline: baselineSnapshot,
+        delta: {
+            successRatePp: roundTo(currentSnapshot.successRate - baselineSnapshot.successRate, 1),
+            failureRatePp: roundTo(currentSnapshot.failureRate - baselineSnapshot.failureRate, 1),
+            avgTokensPerTaskPct: roundTo(percentChange(currentSnapshot.avgTokensPerTask, baselineSnapshot.avgTokensPerTask), 1),
+            avgLeadTimeSecondsPct: roundTo(percentChange(currentSnapshot.avgLeadTimeSeconds, baselineSnapshot.avgLeadTimeSeconds), 1),
+        },
+    };
+}
+
+function toTaskStatus(status: string): TaskPerformanceSnapshot['status'] {
+    if (status === 'done' || status === 'review') return 'success';
+    if (status === 'failed') return 'failed';
+    return 'in_progress';
+}
+
+function deriveLeadTimeSeconds(task: AnalyticsTaskRow): number {
+    const metadata = task.metadata || {};
+    const execMetrics = metadata.executionMetrics as { startedAt?: string; endedAt?: string } | undefined;
+    if (execMetrics?.startedAt && execMetrics?.endedAt) {
+        const started = new Date(execMetrics.startedAt).getTime();
+        const ended = new Date(execMetrics.endedAt).getTime();
+        if (ended > started) return Math.round((ended - started) / 1000);
+    }
+    const created = new Date(task.created_at).getTime();
+    const updated = task.updated_at ? new Date(task.updated_at).getTime() : created;
+    return updated > created ? Math.round((updated - created) / 1000) : 0;
+}
+
+function toTaskSnapshot(task: AnalyticsTaskRow): TaskPerformanceSnapshot {
+    const metadata = task.metadata || {};
+    const execMetrics = metadata.executionMetrics as
+        | {
+            totalTokens?: number;
+            discussionCalls?: number;
+            llmCalls?: number;
+            dbUpdates?: number;
+        }
+        | undefined;
+    const tokenMetrics = metadata.tokens as { total?: number } | undefined;
+
+    return {
+        totalTokens:
+            (typeof execMetrics?.totalTokens === 'number' ? execMetrics.totalTokens : undefined)
+            ?? (typeof tokenMetrics?.total === 'number' ? tokenMetrics.total : 0),
+        leadTimeSeconds: deriveLeadTimeSeconds(task),
+        discussionCalls: Number(execMetrics?.discussionCalls) || 0,
+        llmCalls: Number(execMetrics?.llmCalls) || 0,
+        dbUpdates: Number(execMetrics?.dbUpdates) || 0,
+        status: toTaskStatus(task.status),
+    };
+}
+
+function averageSnapshots(items: TaskPerformanceSnapshot[]): TaskPerformanceSnapshot {
+    if (items.length === 0) {
+        return {
+            totalTokens: 0,
+            leadTimeSeconds: 0,
+            discussionCalls: 0,
+            llmCalls: 0,
+            dbUpdates: 0,
+            status: 'in_progress',
+        };
+    }
+    const sum = items.reduce(
+        (acc, item) => {
+            acc.totalTokens += item.totalTokens;
+            acc.leadTimeSeconds += item.leadTimeSeconds;
+            acc.discussionCalls += item.discussionCalls;
+            acc.llmCalls += item.llmCalls;
+            acc.dbUpdates += item.dbUpdates;
+            return acc;
+        },
+        { totalTokens: 0, leadTimeSeconds: 0, discussionCalls: 0, llmCalls: 0, dbUpdates: 0 }
+    );
+    return {
+        totalTokens: Math.round(sum.totalTokens / items.length),
+        leadTimeSeconds: Math.round(sum.leadTimeSeconds / items.length),
+        discussionCalls: roundTo(sum.discussionCalls / items.length, 1),
+        llmCalls: roundTo(sum.llmCalls / items.length, 1),
+        dbUpdates: roundTo(sum.dbUpdates / items.length, 1),
+        status: 'in_progress',
+    };
+}
+
+export async function getTaskPerformanceBenchmark(taskId: string, projectId?: string | null): Promise<TaskPerformanceBenchmark | null> {
+    if (!taskId) return null;
+
+    const { data: currentTask, error: currentTaskError } = await supabase
+        .from('Tasks')
+        .select('id, status, project_id, created_at, updated_at, metadata')
+        .eq('id', taskId)
+        .single();
+
+    if (currentTaskError || !currentTask) {
+        return null;
+    }
+
+    const normalizedCurrent = currentTask as AnalyticsTaskRow;
+    const effectiveProjectId = projectId ?? normalizedCurrent.project_id ?? null;
+
+    let peersQuery = supabase
+        .from('Tasks')
+        .select('id, status, project_id, created_at, updated_at, metadata')
+        .neq('id', taskId)
+        .in('status', ['done', 'review', 'failed'])
+        .order('updated_at', { ascending: false })
+        .limit(40);
+
+    if (effectiveProjectId) {
+        peersQuery = peersQuery.eq('project_id', effectiveProjectId);
+    }
+
+    const { data: peerTasks, error: peerTasksError } = await peersQuery;
+    if (peerTasksError) {
+        console.error('Error fetching task benchmark peers:', peerTasksError);
+        return null;
+    }
+
+    const currentSnapshot = toTaskSnapshot(normalizedCurrent);
+    const peerSnapshots = (peerTasks || []).map((task) => toTaskSnapshot(task as AnalyticsTaskRow));
+    const baseline = averageSnapshots(peerSnapshots);
+
+    return {
+        current: currentSnapshot,
+        baseline,
+        sampleSize: peerSnapshots.length,
+        deltaPct: {
+            totalTokens: roundTo(percentChange(currentSnapshot.totalTokens, baseline.totalTokens), 1),
+            leadTimeSeconds: roundTo(percentChange(currentSnapshot.leadTimeSeconds, baseline.leadTimeSeconds), 1),
+            discussionCalls: roundTo(percentChange(currentSnapshot.discussionCalls, baseline.discussionCalls), 1),
+            llmCalls: roundTo(percentChange(currentSnapshot.llmCalls, baseline.llmCalls), 1),
+        },
+    };
+}
+
 /**
  * Calculates total tokens, average tokens, and average lead time from tasks.
  */

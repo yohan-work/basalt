@@ -8,6 +8,59 @@ import * as llm from '../llm';
 import { MODEL_CONFIG } from '../model-config';
 
 const execAsync = promisify(exec);
+const READ_CACHE = new Map<string, string>();
+const DIR_CACHE = new Map<string, string[] | string>();
+
+export function reset_runtime_caches() {
+    READ_CACHE.clear();
+    DIR_CACHE.clear();
+}
+
+function getDynamicSkillModel(skillName: string): string {
+    const fastSkills = new Set([
+        'list_directory',
+        'check_environment',
+        'search_npm_package',
+    ]);
+    return fastSkills.has(skillName) ? MODEL_CONFIG.FAST_MODEL : MODEL_CONFIG.SMART_MODEL;
+}
+
+function validateDynamicSkillInputs(skillName: string, inputs: any, requiredParams: string[]): { valid: boolean; message?: string } {
+    const normalizedArgs = Array.isArray(inputs?.args) ? inputs.args : [];
+    if (requiredParams.length === 0) return { valid: true };
+
+    // 1) Positional args mode: { args: [...] }
+    if (normalizedArgs.length > 0) {
+        if (normalizedArgs.length < requiredParams.length) {
+            return {
+                valid: false,
+                message: `스킬 "${skillName}" 입력 인자가 부족합니다. 필요: ${requiredParams.length}개(${requiredParams.join(', ')}), 전달: ${normalizedArgs.length}개`,
+            };
+        }
+        return { valid: true };
+    }
+
+    // 2) Named input mode: { codeToReview: "...", context: "..." }
+    if (inputs && typeof inputs === 'object') {
+        const source = inputs as Record<string, unknown>;
+        const missing = requiredParams.filter((param) => {
+            const value = source[param];
+            return value === undefined || value === null || value === '';
+        });
+        if (missing.length === 0) {
+            return { valid: true };
+        }
+        return {
+            valid: false,
+            message: `스킬 "${skillName}" 입력 인자가 부족합니다. 필요: ${requiredParams.length}개(${requiredParams.join(', ')}), 누락: ${missing.join(', ')}`,
+        };
+    }
+
+    return {
+        valid: false,
+        message: `스킬 "${skillName}" 입력 인자가 없습니다. 필요: ${requiredParams.join(', ')}`,
+    };
+}
 
 // --- Dynamic Skill Executor ---
 export async function execute_skill(
@@ -23,6 +76,17 @@ export async function execute_skill(
         const skillDef = AgentLoader.loadSkill(skillName);
         if (!skillDef || !skillDef.instructions) {
              throw new Error(`Failed to load instructions for skill: ${skillName}`);
+        }
+
+        const requiredParams = Array.isArray(skillDef.inputParams) ? skillDef.inputParams : [];
+        const validation = validateDynamicSkillInputs(skillName, inputs, requiredParams);
+        if (!validation.valid) {
+            return {
+                success: false,
+                error: true,
+                skill: skillName,
+                message: validation.message,
+            };
         }
 
         // 2. Prepare the system prompt with the skill's instructions
@@ -42,20 +106,44 @@ ${JSON.stringify(inputs, null, 2)}
 
 Please execute the skill based on the instructions above.`;
 
-        // 3. Prompt the LLM to execute
-        // For now, we return text. If skills define specific schema, we could parse it.
+        const model = getDynamicSkillModel(skillName);
+        const schema = AgentLoader.extractSection(skillDef.instructions, 'Schema');
+
+        // 3. Prompt the LLM to execute (prefer structured result when schema exists)
+        if (schema) {
+            const result = await llm.generateJSON(
+                systemPrompt,
+                "Execute the skill based on the provided inputs and context.",
+                schema,
+                model
+            );
+            return {
+                success: true,
+                error: false,
+                skill: skillName,
+                result,
+            };
+        }
+
         const response = await llm.generateText(
             systemPrompt,
             "Execute the skill based on the provided inputs and context.",
-            MODEL_CONFIG.SMART_MODEL,
+            model,
             emitter
         );
 
-        return response;
+        return {
+            success: true,
+            error: false,
+            skill: skillName,
+            content: response,
+        };
     } catch (e: any) {
         console.error(`Failed to execute skill ${skillName}:`, e);
         return {
+            success: false,
             error: true,
+            skill: skillName,
             message: `Execution failed for ${skillName}: ${e.message}`
         };
     }
@@ -76,11 +164,16 @@ export async function read_codebase(filePath: string, projectPath: string = proc
             relativePath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
         }
         const fullPath = path.resolve(projectPath, relativePath);
+        const cacheKey = `${projectPath}:${relativePath}`;
+        if (READ_CACHE.has(cacheKey)) {
+            return READ_CACHE.get(cacheKey)!;
+        }
 
         if (!fs.existsSync(fullPath)) {
             return `File "${filePath}" does not exist in project. (Path: ${relativePath})`;
         }
         const content = fs.readFileSync(fullPath, 'utf8');
+        READ_CACHE.set(cacheKey, content);
         return content;
     } catch (error: any) {
         return `Error reading file: ${error.message} `;
@@ -104,6 +197,8 @@ export async function write_code(filePath: string, content: string, baseDir: str
             fs.mkdirSync(dir, { recursive: true });
         }
         fs.writeFileSync(fullPath, content, 'utf-8');
+        const cacheKey = `${baseDir}:${relativePath}`;
+        READ_CACHE.set(cacheKey, content);
 
         return {
             success: true,
@@ -262,11 +357,17 @@ export async function check_environment() {
 export async function list_directory(dirPath: string = '.', baseDir: string = process.cwd()) {
     try {
         const fullPath = path.resolve(baseDir, dirPath);
+        const cacheKey = `${baseDir}:${dirPath}`;
+        if (DIR_CACHE.has(cacheKey)) {
+            return DIR_CACHE.get(cacheKey)!;
+        }
         if (!fs.existsSync(fullPath)) return 'Directory does not exist';
         const entries = fs.readdirSync(fullPath, { withFileTypes: true });
-        return entries.map(entry => {
+        const result = entries.map(entry => {
             return `${entry.isDirectory() ? '[DIR]' : '[FILE]'} ${entry.name}`;
         });
+        DIR_CACHE.set(cacheKey, result);
+        return result;
     } catch (error: any) {
         return `Error listing directory: ${error.message}`;
     }

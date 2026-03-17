@@ -7,6 +7,15 @@ import { ContextManager } from '../context-manager';
 import { StreamEmitter } from '../stream-emitter';
 import { ProjectProfiler } from '../profiler';
 import { MODEL_CONFIG } from '../model-config';
+import {
+    BudgetEvent,
+    DEFAULT_BUDGET_POLICY,
+    ExecutionBudgetPolicy,
+    ExecutionMetrics,
+    StepExecutionMetric,
+    StrategyPreset,
+} from '../orchestration/metrics';
+import { applyPresetDefaults, resolveStepPolicy } from '../orchestration/policy';
 
 interface AgentTask {
     id: string; // Supabase UUID
@@ -41,6 +50,7 @@ interface ExecutionOptions {
     discussionMode?: DiscussionMode;
     maxDiscussionThoughts?: number;
     carryDiscussionToPrompt?: boolean;
+    strategyPreset?: StrategyPreset;
 }
 
 type CollaborationGraph = Record<string, Record<string, {
@@ -60,7 +70,27 @@ export class Orchestrator {
         discussionMode: 'step_handoff',
         maxDiscussionThoughts: 3,
         carryDiscussionToPrompt: true,
+        strategyPreset: 'balanced',
     };
+    private budgetPolicy: ExecutionBudgetPolicy = { ...DEFAULT_BUDGET_POLICY };
+    private executionMetrics: ExecutionMetrics = {
+        startedAt: new Date().toISOString(),
+        profile: 'balanced',
+        llmCalls: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        skillCalls: 0,
+        skillLatencyMs: 0,
+        dbUpdates: 0,
+        discussionCalls: 0,
+        budgetEvents: [],
+        stepMetrics: {},
+    };
+    private activeStepIndex: number | null = null;
+    private metadataCache: Record<string, any> | null = null;
+    private metadataLastFlushedAt = 0;
+    private readonly METADATA_FLUSH_INTERVAL_MS = 1500;
 
     // Simple in-memory lock to prevent concurrent executions of the same task
     private static runningTasks = new Set<string>();
@@ -73,9 +103,107 @@ export class Orchestrator {
         this.emitter = emitter || null;
     }
 
+    private createStepMetric(stepIndex: number, action: string, agent: string): StepExecutionMetric {
+        return {
+            stepIndex,
+            action,
+            agent,
+            status: 'pending',
+            llmCalls: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            skillCalls: 0,
+            skillLatencyMs: 0,
+            dbUpdates: 0,
+        };
+    }
+
+    private ensureStepMetric(stepIndex: number, action: string, agent: string): StepExecutionMetric {
+        if (!this.executionMetrics.stepMetrics[stepIndex]) {
+            this.executionMetrics.stepMetrics[stepIndex] = this.createStepMetric(stepIndex, action, agent);
+        }
+        return this.executionMetrics.stepMetrics[stepIndex];
+    }
+
+    private incrementDbUpdate() {
+        this.executionMetrics.dbUpdates += 1;
+        if (this.activeStepIndex !== null && this.executionMetrics.stepMetrics[this.activeStepIndex]) {
+            this.executionMetrics.stepMetrics[this.activeStepIndex].dbUpdates += 1;
+        }
+    }
+
+    private pushBudgetEvent(event: Omit<BudgetEvent, 'createdAt'>) {
+        this.executionMetrics.budgetEvents.push({
+            ...event,
+            createdAt: new Date().toISOString(),
+        });
+    }
+
+    private resolveBudgetPolicy(taskMetadata: any, strategyPreset: StrategyPreset): ExecutionBudgetPolicy {
+        const raw = taskMetadata?.budgetPolicy || {};
+        const presetDefaults = applyPresetDefaults(strategyPreset).budgetPolicy;
+        return {
+            maxTokensPerTask: Math.max(
+                1000,
+                Number(raw.maxTokensPerTask) || Number(presetDefaults.maxTokensPerTask) || DEFAULT_BUDGET_POLICY.maxTokensPerTask
+            ),
+            maxDiscussionCalls: Math.max(
+                0,
+                Number(raw.maxDiscussionCalls) || Number(presetDefaults.maxDiscussionCalls) || DEFAULT_BUDGET_POLICY.maxDiscussionCalls
+            ),
+            maxSkillRetries: Math.max(
+                0,
+                Math.min(3, Number(raw.maxSkillRetries) || Number(presetDefaults.maxSkillRetries) || DEFAULT_BUDGET_POLICY.maxSkillRetries)
+            ),
+            maxDbWritesPerTask: Math.max(20, Number(raw.maxDbWritesPerTask) || DEFAULT_BUDGET_POLICY.maxDbWritesPerTask),
+        };
+    }
+
+    private checkBudget(type: BudgetEvent['type']): boolean {
+        if (type === 'tokens' && this.executionMetrics.totalTokens >= this.budgetPolicy.maxTokensPerTask) {
+            this.pushBudgetEvent({
+                type,
+                message: `토큰 예산 초과: ${this.executionMetrics.totalTokens}/${this.budgetPolicy.maxTokensPerTask}`,
+            });
+            return false;
+        }
+        if (type === 'discussion' && this.executionMetrics.discussionCalls >= this.budgetPolicy.maxDiscussionCalls) {
+            this.pushBudgetEvent({
+                type,
+                message: `토론 호출 예산 초과: ${this.executionMetrics.discussionCalls}/${this.budgetPolicy.maxDiscussionCalls}`,
+            });
+            return false;
+        }
+        if (type === 'db_writes' && this.executionMetrics.dbUpdates >= this.budgetPolicy.maxDbWritesPerTask) {
+            this.pushBudgetEvent({
+                type,
+                message: `DB write 예산 초과: ${this.executionMetrics.dbUpdates}/${this.budgetPolicy.maxDbWritesPerTask}`,
+            });
+            return false;
+        }
+        return true;
+    }
+
+    private llmTelemetry(modeHint?: { action?: string; agent?: string }): llm.LLMTelemetryHooks {
+        return {
+            onRequestStart: ({ mode }) => {
+                this.executionMetrics.llmCalls += 1;
+                if (this.activeStepIndex !== null && this.executionMetrics.stepMetrics[this.activeStepIndex]) {
+                    this.executionMetrics.stepMetrics[this.activeStepIndex].llmCalls += 1;
+                }
+                void this.log('System', `[LLM] ${mode} 요청 시작`, { type: 'System', ...modeHint });
+            },
+            onError: ({ message }) => {
+                void this.log('System', `[LLM] 요청 오류: ${message}`, { type: 'WARNING', ...modeHint });
+            },
+        };
+    }
+
     private async log(agentName: string, message: string, metadata: any = {}) {
         console.log(`[${agentName}] ${message}`, metadata);
         try {
+            if (!this.checkBudget('db_writes')) return;
+            this.incrementDbUpdate();
             await supabase.from('Execution_Logs').insert({
                 task_id: this.taskId,
                 agent_role: agentName,
@@ -90,37 +218,36 @@ export class Orchestrator {
 
     private async updateStatus(status: AgentTask['status']) {
         try {
+            this.incrementDbUpdate();
             await supabase.from('Tasks').update({ status }).eq('id', this.taskId);
         } catch (e: any) {
             console.error('Supabase Status Update Error:', e);
         }
     }
 
-    private async updateMetadata(data: any) {
+    private async updateMetadata(data: any, immediate: boolean = true) {
         try {
-            // Fetch current metadata first to merge? Or just upsert?
-            // Since we don't have existing metadata in memory, let's just fetch and merge or just update top level keys
-            // Simplify: We assume 'data' is the partial update
-            const { data: current } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
-            const newMetadata = { ...(current?.metadata || {}), ...data };
-
-            await supabase.from('Tasks').update({ metadata: newMetadata }).eq('id', this.taskId);
+            await this.ensureMetadataCache();
+            this.metadataCache = { ...(this.metadataCache || {}), ...data };
+            await this.flushMetadataCache(immediate);
         } catch (e: any) {
             console.error('Supabase Metadata Update Error:', e);
         }
     }
 
-    private async updateProgress(progress: Partial<ProgressInfo>) {
+    private async updateProgress(progress: Partial<ProgressInfo>, immediate: boolean = true) {
         try {
-            const { data: current } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
-            const currentProgress = current?.metadata?.progress || {};
+            await this.ensureMetadataCache();
+            const currentProgress = this.metadataCache?.progress || {};
             const newProgress: ProgressInfo = {
                 ...currentProgress,
                 ...progress
             };
-            await supabase.from('Tasks').update({
-                metadata: { ...(current?.metadata || {}), progress: newProgress }
-            }).eq('id', this.taskId);
+            this.metadataCache = {
+                ...(this.metadataCache || {}),
+                progress: newProgress,
+            };
+            await this.flushMetadataCache(immediate);
         } catch (e: any) {
             console.error('Supabase Progress Update Error:', e);
         }
@@ -129,7 +256,25 @@ export class Orchestrator {
     private async getTask(): Promise<AgentTask | null> {
         const { data, error } = await supabase.from('Tasks').select('*').eq('id', this.taskId).single();
         if (error || !data) return null;
+        this.metadataCache = (data as AgentTask).metadata || {};
         return data as AgentTask;
+    }
+
+    private async ensureMetadataCache() {
+        if (this.metadataCache) return;
+        const { data } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+        this.metadataCache = (data?.metadata || {}) as Record<string, any>;
+    }
+
+    private async flushMetadataCache(force: boolean = false) {
+        if (!this.metadataCache) return;
+        const now = Date.now();
+        if (!force && now - this.metadataLastFlushedAt < this.METADATA_FLUSH_INTERVAL_MS) {
+            return;
+        }
+        this.incrementDbUpdate();
+        await supabase.from('Tasks').update({ metadata: this.metadataCache }).eq('id', this.taskId);
+        this.metadataLastFlushedAt = now;
     }
 
     private normalizeAgentKey(agent: string): string {
@@ -141,10 +286,13 @@ export class Orchestrator {
 
     private resolveExecutionOptions(taskMetadata: any, runtimeOptions?: ExecutionOptions): Required<ExecutionOptions> {
         const saved = taskMetadata?.executionOptions || {};
+        const preset = (runtimeOptions?.strategyPreset ?? saved.strategyPreset ?? 'balanced') as StrategyPreset;
+        const presetDefaults = applyPresetDefaults(preset);
         const merged = {
-            discussionMode: runtimeOptions?.discussionMode ?? saved.discussionMode ?? 'step_handoff',
-            maxDiscussionThoughts: runtimeOptions?.maxDiscussionThoughts ?? saved.maxDiscussionThoughts ?? 3,
-            carryDiscussionToPrompt: runtimeOptions?.carryDiscussionToPrompt ?? saved.carryDiscussionToPrompt ?? true,
+            discussionMode: runtimeOptions?.discussionMode ?? saved.discussionMode ?? presetDefaults.discussionMode,
+            maxDiscussionThoughts: runtimeOptions?.maxDiscussionThoughts ?? saved.maxDiscussionThoughts ?? presetDefaults.maxDiscussionThoughts,
+            carryDiscussionToPrompt: runtimeOptions?.carryDiscussionToPrompt ?? saved.carryDiscussionToPrompt ?? presetDefaults.carryDiscussionToPrompt,
+            strategyPreset: preset,
         };
 
         const validModes: DiscussionMode[] = ['off', 'step_handoff', 'roundtable'];
@@ -155,6 +303,9 @@ export class Orchestrator {
             discussionMode,
             maxDiscussionThoughts,
             carryDiscussionToPrompt: Boolean(merged.carryDiscussionToPrompt),
+            strategyPreset: ['quality_first', 'balanced', 'speed_first', 'cost_saver'].includes(merged.strategyPreset)
+                ? merged.strategyPreset
+                : 'balanced',
         };
     }
 
@@ -192,7 +343,12 @@ export class Orchestrator {
         }
     }
 
-    private resolveDiscussionParticipants(workflow: any, stepIndex: number, currentAgent: string): string[] {
+    private resolveDiscussionParticipants(
+        workflow: any,
+        stepIndex: number,
+        currentAgent: string,
+        discussionMode: DiscussionMode
+    ): string[] {
         const participants = new Set<string>();
         const current = this.normalizeAgentKey(currentAgent);
         if (current) participants.add(current);
@@ -201,7 +357,7 @@ export class Orchestrator {
         const prevStepAgent = this.normalizeAgentKey(workflow?.steps?.[stepIndex - 1]?.agent || '');
         const nextStepAgent = this.normalizeAgentKey(workflow?.steps?.[stepIndex + 1]?.agent || '');
 
-        if (this.executionOptions.discussionMode === 'roundtable') {
+        if (discussionMode === 'roundtable') {
             const requiredAgents = workflow?.requiredAgents || workflow?.required_agents || [];
             for (const role of requiredAgents) {
                 participants.add(this.normalizeAgentKey(role));
@@ -214,12 +370,24 @@ export class Orchestrator {
         return Array.from(participants).filter(Boolean);
     }
 
-    private async runStepDiscussion(task: AgentTask, workflow: any, stepIndex: number, step: any): Promise<string> {
-        if (this.executionOptions.discussionMode === 'off') return '';
+    private async runStepDiscussion(
+        task: AgentTask,
+        workflow: any,
+        stepIndex: number,
+        step: any,
+        discussionMode: DiscussionMode,
+        shouldRun: boolean
+    ): Promise<string> {
+        if (!shouldRun || discussionMode === 'off') return '';
+        if (!this.checkBudget('discussion')) {
+            await this.log('System', `Step ${stepIndex + 1} 토론 생략: discussion budget 초과`, { type: 'WARNING' });
+            return '';
+        }
 
         try {
+            this.executionMetrics.discussionCalls += 1;
             const allAgents = AgentLoader.listAgents().filter(a => a.name !== 'git-manager');
-            const participantRoles = this.resolveDiscussionParticipants(workflow, stepIndex, step.agent);
+            const participantRoles = this.resolveDiscussionParticipants(workflow, stepIndex, step.agent, discussionMode);
             const activeAgents = allAgents.filter(a => participantRoles.includes(this.normalizeAgentKey(a.role || a.name)));
             const participants = activeAgents.length > 0 ? activeAgents : allAgents;
 
@@ -281,6 +449,8 @@ export class Orchestrator {
             await this.updateMetadata({
                 executionDiscussions: [...existing, entry],
                 agentCollaboration: this.collaborationGraph,
+                executionMetrics: this.executionMetrics,
+                budgetPolicy: this.budgetPolicy,
             });
             this.emitter?.emit({
                 type: 'skill_result',
@@ -408,18 +578,25 @@ export class Orchestrator {
         taskDescription: string,
         projectPath: string,
         techStack: string,
-        stepDescription?: string
+        stepDescription?: string,
+        modelTier: 'fast' | 'smart' = 'smart',
+        contextBudget: number = 10000
     ): Promise<any[]> {
+        if (!this.checkBudget('tokens')) {
+            await this.log('System', `[Budget] ${skillName} 인자 생성을 건너뜁니다.`, { type: 'WARNING' });
+            return [];
+        }
         const skillDef = AgentLoader.loadSkill(skillName);
         const inputsDef = skillDef.inputs ? `\nInputs Definition:\n${skillDef.inputs}` : '';
 
         // Get Optimized Context
-        const dynamicContext = this.contextManager.getOptimizedContext(10000);
+        const dynamicContext = this.contextManager.getOptimizedContext(contextBudget);
 
         // Route to FAST model for skills that just need a path/simple arg
-        const model = Orchestrator.FAST_ARG_SKILLS.includes(skillName)
+        const defaultModel = Orchestrator.FAST_ARG_SKILLS.includes(skillName)
             ? MODEL_CONFIG.FAST_MODEL
             : MODEL_CONFIG.SMART_MODEL;
+        const model = modelTier === 'fast' ? MODEL_CONFIG.FAST_MODEL : defaultModel;
 
         const systemPrompt = `
 You are an intelligent agent orchestrator.
@@ -463,7 +640,8 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 '{ "arguments": [] }',
                 this.emitter,
                 model,
-                () => this.refreshLock()
+                () => this.refreshLock(),
+                this.llmTelemetry({ action: skillName })
             );
 
             if (response.__tokens) {
@@ -479,15 +657,15 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
 
     private async refreshLock() {
         try {
-            const { data: current } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
-            const newMetadata = {
-                ...(current?.metadata || {}),
+            await this.ensureMetadataCache();
+            this.metadataCache = {
+                ...(this.metadataCache || {}),
                 lock: {
                     held_since: Date.now(),
                     process_id: process.pid
                 }
             };
-            await supabase.from('Tasks').update({ metadata: newMetadata }).eq('id', this.taskId);
+            await this.flushMetadataCache(true);
             // console.log(`[System] Lock refreshed at ${new Date().toLocaleTimeString()}`);
         } catch (e) {
             console.error('Failed to refresh lock:', e);
@@ -496,8 +674,17 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
 
     private async accumulateTokens(promptTokens: number, evalTokens: number) {
         try {
-            const { data: current } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
-            const existingTokens = current?.metadata?.tokens || { prompt: 0, completion: 0, total: 0 };
+            this.executionMetrics.promptTokens += promptTokens;
+            this.executionMetrics.completionTokens += evalTokens;
+            this.executionMetrics.totalTokens += promptTokens + evalTokens;
+            if (this.activeStepIndex !== null && this.executionMetrics.stepMetrics[this.activeStepIndex]) {
+                const stepMetric = this.executionMetrics.stepMetrics[this.activeStepIndex];
+                stepMetric.promptTokens += promptTokens;
+                stepMetric.completionTokens += evalTokens;
+            }
+
+            await this.ensureMetadataCache();
+            const existingTokens = this.metadataCache?.tokens || { prompt: 0, completion: 0, total: 0 };
             
             const newTokens = {
                 prompt: existingTokens.prompt + promptTokens,
@@ -505,11 +692,12 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 total: existingTokens.total + promptTokens + evalTokens
             };
 
-            const newMetadata = {
-                ...(current?.metadata || {}),
-                tokens: newTokens
+            this.metadataCache = {
+                ...(this.metadataCache || {}),
+                tokens: newTokens,
+                executionMetrics: this.executionMetrics,
             };
-            await supabase.from('Tasks').update({ metadata: newMetadata }).eq('id', this.taskId);
+            await this.flushMetadataCache(false);
 
             // Emit token update to UI if needed
             this.emitter?.emit({ type: 'llm_token_usage', tokens: newTokens });
@@ -527,6 +715,7 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 this.emitter?.emit({ type: 'error', message: 'Task not found' });
                 return;
             }
+            this.metadataCache = task.metadata || {};
 
             // --- Persistent Lock Check ---
             const currentLock = task.metadata?.lock;
@@ -573,6 +762,24 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
 
             const workflow = task.metadata.workflow;
             this.executionOptions = this.resolveExecutionOptions(task.metadata, options);
+            this.budgetPolicy = this.resolveBudgetPolicy(task.metadata, this.executionOptions.strategyPreset);
+            const existingMetrics = task.metadata?.executionMetrics;
+            this.executionMetrics = {
+                startedAt: existingMetrics?.startedAt || new Date().toISOString(),
+                profile: this.executionOptions.strategyPreset,
+                llmCalls: Number(existingMetrics?.llmCalls) || 0,
+                promptTokens: Number(existingMetrics?.promptTokens) || 0,
+                completionTokens: Number(existingMetrics?.completionTokens) || 0,
+                totalTokens: Number(existingMetrics?.totalTokens) || 0,
+                skillCalls: Number(existingMetrics?.skillCalls) || 0,
+                skillLatencyMs: Number(existingMetrics?.skillLatencyMs) || 0,
+                dbUpdates: Number(existingMetrics?.dbUpdates) || 0,
+                discussionCalls: Number(existingMetrics?.discussionCalls) || 0,
+                budgetEvents: Array.isArray(existingMetrics?.budgetEvents) ? existingMetrics.budgetEvents : [],
+                stepMetrics: existingMetrics?.stepMetrics && typeof existingMetrics.stepMetrics === 'object'
+                    ? existingMetrics.stepMetrics
+                    : {},
+            };
             this.collaborationGraph =
                 task.metadata?.agentCollaboration && typeof task.metadata.agentCollaboration === 'object'
                     ? (task.metadata.agentCollaboration as CollaborationGraph)
@@ -580,9 +787,12 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
             this.seedCollaborationFromWorkflow(workflow);
             await this.updateMetadata({
                 executionOptions: this.executionOptions,
+                budgetPolicy: this.budgetPolicy,
+                executionMetrics: this.executionMetrics,
                 agentCollaboration: this.collaborationGraph
             });
             await this.updateStatus('working');
+            skills.reset_runtime_caches();
             const mainAgentName = this.mainAgentDef.name;
             this.emitter?.emit({ type: 'phase_start', phase: 'execution', taskId: this.taskId });
 
@@ -669,18 +879,39 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
             for (let stepIndex = resumeFrom; stepIndex < workflow.steps.length; stepIndex++) {
                 // Heartbeat/Lock Refresh: Update metadata periodically to show we are still alive
                 if (stepIndex > resumeFrom) {
-                    await this.updateMetadata({ lock: { held_since: Date.now(), process_id: process.pid } });
+                    await this.updateMetadata({ lock: { held_since: Date.now(), process_id: process.pid } }, false);
                 }
 
                 const step = workflow.steps[stepIndex];
                 const { agent, action } = step;
                 const agentRoleSlug = agent.toLowerCase().replace(/[\s_]+/g, '-');
+                const stepPolicy = resolveStepPolicy({
+                    strategyPreset: this.executionOptions.strategyPreset,
+                    discussionMode: this.executionOptions.discussionMode,
+                    action,
+                    stepIndex,
+                    totalSteps,
+                    maxSkillRetries: this.budgetPolicy.maxSkillRetries,
+                    currentTotalTokens: this.executionMetrics.totalTokens,
+                    budgetPolicy: this.budgetPolicy,
+                });
                 this.recordCollaboration(previousStepAgent, agentRoleSlug, 'step_handoff');
 
                 try {
                     const stepAgentDef = AgentLoader.loadAgent(agentRoleSlug);
+                    this.activeStepIndex = stepIndex;
+                    const stepMetric = this.ensureStepMetric(stepIndex, action, stepAgentDef.name);
+                    stepMetric.status = 'running';
+                    stepMetric.startedAt = stepMetric.startedAt || new Date().toISOString();
                     const skillFunc = this.getSkillFunction(action);
-                    const discussionGuidance = await this.runStepDiscussion(task, workflow, stepIndex, step);
+                    const discussionGuidance = await this.runStepDiscussion(
+                        task,
+                        workflow,
+                        stepIndex,
+                        step,
+                        stepPolicy.discussionMode,
+                        stepPolicy.shouldRunDiscussion
+                    );
                     const stepGoalWithDiscussion = discussionGuidance
                         ? `${step.description || ''}\n\n[팀 토론 인사이트]\n${discussionGuidance}`
                         : (step.description || task.description);
@@ -691,7 +922,7 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                         currentAction: action,
                         currentAgent: stepAgentDef.name,
                         stepStatus: 'running'
-                    });
+                    }, false);
                     this.emitter?.emit({
                         type: 'step_start',
                         step: stepIndex,
@@ -704,9 +935,12 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                     // --- EXECUTION WITH RETRY/SELF-HEAL LOOP ---
                     let stepSuccess = false;
                     let executionError: any = null;
-                    const MAX_STEP_RETRIES = 1;
+                    const MAX_STEP_RETRIES = stepPolicy.maxSkillRetries;
 
                     for (let stepAttempt = 0; stepAttempt <= MAX_STEP_RETRIES; stepAttempt++) {
+                        const skillAttemptStartedAt = Date.now();
+                        this.executionMetrics.skillCalls += 1;
+                        stepMetric.skillCalls += 1;
                         try {
                             if (stepAttempt > 0) {
                                 await this.log(mainAgentName, `Self-Heal Attempt ${stepAttempt} for action: ${action}`, { type: 'WARNING' });
@@ -720,6 +954,9 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
 
                                 // --- SPECIAL HANDLING: write_code uses CODING model directly ---
                                 if (action === 'write_code') {
+                                    if (!this.checkBudget('tokens')) {
+                                        throw new Error('Token budget exceeded before code generation');
+                                    }
                                     const codePrompt = `${stepGoalWithDiscussion}\n\nOverall task: ${task.description}`;
 
                                     await this.log(stepAgentDef.name, `Generating code with CODING model for: ${step.description || task.description}`, { type: 'ACTION' });
@@ -744,7 +981,8 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                                             this.emitter,
                                             MODEL_CONFIG.CODING_MODEL,
                                             techStack,
-                                            () => this.refreshLock()
+                                            () => this.refreshLock(),
+                                            this.llmTelemetry({ action, agent: stepAgentDef.name })
                                         );
 
                                         if (codeResult?.tokens) {
@@ -796,7 +1034,13 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                                     }
                                 } else {
                                     let args = await this.generateSkillArguments(
-                                        action, task.description, projectPath, techStack, stepGoalWithDiscussion
+                                        action,
+                                        task.description,
+                                        projectPath,
+                                        techStack,
+                                        stepGoalWithDiscussion,
+                                        stepPolicy.modelTier,
+                                        stepPolicy.contextBudget
                                     );
 
                                     const filesystemSkills = ['read_codebase', 'run_shell_command', 'manage_git', 'list_directory'];
@@ -836,11 +1080,17 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                                     this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
                                 }
                                 stepSuccess = true;
+                                const skillAttemptLatency = Date.now() - skillAttemptStartedAt;
+                                this.executionMetrics.skillLatencyMs += skillAttemptLatency;
+                                stepMetric.skillLatencyMs += skillAttemptLatency;
                                 break; // Exit attempt loop on success
                             } else {
                                 throw new Error(`Runtime function for skill ${action} not found.`);
                             }
                         } catch (err: any) {
+                            const skillAttemptLatency = Date.now() - skillAttemptStartedAt;
+                            this.executionMetrics.skillLatencyMs += skillAttemptLatency;
+                            stepMetric.skillLatencyMs += skillAttemptLatency;
                             executionError = err;
                             await this.log(mainAgentName, `Step ${stepIndex + 1} attempt ${stepAttempt + 1} failed: ${err.message}`, { type: 'WARNING' });
 
@@ -862,13 +1112,19 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
 
                     // Update progress: step completed
                     const stepDuration = this.emitter?.markStepEnd() || 0;
-                    const { data: currentMeta } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
-                    const completedSteps = currentMeta?.metadata?.progress?.completedSteps || [];
+                    await this.ensureMetadataCache();
+                    const completedSteps = this.metadataCache?.progress?.completedSteps || [];
                     await this.updateProgress({
                         completedSteps: [...completedSteps, action],
                         stepStatus: 'completed'
+                    }, false);
+                    stepMetric.status = 'completed';
+                    stepMetric.endedAt = new Date().toISOString();
+                    await this.updateMetadata({
+                        executionMetrics: this.executionMetrics,
+                        budgetPolicy: this.budgetPolicy,
+                        agentCollaboration: this.collaborationGraph
                     });
-                    await this.updateMetadata({ agentCollaboration: this.collaborationGraph });
                     previousStepAgent = agentRoleSlug;
 
                     // Emit step_complete with ETA
@@ -893,8 +1149,13 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                     // Update progress: step failed
                     await this.updateProgress({
                         stepStatus: 'failed'
-                    });
+                    }, false);
 
+                    const failedStepMetric = this.executionMetrics.stepMetrics[stepIndex];
+                    if (failedStepMetric) {
+                        failedStepMetric.status = 'failed';
+                        failedStepMetric.endedAt = new Date().toISOString();
+                    }
                     // Save error metadata for retry functionality
                     const errorMetadata: ErrorMetadata = {
                         lastError: err.message,
@@ -905,7 +1166,8 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                         failedAt: new Date().toISOString(),
                         previousStatus: task.status
                     };
-                    await this.updateMetadata(errorMetadata);
+                    await this.updateMetadata(errorMetadata, false);
+                    await this.updateMetadata({ executionMetrics: this.executionMetrics, budgetPolicy: this.budgetPolicy });
                     await this.updateStatus('failed');
                     await this.log('System', `Task marked as failed. Can be retried from step ${stepIndex + 1}.`, { type: 'ERROR' });
                     this.emitter?.emit({ type: 'done', status: 'failed' });
@@ -913,20 +1175,28 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 }
             }
 
+            this.executionMetrics.endedAt = new Date().toISOString();
             await this.updateStatus('testing');
             await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
             // Release lock on success
-            await this.updateMetadata({ lock: null });
+            await this.updateMetadata({
+                lock: null,
+                executionMetrics: this.executionMetrics,
+                budgetPolicy: this.budgetPolicy,
+            });
             this.emitter?.emit({ type: 'done', status: 'execution_complete' });
         } catch (error: any) {
             await this.log('System', `Execution Phase Failed: ${error.message}`, { type: 'ERROR' });
             await this.updateStatus('failed');
             // Release lock on fatal error
+            this.executionMetrics.endedAt = new Date().toISOString();
             await this.updateMetadata({
                 lock: null,
                 lastError: error.message,
                 failedAt: new Date().toISOString(),
-                retryCount: ((await this.getTask())?.metadata?.retryCount || 0) + 1
+                retryCount: ((await this.getTask())?.metadata?.retryCount || 0) + 1,
+                executionMetrics: this.executionMetrics,
+                budgetPolicy: this.budgetPolicy,
             });
             this.emitter?.emit({ type: 'error', message: error.message });
             this.emitter?.emit({ type: 'done', status: 'failed' });
@@ -993,7 +1263,8 @@ Use 'feat:', 'fix:', 'refactor:' conventions for commit messages.
                         "{}",
                         this.emitter,
                         MODEL_CONFIG.FAST_MODEL,
-                        () => this.refreshLock()
+                        () => this.refreshLock(),
+                        this.llmTelemetry({ action: 'manage_git', agent: mainAgentName })
                     );
                     
                     if (generated.__tokens) {

@@ -24,6 +24,18 @@ export interface LLMResponse {
     };
 }
 
+export interface LLMTelemetryHooks {
+    onRequestStart?: (meta: { mode: string; model: string }) => void;
+    onTokenUsage?: (meta: {
+        mode: string;
+        model: string;
+        promptTokens: number;
+        completionTokens: number;
+    }) => void;
+    onRequestEnd?: (meta: { mode: string; model: string; latencyMs: number }) => void;
+    onError?: (meta: { mode: string; model: string; message: string }) => void;
+}
+
 /**
  * Custom HTTP requester to bypass fetch timeout limitations (UND_ERR_HEADERS_TIMEOUT)
  */
@@ -267,7 +279,8 @@ export async function generateCode(
     prompt: string,
     context: string,
     model: string = MODEL_CONFIG.CODING_MODEL,
-    techStack: string = 'nextjs'
+    techStack: string = 'nextjs',
+    telemetry?: LLMTelemetryHooks
 ): Promise<LLMResponse> {
     validateModels();
 
@@ -283,6 +296,8 @@ Task: ${prompt}
 `;
 
     try {
+        const startedAt = Date.now();
+        telemetry?.onRequestStart?.({ mode: 'code', model });
         let fullText = '';
         let tokens: LLMResponse['tokens'] = undefined;
         await withRetry(async () => {
@@ -306,6 +321,16 @@ Task: ${prompt}
         });
 
         const files = extractFilesFromRaw(fullText);
+        const tokenMeta = tokens as { prompt_eval_count: number; eval_count: number } | undefined;
+        if (tokenMeta) {
+            telemetry?.onTokenUsage?.({
+                mode: 'code',
+                model,
+                promptTokens: tokenMeta.prompt_eval_count,
+                completionTokens: tokenMeta.eval_count,
+            });
+        }
+        telemetry?.onRequestEnd?.({ mode: 'code', model, latencyMs: Date.now() - startedAt });
         
         return {
             content: fullText.split('File:')[0].trim(),
@@ -314,6 +339,7 @@ Task: ${prompt}
         };
 
     } catch (error: any) {
+        telemetry?.onError?.({ mode: 'code', model, message: error.message });
         console.error('LLM Generation Failed:', error);
         return {
             content: `Failed to generate code via AI: ${error.message}`,
@@ -327,67 +353,102 @@ export async function generateText(
     systemPrompt: string,
     userPrompt: string,
     model: string = MODEL_CONFIG.SMART_MODEL,
-    emitter: any = null
+    emitter: any = null,
+    telemetry?: LLMTelemetryHooks
 ): Promise<string> {
     validateModels();
-
-    return withRetry(async () => {
-        let fullText = '';
-        await ollamaRequest(
-            `${OLLAMA_BASE_URL}/api/generate`,
-            { model, system: systemPrompt, prompt: userPrompt, stream: false },
-            TIMEOUT_MS.JSON, // using JSON timeout as it's a general text task
-            async (res) => {
-                const chunks: any[] = [];
-                for await (const chunk of res) chunks.push(chunk);
-                const data = JSON.parse(Buffer.concat(chunks).toString());
-                fullText = data.response;
-            }
-        );
-        return fullText.trim();
-    });
+    const startedAt = Date.now();
+    telemetry?.onRequestStart?.({ mode: 'text', model });
+    try {
+        const result = await withRetry(async () => {
+            let fullText = '';
+            await ollamaRequest(
+                `${OLLAMA_BASE_URL}/api/generate`,
+                { model, system: systemPrompt, prompt: userPrompt, stream: false },
+                TIMEOUT_MS.JSON, // using JSON timeout as it's a general text task
+                async (res) => {
+                    const chunks: any[] = [];
+                    for await (const chunk of res) chunks.push(chunk);
+                    const data = JSON.parse(Buffer.concat(chunks).toString());
+                    fullText = data.response;
+                    const promptTokens = data.prompt_eval_count || 0;
+                    const completionTokens = data.eval_count || 0;
+                    if (promptTokens || completionTokens) {
+                        telemetry?.onTokenUsage?.({
+                            mode: 'text',
+                            model,
+                            promptTokens,
+                            completionTokens,
+                        });
+                    }
+                }
+            );
+            return fullText.trim();
+        });
+        telemetry?.onRequestEnd?.({ mode: 'text', model, latencyMs: Date.now() - startedAt });
+        return result;
+    } catch (error: any) {
+        telemetry?.onError?.({ mode: 'text', model, message: error.message });
+        throw error;
+    }
 }
 
 export async function generateJSON(
     systemPrompt: string,
     userPrompt: string,
     schemaDescription: string,
-    model: string = MODEL_CONFIG.SMART_MODEL
+    model: string = MODEL_CONFIG.SMART_MODEL,
+    telemetry?: LLMTelemetryHooks
 ): Promise<any> {
     validateModels();
 
     const userPromptText = `Goal: ${userPrompt}\n\nReturn the response in the following JSON format ONLY:\n${schemaDescription}`;
 
-    return withRetry(async () => {
-        let fullText = '';
-        let tokens: { prompt_eval_count: number; eval_count: number } | undefined;
-        await ollamaRequest(
-            `${OLLAMA_BASE_URL}/api/generate`,
-            { model, system: systemPrompt, prompt: userPromptText, stream: false },
-            TIMEOUT_MS.JSON,
-            async (res) => {
-                const chunks: any[] = [];
-                for await (const chunk of res) chunks.push(chunk);
-                const data = JSON.parse(Buffer.concat(chunks).toString());
-                fullText = data.response;
-                if (data.prompt_eval_count || data.eval_count) {
-                    tokens = {
-                        prompt_eval_count: data.prompt_eval_count || 0,
-                        eval_count: data.eval_count || 0
-                    };
+    const startedAt = Date.now();
+    telemetry?.onRequestStart?.({ mode: 'json', model });
+    try {
+        const result = await withRetry(async () => {
+            let fullText = '';
+            let tokens: { prompt_eval_count: number; eval_count: number } | undefined;
+            await ollamaRequest(
+                `${OLLAMA_BASE_URL}/api/generate`,
+                { model, system: systemPrompt, prompt: userPromptText, stream: false },
+                TIMEOUT_MS.JSON,
+                async (res) => {
+                    const chunks: any[] = [];
+                    for await (const chunk of res) chunks.push(chunk);
+                    const data = JSON.parse(Buffer.concat(chunks).toString());
+                    fullText = data.response;
+                    if (data.prompt_eval_count || data.eval_count) {
+                        tokens = {
+                            prompt_eval_count: data.prompt_eval_count || 0,
+                            eval_count: data.eval_count || 0
+                        };
+                    }
                 }
+            );
+            const parsed = JSON.parse(cleanJSON(fullText));
+            if (tokens) {
+                telemetry?.onTokenUsage?.({
+                    mode: 'json',
+                    model,
+                    promptTokens: tokens.prompt_eval_count,
+                    completionTokens: tokens.eval_count,
+                });
+                // Attach hidden metadata if possible, or we just rely on streaming for detailed tracking
+                Object.defineProperty(parsed, '__tokens', {
+                    value: tokens,
+                    enumerable: false
+                });
             }
-        );
-        const result = JSON.parse(cleanJSON(fullText));
-        if (tokens) {
-            // Attach hidden metadata if possible, or we just rely on streaming for detailed tracking
-            Object.defineProperty(result, '__tokens', {
-                value: tokens,
-                enumerable: false
-            });
-        }
+            return parsed;
+        });
+        telemetry?.onRequestEnd?.({ mode: 'json', model, latencyMs: Date.now() - startedAt });
         return result;
-    });
+    } catch (error: any) {
+        telemetry?.onError?.({ mode: 'json', model, message: error.message });
+        throw error;
+    }
 }
 
 export function cleanJSON(text: string): string {
@@ -430,7 +491,8 @@ export async function generateCodeStream(
     emitter: StreamEmitter | null,
     model: string = MODEL_CONFIG.CODING_MODEL,
     techStack: string = 'nextjs',
-    onHeartbeat?: () => void
+    onHeartbeat?: () => void,
+    telemetry?: LLMTelemetryHooks
 ): Promise<LLMResponse> {
     if (!emitter) {
         return generateCode(prompt, context, model, techStack);
@@ -449,7 +511,9 @@ ${context}
 Task: ${prompt}
 `;
 
+    const startedAt = Date.now();
     try {
+        telemetry?.onRequestStart?.({ mode: 'code_stream', model });
         let fullText = '';
         let tokens: LLMResponse['tokens'] = undefined;
         await withRetry(async () => {
@@ -526,16 +590,28 @@ Do NOT write any explanatory text. Only output files using the format above.`;
             }
         }
 
+        const streamTokenMeta = tokens as { prompt_eval_count: number; eval_count: number } | undefined;
+        if (streamTokenMeta) {
+            telemetry?.onTokenUsage?.({
+                mode: 'code_stream',
+                model,
+                promptTokens: streamTokenMeta.prompt_eval_count,
+                completionTokens: streamTokenMeta.eval_count,
+            });
+        }
         return {
             content: fullText.split('File:')[0].trim(),
             files,
             tokens
         };
     } catch (error: any) {
+        telemetry?.onError?.({ mode: 'code_stream', model, message: error.message });
         if (emitter && typeof (emitter as any).emit === 'function') {
             (emitter as any).emit({ type: 'error', message: error.message });
         }
         return { content: error.message, files: [], error: true };
+    } finally {
+        telemetry?.onRequestEnd?.({ mode: 'code_stream', model, latencyMs: Date.now() - startedAt });
     }
 }
 
@@ -546,7 +622,8 @@ export async function generateJSONStream(
     schemaDescription: string,
     emitter: StreamEmitter | null,
     model: string = MODEL_CONFIG.SMART_MODEL,
-    onHeartbeat?: () => void
+    onHeartbeat?: () => void,
+    telemetry?: LLMTelemetryHooks
 ): Promise<any> {
     if (!emitter) {
         return generateJSON(systemPrompt, userPrompt, schemaDescription, model);
@@ -557,6 +634,8 @@ export async function generateJSONStream(
     const userPromptText = `Goal: ${userPrompt}\n\nReturn the response in the following JSON format ONLY:\n${schemaDescription}`;
 
     try {
+        const startedAt = Date.now();
+        telemetry?.onRequestStart?.({ mode: 'json_stream', model });
         let fullText = '';
         let tokens: { prompt_eval_count: number; eval_count: number } | undefined;
         await withRetry(async () => {
@@ -598,13 +677,21 @@ export async function generateJSONStream(
         }
 
         if (tokens) {
+            telemetry?.onTokenUsage?.({
+                mode: 'json_stream',
+                model,
+                promptTokens: tokens.prompt_eval_count,
+                completionTokens: tokens.eval_count,
+            });
             Object.defineProperty(result, '__tokens', {
                 value: tokens,
                 enumerable: false
             });
         }
+        telemetry?.onRequestEnd?.({ mode: 'json_stream', model, latencyMs: Date.now() - startedAt });
         return result;
     } catch (error: any) {
+        telemetry?.onError?.({ mode: 'json_stream', model, message: error.message });
         if (emitter && typeof (emitter as any).emit === 'function') {
             (emitter as any).emit({ type: 'error', message: error.message });
         }

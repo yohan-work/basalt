@@ -111,6 +111,9 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
         if (typeof executeOptions?.carryDiscussionToPrompt === 'boolean') {
             params.set('carryDiscussionToPrompt', String(executeOptions.carryDiscussionToPrompt));
         }
+        if (executeOptions?.strategyPreset) {
+            params.set('strategyPreset', executeOptions.strategyPreset);
+        }
         const url = `/api/agent/stream?${params.toString()}`;
 
         (async () => {
