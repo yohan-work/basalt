@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp, Pencil, Search, ClipboardPaste, ExternalLink, ChevronDown } from 'lucide-react';
@@ -63,6 +63,174 @@ const DEFAULT_EXECUTION_OPTIONS: Required<ExecuteStreamOptions> = {
     carryDiscussionToPrompt: true,
     strategyPreset: 'balanced',
 };
+
+type MarkdownLineView = {
+    kind: 'text' | 'heading' | 'list' | 'quote' | 'code';
+    content: string;
+    level?: number;
+    indent?: number;
+    codeFence?: boolean;
+};
+
+function renderMarkdownInline(content: string): ReactNode[] {
+    const nodes: ReactNode[] = [];
+    const regex = /\*\*([^\n*]+?)\*\*|`([^`\n]+)`|~~([^\n~]+)~~|_([^_\n]+)_/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(content)) !== null) {
+        if (match.index > lastIndex) {
+            nodes.push(content.slice(lastIndex, match.index));
+        }
+
+        if (match[1] !== undefined) {
+            nodes.push(<strong key={`b-${match.index}`}>{match[1]}</strong>);
+        } else if (match[2] !== undefined) {
+            nodes.push(
+                <code
+                    key={`c-${match.index}`}
+                    className="rounded bg-background/70 px-1 py-0.5 text-[11px] font-mono"
+                >
+                    {match[2]}
+                </code>
+            );
+        } else if (match[3] !== undefined) {
+            nodes.push(<del key={`d-${match.index}`}>{match[3]}</del>);
+        } else if (match[4] !== undefined) {
+            nodes.push(<em key={`i2-${match.index}`}>{match[4]}</em>);
+        }
+
+        lastIndex = match.index + match[0].length;
+    }
+
+    if (lastIndex < content.length) {
+        nodes.push(content.slice(lastIndex));
+    }
+
+    return nodes.length ? nodes : [''];
+}
+
+function parseMarkdownLikeLine(rawLine: string, inCodeBlockRef: { value: boolean }): MarkdownLineView {
+    const line = rawLine;
+    if (inCodeBlockRef.value) {
+        if (line.trim().startsWith('```')) {
+            inCodeBlockRef.value = false;
+            return { kind: 'code', content: line, codeFence: true };
+        }
+        return { kind: 'code', content: line };
+    }
+
+    if (line.trim().startsWith('```')) {
+        inCodeBlockRef.value = true;
+        return { kind: 'code', content: line, codeFence: true };
+    }
+
+    const headingMatch = /^(#{1,6})(?:\s+(.*)|(.+))$/.exec(line);
+    if (headingMatch) {
+        return {
+            kind: 'heading',
+            content: (headingMatch[2] ?? headingMatch[3] ?? '').trim(),
+            level: Math.min(6, Math.max(1, headingMatch[1].length)),
+            indent: 0,
+        };
+    }
+
+    const bulletMatch = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(line);
+    if (bulletMatch) {
+        return { kind: 'list', content: `${bulletMatch[3]}`, indent: Math.min(2, Math.floor((bulletMatch[1].length || 0) / 2)) };
+    }
+
+    if (line.startsWith('> ')) {
+        return { kind: 'quote', content: line.slice(2) };
+    }
+
+    if (line.startsWith('>')) {
+        return { kind: 'quote', content: line.slice(1).trimStart() };
+    }
+
+    if (!line.trim()) {
+        return { kind: 'text', content: '', };
+    }
+
+    return { kind: 'text', content: line };
+}
+
+function MarkdownLikeViewer({ content, height = 300, className = '' }: { content: string; height?: number; className?: string }) {
+    const inCodeBlockRef = { value: false };
+    const lines = (content || '').replace(/\r\n/g, '\n').split('\n');
+    const parsedLines = lines.map((line) => parseMarkdownLikeLine(line, inCodeBlockRef));
+    const listIndent = (depth: number | undefined, kind: MarkdownLineView['kind']) => {
+        if (kind !== 'list') return 0;
+        return Math.max(0, (depth || 0) * 8);
+    };
+
+    return (
+        <div
+            className={`rounded-md border bg-muted/30 overflow-hidden ${className}`}
+            style={{ height }}
+        >
+            <div className="h-full overflow-y-auto px-2 py-3 text-xs">
+                <div className="text-foreground/90 font-mono">
+                    {parsedLines.map((token, index) => {
+                        if (token.kind === 'code') {
+                            return (
+                                <div
+                                    key={index}
+                                    className={`whitespace-pre-wrap break-all rounded-sm px-2 py-0.5 ${token.codeFence ? 'bg-slate-100/70 dark:bg-slate-800/40 text-slate-700 dark:text-slate-200' : 'text-slate-900 dark:text-slate-100'}`}
+                                    style={{ paddingLeft: `${listIndent(token.indent, token.kind)}px` }}
+                                >
+                                    {renderMarkdownInline(token.content || '\u00A0')}
+                                </div>
+                            );
+                        }
+
+                        if (token.kind === 'heading') {
+                            const fontSize =
+                                token.level === 1 ? 'text-sm' :
+                                    token.level === 2 ? 'text-xs' :
+                                        token.level === 3 ? 'text-[11px]' : 'text-[11px]';
+                            const fontWeight = token.level === 1 || token.level === 2 ? 'font-semibold' : 'font-medium';
+                            return (
+                                <div key={index} className={`${fontSize} ${fontWeight} mt-2 mb-1`}>
+                                    {renderMarkdownInline(token.content || '\u00A0')}
+                                </div>
+                            );
+                        }
+
+                        if (token.kind === 'quote') {
+                            return (
+                                <div key={index} className="border-l-2 border-amber-400 pl-2 text-amber-700/90 dark:text-amber-200/90 italic">
+                                    {token.content}
+                                </div>
+                            );
+                        }
+
+                        if (token.kind === 'list') {
+                            return (
+                                <div
+                                    key={index}
+                                    className="flex items-start gap-2"
+                                    style={{ paddingLeft: `${listIndent(token.indent, token.kind)}px` }}
+                                >
+                                    <span className="mt-1 h-1.5 w-1.5 rounded-full bg-muted-foreground/60 shrink-0" />
+                                    <span className="whitespace-pre-wrap break-all leading-5">
+                                        {renderMarkdownInline(token.content || '\u00A0')}
+                                    </span>
+                                </div>
+                            );
+                        }
+
+                        return (
+                            <div key={index} className="leading-6 whitespace-pre-wrap break-all">
+                                {renderMarkdownInline(token.content || '\u00A0')}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
+    );
+}
 
 function normalizeExecutionOptions(raw?: ExecuteStreamOptions): Required<ExecuteStreamOptions> {
     const discussionMode =
@@ -139,6 +307,8 @@ export function TaskDetailsModal({
     const [modifyElementRequest, setModifyElementRequest] = useState('');
     const [isModifyingElement, setIsModifyingElement] = useState(false);
     const [isReviewing, setIsReviewing] = useState(false);
+    const [originalRequestViewMode, setOriginalRequestViewMode] = useState<'text' | 'viewer'>('text');
+    const [reviewResultViewMode, setReviewResultViewMode] = useState<'text' | 'viewer'>('text');
     const [isGeneratingReviewSuggestions, setIsGeneratingReviewSuggestions] = useState(false);
     const [isApplyingReviewSuggestions, setIsApplyingReviewSuggestions] = useState(false);
     const [isDiscussionAccordionOpen, setIsDiscussionAccordionOpen] = useState(false);
@@ -700,11 +870,88 @@ export function TaskDetailsModal({
                             <div className="flex-1 overflow-y-auto p-6 space-y-6">
                                 {/* Description */}
                                 <div className="space-y-2">
-                                    <h3 className="text-sm font-medium text-muted-foreground">Original Request</h3>
-                                    <div className="p-3 bg-muted/40 rounded-md text-sm whitespace-pre-wrap">
-                                        {task.description}
+                                    <div className="flex items-center justify-between gap-2">
+                                        <h3 className="text-sm font-medium text-muted-foreground">Original Request</h3>
+                                        <div className="flex items-center gap-1.5">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant={originalRequestViewMode === 'text' ? 'secondary' : 'outline'}
+                                                onClick={() => setOriginalRequestViewMode('text')}
+                                                className="h-7 px-2 text-[11px]"
+                                                aria-pressed={originalRequestViewMode === 'text'}
+                                                aria-label="원본 요청 텍스트 보기"
+                                            >
+                                                <FileText className="h-3 w-3 mr-1" />
+                                                텍스트
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant={originalRequestViewMode === 'viewer' ? 'secondary' : 'outline'}
+                                                onClick={() => setOriginalRequestViewMode('viewer')}
+                                                className="h-7 px-2 text-[11px]"
+                                                aria-pressed={originalRequestViewMode === 'viewer'}
+                                                aria-label="원본 요청 뷰어 보기"
+                                            >
+                                                <Search className="h-3 w-3 mr-1" />
+                                                뷰어
+                                            </Button>
+                                        </div>
                                     </div>
+                                    {originalRequestViewMode === 'viewer' ? (
+                                        <MarkdownLikeViewer content={task.description} height={160} />
+                                    ) : (
+                                        <div className="p-3 bg-muted/40 rounded-md text-sm whitespace-pre-wrap">
+                                            {task.description}
+                                        </div>
+                                    )}
                                 </div>
+
+                                {/* Code Review Result */}
+                                {reviewResult && (
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                                                <Search className="w-4 h-4" />
+                                                코드 검토 결과
+                                            </h3>
+                                            <div className="flex items-center gap-1.5">
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant={reviewResultViewMode === 'text' ? 'secondary' : 'outline'}
+                                                    onClick={() => setReviewResultViewMode('text')}
+                                                    className="h-7 px-2 text-[11px]"
+                                                    aria-pressed={reviewResultViewMode === 'text'}
+                                                    aria-label="코드 검토 결과 텍스트 보기"
+                                                >
+                                                    <FileText className="h-3 w-3 mr-1" />
+                                                    텍스트
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant={reviewResultViewMode === 'viewer' ? 'secondary' : 'outline'}
+                                                    onClick={() => setReviewResultViewMode('viewer')}
+                                                    className="h-7 px-2 text-[11px]"
+                                                    aria-pressed={reviewResultViewMode === 'viewer'}
+                                                    aria-label="코드 검토 결과 뷰어 보기"
+                                                >
+                                                    <Search className="h-3 w-3 mr-1" />
+                                                    뷰어
+                                                </Button>
+                                            </div>
+                                        </div>
+                                        {reviewResultViewMode === 'viewer' ? (
+                                            <MarkdownLikeViewer content={reviewResult} height={300} className="bg-card/60" />
+                                        ) : (
+                                            <div className="p-4 rounded-md border bg-card text-sm whitespace-pre-wrap max-h-[300px] overflow-y-auto">
+                                                {reviewResult}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* Task Performance Benchmark */}
                                 <div className="space-y-3">
@@ -1048,19 +1295,6 @@ export function TaskDetailsModal({
                                         <div className={`p-3 rounded-md border text-sm ${verification.verified ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
                                             <p className="font-semibold">{verification.verified ? 'Verified Successfully' : 'Verification Failed'}</p>
                                             <p className="text-xs mt-1">{verification.notes}</p>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Code Review Result */}
-                                {reviewResult && (
-                                    <div className="space-y-3">
-                                        <h3 className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-                                            <Search className="w-4 h-4" />
-                                            코드 검토 결과
-                                        </h3>
-                                        <div className="p-4 rounded-md border bg-card text-sm whitespace-pre-wrap max-h-[300px] overflow-y-auto">
-                                            {reviewResult}
                                         </div>
                                     </div>
                                 )}
