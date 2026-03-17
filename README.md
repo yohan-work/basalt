@@ -46,8 +46,9 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - **지속적 잠금 메커니즘(Persistent Locking)**: DB 레벨의 잠금 장치를 통해 작업의 중복 실행을 방지하고 작업 안정성 확보
 - **Human-in-the-Loop (HITL)**: 파일 삭제, 주요 설정 변경 등 파괴적인 액션이 감지될 경우, 작업을 일시 정지하고 사용자의 승인(Approve) 또는 반려(Reject)를 대기하여 안전을 보장
 - **Step 사전 토론 모드**: 실행 단계에서 step마다 `consult_agents` 토론을 수행해 리스크/핸드오프 인사이트를 생성
-- **실행 옵션 제어**: `discussionMode`(`off`/`step_handoff`/`roundtable`), `maxDiscussionThoughts`, `carryDiscussionToPrompt`를 실행 시점에 제어
-- **토론/협업 메타데이터 영속화**: `metadata.executionOptions`, `metadata.executionDiscussions`, `metadata.agentCollaboration`를 저장해 실행 과정을 추적
+- **실행 옵션 제어**: `discussionMode`(`off`/`step_handoff`/`roundtable`), `maxDiscussionThoughts`, `carryDiscussionToPrompt`, `strategyPreset`(`quality_first`/`balanced`/`speed_first`/`cost_saver`)를 실행 시점에 제어
+- **토론/협업 메타데이터 영속화**: `metadata.executionOptions`, `metadata.executionDiscussions`, `metadata.agentCollaboration`, `metadata.executionMetrics`, `metadata.budgetPolicy`를 저장해 실행 과정을 추적
+- **정책 기반 스텝 실행**: step별 리스크/비용 압력에 따라 토론 실행 여부, 컨텍스트 예산, 인자 생성 모델 티어, 재시도 횟수를 동적으로 조정
 
 ### TeamOrchestrator
 
@@ -59,10 +60,12 @@ workflow에 정의된 step들을 순서대로 실행합니다. 각 step마다:
 - 에이전트별 독립 컨텍스트 매니저 운영
 - 상태를 Supabase에 영속화하여 중단 후 재개 가능
 - 액션 기반 통신 (메시지 전송, 태스크 생성/인수/리뷰/제출, 스킬 호출)
-- 라운드 시작 시 사전 토론(`discussion round`) 실행 및 `metadata.roundSummaries` 저장
+- 라운드 시작 시 조건부 사전 토론(`discussion round`) 실행 및 `metadata.roundSummaries` 저장
 - 명시적 핸드오프 액션(`handoff_task`) 지원으로 in-progress 태스크 전달
 - 팀 메시지 타입(`chat`/`discussion`/`system`) 분류 저장 및 시각화 연동
 - 팀 협업 강도(`metadata.collaboration`) 누적 저장
+- 팀 턴 제한 병렬 실행(기본 2-way) + 보드 변경 직렬 커밋으로 처리량 개선
+- `metadata.teamExecutionMetrics`에 라운드/턴/스킬/LLM 사용량 메트릭 저장
 
 ### LLM
 
@@ -148,18 +151,19 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | 메서드 | 경로 | 하는 일 |
 |--------|------|--------|
 | POST | `/api/agent/plan` | 태스크 분석 및 워크플로우 생성 |
-| POST | `/api/agent/execute` | 워크플로우 순차 실행 (`options`: `discussionMode`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`) |
+| POST | `/api/agent/execute` | 워크플로우 순차 실행 (`options`: `discussionMode`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`, `strategyPreset`) |
 | POST | `/api/agent/verify` | 결과 검증 및 Git PR 생성 |
 | POST | `/api/agent/retry` | 실패한 태스크 재시도 (실패 step부터 재개) |
 | POST | `/api/agent/skills` | 스킬 동적 실행 (`skillName`, `args`, 선택 `projectPath`) |
-| GET | `/api/agent/stream` | SSE 실시간 진행 스트리밍 (`taskId`, `action`, 선택: `discussionMode`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`) |
+| GET | `/api/agent/stream` | SSE 실시간 진행 스트리밍 (`taskId`, `action`, 선택: `discussionMode`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`, `strategyPreset`) |
 | POST | `/api/agent/edit-completed` | 완료/검토/테스트 단계 태스크의 코드에 사용자 지시사항 적용 (`taskId`, `instructions`) |
 | POST | `/api/agent/modify-element` | 완료 결과물의 특정 요소만 수정 (`taskId`, `filePath`, `elementDescriptor`, `request`) |
 | POST | `/api/agent/review` | 태스크 결과물 코드 검토 실행, 결과를 `metadata.reviewResult`에 저장 |
 | GET | `/api/project/components` | 프로젝트(및 선택 시 특정 태스크)의 컴포넌트 목록 (`projectId`, 선택 `taskId`) |
 | POST | `/api/system/dialog` | macOS 폴더 선택 다이얼로그 |
 | POST | `/api/tts` | 텍스트를 음성으로 변환 (edge-tts-universal). `{ text, voice, rate?, pitch? }` → `audio/mpeg` 스트림 반환 |
-| POST | `/api/team/execute` | 팀 협업 오케스트레이션 (최대 5분, 선택: `discussionMode`) |
+| POST | `/api/team/execute` | 팀 협업 오케스트레이션. 기본 비동기(202) 실행 + `runId` 반환, 선택: `discussionMode`, `strategyPreset`, `waitForCompletion` |
+| GET | `/api/team/execute` | 팀 실행 상태 조회 (`runId`) |
 
 ### 추가 기능 구현 내역
 
@@ -199,7 +203,25 @@ step/action/participants/thoughts/createdAt 정보를 카드 형태로 표시하
 `From -> To` 가중치, row/col 합계를 통해 협업 흐름을 정량적으로 파악할 수 있습니다.
 
 **Tasks.metadata 추가 필드**:  
-`attachedComponentPaths`(string[]), `editInProgress`/`modifyElementInProgress`(락 플래그), `reviewResult`/`reviewAt`(코드 검토 결과), `executionOptions`, `executionDiscussions`, `agentCollaboration`.
+`attachedComponentPaths`(string[]), `editInProgress`/`modifyElementInProgress`(락 플래그), `reviewResult`/`reviewAt`(코드 검토 결과), `executionOptions`, `executionDiscussions`, `agentCollaboration`, `executionMetrics`, `budgetPolicy`, `teamExecutionMetrics`.
+
+### 운영 시나리오 가이드
+
+`strategyPreset`을 기준으로 먼저 선택한 뒤, 필요한 경우 `discussionMode`를 수동 오버라이드하는 방식을 권장합니다.
+
+- `quality_first`: 고난도 기능 구현, 대규모 리팩터링, 릴리즈 직전 안정화 작업
+  - 기본값: 토론 적극 활용(`roundtable`), 높은 토큰/재시도 예산
+- `balanced`: 일반적인 기능 개발/수정의 기본 운영 모드
+  - 기본값: 품질과 속도 균형, 핵심 step만 토론
+- `speed_first`: 빠른 프로토타이핑, 데모용 초안, 단순 UI/문구 수정
+  - 기본값: 토론 축소, 컨텍스트/재시도 보수 운용
+- `cost_saver`: 반복 태스크 대량 처리, 저비용 배치 실행
+  - 기본값: 토론 최소화(`off` 우선), 토큰 예산 우선
+
+토론 모드 선택 기준:
+- `roundtable`: 요구사항 불명확, 여러 에이전트 간 의존성이 높은 작업
+- `step_handoff`: 일반적인 멀티-step 구현(권장 기본값)
+- `off`: 경로 확인/단순 읽기/정적 변경 등 저위험 step 중심 실행
 
 ### Components
 
