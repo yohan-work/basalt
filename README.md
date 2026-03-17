@@ -5,6 +5,22 @@
 
 ---
 
+## 문서 구조
+
+기능별 상세 문서는 분리 문서로 정리했습니다.  
+`README.md`는 프로젝트 개요/진입점 역할을 유지하고, 자세한 내용은 아래 문서에서 확인하세요.
+
+- [docs/README.md](docs/README.md): 문서 인덱스
+- [docs/architecture/orchestrator.md](docs/architecture/orchestrator.md): Orchestrator 동작
+- [docs/architecture/team-orchestrator.md](docs/architecture/team-orchestrator.md): 팀 오케스트레이션
+- [docs/llm.md](docs/llm.md): LLM 구성/안정성
+- [docs/agents-skills.md](docs/agents-skills.md): 에이전트·스킬 정의
+- [docs/api.md](docs/api.md): API 상세
+- [docs/features.md](docs/features.md): 기능별 상세
+- [docs/ui-components.md](docs/ui-components.md): UI/컴포넌트 카탈로그
+- [docs/setup.md](docs/setup.md): 설치·실행·스크립트
+- [docs/stack.md](docs/stack.md): 스택 요약
+
 ## 어떻게 돌아가나요?
 
 ### 전체 흐름
