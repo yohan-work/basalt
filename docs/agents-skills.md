@@ -1,6 +1,26 @@
 # Agents와 Skills
 
+태그: `#agent` `#skill` `#workflow` `#loader`
+
 이 문서는 Basalt의 실행 주체와 실행 단위를 한 번에 정리합니다.
+
+## 공통 계약
+
+### 목표
+- 태스크 특성에 맞는 에이전트-스킬 조합으로 예측 가능한 실행 경로를 보장
+
+### 입력
+- 태스크 상태, workflow step, 프로젝트 컨텍스트
+
+### 제약
+- 에이전트 역할 경계 침범 금지
+- 위험 동작은 HITL 또는 승인 단계로 분기
+
+### 출력
+- step 실행 결과(성공/실패), 필요시 경고 및 후속 제안
+
+### 성공기준
+- 요청된 단계가 계약된 스킬로 수행되고 결과 메타가 적재됨
 
 ## 에이전트
 
@@ -31,3 +51,7 @@
 - 에이전트 오케스트레이션: `app/api/agent/plan`, `app/api/agent/execute`
 - 스킬 실행: `app/api/agent/skills`
 - 동적 API/행동 추가 시: `lib/agent-loader.ts`, `app/api/agent/execute/route.ts`
+
+## 계약 문서
+
+- 에이전트/스킬 계약 상세: `docs/prompting/agent-skill-contracts.md`

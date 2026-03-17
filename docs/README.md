@@ -27,6 +27,21 @@
 - `agents-skills.md`  
   - 에이전트 정의, SKILL/AGENT 동작, 동적 로더 연동
 
+### 프롬프트 엔지니어링
+
+- `prompting/contract-template.md`  
+  - 계약 표준 템플릿(목표/입력/제약/출력/성공기준)
+- `prompting/api-contracts.md`  
+  - API 단위 실행 계약(필수/선택 필드, 성공 조건)
+- `prompting/agent-skill-contracts.md`  
+  - 에이전트/스킬별 계약(목표, 제약, 출력)
+- `prompting/prompt-families.md`  
+  - Planning/Execution/Review/Editing/Approval 패밀리
+- `prompting/eval-metric.md`  
+  - 프롬프트 성능 측정 지표
+- `prompting/failure-log-template.md`  
+  - 실패 패턴 기록 및 재학습 템플릿
+
 ### UI/구성
 
 - `ui-components.md`  

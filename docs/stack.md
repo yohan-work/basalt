@@ -1,5 +1,7 @@
 # 기술 스택
 
+태그: `#stack` `#dependencies` `#infra`
+
 ## 프레임워크/런타임
 
 - Next.js 16 (App Router, React Compiler)

@@ -77,8 +77,22 @@ export function DoneTasksArchive() {
     const handleDelete = async (e: React.MouseEvent, task: Task) => {
         e.stopPropagation();
         if (!confirm(`"${task.title}" 태스크를 삭제하시겠습니까?\n(관련 로그도 함께 삭제됩니다)`)) return;
-        await supabase.from('Execution_Logs').delete().eq('task_id', task.id);
-        await supabase.from('Tasks').delete().eq('id', task.id);
+
+        const { error: logsError } = await supabase.from('Execution_Logs').delete().eq('task_id', task.id);
+        if (logsError) {
+            console.error('Logs delete failed:', logsError);
+        }
+
+        const { error: taskDeleteError } = await supabase.from('Tasks').delete().eq('id', task.id);
+        if (taskDeleteError) {
+            console.error('Delete failed:', taskDeleteError);
+            alert('삭제 실패: ' + taskDeleteError.message);
+            return;
+        }
+
+        setTasks(prev => prev.filter(t => t.id !== task.id));
+        setSelectedTask(prev => (prev && prev.id === task.id ? null : prev));
+        setIsDetailsOpen(false);
     };
 
     const formatDate = (iso: string) => {

@@ -1,5 +1,7 @@
 # 설치·실행·운영 가이드
 
+태그: `#ops` `#setup` `#script` `#environment`
+
 ## 빠른 시작
 
 ```bash

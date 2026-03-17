@@ -1,6 +1,26 @@
 # Orchestrator 아키텍처
 
+태그: `#architecture` `#orchestrator` `#workflow` `#metadata`
+
 Basalt의 단일 태스크 실행 핵심은 `lib/agents/Orchestrator.ts`입니다.
+
+## 계약
+
+### 목표
+- 태스크 실행을 단계적으로 진행하고 상태/메타데이터를 안정적으로 보존
+
+### 입력
+- 작업 상태, workflow 정의, 실행 옵션
+
+### 제약
+- 실패 시 재시도 정책 준수
+- 승인 필요 상태는 HITL로 분기
+
+### 출력
+- 상태 전이 로그, 실행 토론/메타 데이터
+
+### 성공기준
+- step 단위 실행이 계획대로 완료되거나 실패 지점을 명확히 저장
 
 ## 처리 흐름
 

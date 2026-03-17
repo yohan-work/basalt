@@ -65,7 +65,13 @@ export function KanbanBoard() {
 
     // SSE stream for real-time progress
     const stream = useEventStream({
-        onError: (msg) => showActionError(`Stream error: ${msg}`),
+        onError: (msg) => {
+            showActionError(`Stream error: ${msg}`);
+            void fetchTasks(false);
+        },
+        onDone: () => {
+            void fetchTasks(false);
+        },
     });
 
     // Realtime 구독 — 마운트 시 1회만 생성, selectedTask 변경과 무관
@@ -144,10 +150,23 @@ export function KanbanBoard() {
             newTask.metadata = { attachedComponentPaths: taskData.attachedComponentPaths };
         }
 
-        const { error } = await supabase.from('Tasks').insert(newTask);
+        const { data: createdTask, error } = await supabase.from('Tasks')
+            .insert(newTask)
+            .select('*')
+            .single();
         if (error) {
             console.error('Error creating task:', error);
             showActionError('태스크 생성에 실패했습니다: ' + error.message);
+            return;
+        }
+
+        if (createdTask) {
+            setTasks(prev => {
+                if (prev.some(task => task.id === createdTask.id)) {
+                    return prev;
+                }
+                return [...prev, createdTask as Task];
+            });
         }
     };
 
@@ -286,11 +305,22 @@ export function KanbanBoard() {
             const { error } = await supabase.from('Tasks').delete().eq('id', task.id);
             if (error) {
                 console.error('Delete failed:', error);
-                alert('삭제 실패: ' + error.message);
+                showActionError('삭제 실패: ' + error.message);
+                return;
             }
-            // Realtime subscription will handle UI update
+
+            setTasks(prev => prev.filter(t => t.id !== task.id));
+            setSelectedTask(prev => (prev && prev.id === task.id ? null : prev));
+            setIsDetailsOpen(false);
+            setProcessingTaskIds(prev => {
+                const next = new Set(prev);
+                next.delete(task.id);
+                return next;
+            });
+            void fetchTasks(false);
         } catch (error) {
             console.error('Delete error:', error);
+            showActionError('삭제 중 오류가 발생했습니다.');
         }
     };
 

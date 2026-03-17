@@ -1,5 +1,7 @@
 # UI 및 컴포넌트 가이드
 
+태그: `#ui` `#components` `#analytics`
+
 Basalt 핵심 화면 요소는 `components/` 기준으로 관리됩니다.
 
 ## 핵심 컴포넌트

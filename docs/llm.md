@@ -1,5 +1,7 @@
 # LLM 운영 가이드
 
+태그: `#llm` `#model` `#stability` `#timeout`
+
 Basalt의 LLM 호출은 `lib/llm.ts`에서 공통 처리됩니다.
 
 ## 모델 구성

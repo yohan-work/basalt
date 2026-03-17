@@ -1,6 +1,26 @@
 # TeamOrchestrator 아키텍처
 
+태그: `#architecture` `#team` `#orchestration` `#chat`
+
 멀티 에이전트 협업은 `lib/agents/TeamOrchestrator.ts`에서 처리합니다.
+
+## 계약
+
+### 목표
+- 다중 에이전트 협업에서 라운드/메시지 기반 작업 분배와 전달 흔적을 관리
+
+### 입력
+- 팀 실행 요청, 팀 보드 상태, 협업 설정
+
+### 제약
+- 라운드/turn 제한 준수
+- 과도한 동시 처리로 인한 race condition 억제
+
+### 출력
+- 라운드 요약, 협업 메트릭, 에이전트 상태
+
+### 성공기준
+- 회차 종료 시 `roundSummaries` 및 `teamExecutionMetrics`가 갱신됨
 
 ## 핵심 개념
 
