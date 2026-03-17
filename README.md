@@ -75,8 +75,8 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 2. **코드 생성** — `write_code` 같은 스킬에서 직접 코드를 생성할 때
 
 안정성을 위해 다음 기능이 내장되어 있습니다:
-- **Exponential backoff 재시도** (최대 3회, 1s → 2s → 4s)
-- **AbortController 기반 타임아웃** (코드 생성 120초, JSON 생성 60초)
+- **Exponential backoff 재시도** (최대 3회, 0.5초 → 1초 → 2초)
+- **AbortController 기반 타임아웃** (코드 생성 180초, JSON 생성 90초)
 - **환경변수 기반 설정** (`OLLAMA_BASE_URL`, 모델 오버라이드)
 - **SSE 스트리밍 모드** — `stream: true`로 Ollama API 호출 시 토큰 단위 실시간 전송 지원 (`generateCodeStream`, `generateJSONStream`)
 - **지능형 워크플로우 최적화**: 특정 예시(로그인 페이지 등)에 고착되지 않도록 가이드라인을 추상화하여 사용자 의도 정확도 향상
@@ -91,7 +91,7 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 |------|----------|-------------------|
 | 빠른 응답 (FAST) | `llama3.2:latest` | `FAST_MODEL` |
 | 분석/추론 (SMART) | `gemma3:latest` | `SMART_MODEL` |
-| 코드 생성 (CODING) | `gpt-oss:20b` | `CODING_MODEL` |
+| 코드 생성 (CODING) | `qwen2.5-coder:7b` | `CODING_MODEL` |
 
 ### Agents
 
@@ -158,8 +158,15 @@ Ollama 서버와 통신합니다. 두 가지 용도로 씁니다:
 | GET | `/api/agent/stream` | SSE 실시간 진행 스트리밍 (`taskId`, `action`, 선택: `discussionMode`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`, `strategyPreset`) |
 | POST | `/api/agent/edit-completed` | 완료/검토/테스트 단계 태스크의 코드에 사용자 지시사항 적용 (`taskId`, `instructions`) |
 | POST | `/api/agent/modify-element` | 완료 결과물의 특정 요소만 수정 (`taskId`, `filePath`, `elementDescriptor`, `request`) |
+| POST | `/api/agent/review/suggestions` | 코드 리뷰 결과 기반 반영 제안 생성 (`taskId`) |
+| POST | `/api/agent/review/apply` | 리뷰 제안 적용 (`taskId`, `selectedFilePaths`) |
+| POST | `/api/agent/patch-file` | 완료/검토/테스트 단계에서 diff의 특정 파일 직접 패치 (`taskId`, `filePath`, `content`) |
+| POST | `/api/agent/approve` | Review 상태 태스크를 done 상태로 승인 |
+| POST | `/api/agent/discuss` | TaskDetails 모달 기준의 브레인스토밍 토론 생성 |
+| POST | `/api/agent/enhance-prompt` | 사용자 초안을 실행용 프롬프트 형태로 확장 |
 | POST | `/api/agent/review` | 태스크 결과물 코드 검토 실행, 결과를 `metadata.reviewResult`에 저장 |
 | GET | `/api/project/components` | 프로젝트(및 선택 시 특정 태스크)의 컴포넌트 목록 (`projectId`, 선택 `taskId`) |
+| GET | `/api/project/dev-server-info` | 프로젝트 dev 서버 포트 추론 및 URL 확인 |
 | POST | `/api/system/dialog` | macOS 폴더 선택 다이얼로그 |
 | POST | `/api/tts` | 텍스트를 음성으로 변환 (edge-tts-universal). `{ text, voice, rate?, pitch? }` → `audio/mpeg` 스트림 반환 |
 | POST | `/api/team/execute` | 팀 협업 오케스트레이션. 기본 비동기(202) 실행 + `runId` 반환, 선택: `discussionMode`, `strategyPreset`, `waitForCompletion` |
@@ -179,11 +186,15 @@ status가 `testing`, `review`, `done`인 태스크의 결과물(`metadata.fileCh
 **4. 코드 검토**  
 TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_code_review` 스킬로 태스크의 fileChanges(또는 프로젝트 코드)를 검토 → 결과를 `metadata.reviewResult`, `metadata.reviewAt`에 저장하고 Details 탭 "코드 검토 결과"에 표시합니다.
 
-**5. react-grab 연동 (요소 선택 → AI 수정)**  
-- **클립보드 붙여넣기**: 미리보기(에이전트가 만든 앱)에서 [react-grab](https://github.com/aidenybai/react-grab)으로 요소 선택 후 Cmd+C(또는 Ctrl+C)로 복사 → Basalt TaskDetailsModal Changes 탭에서 "요소 컨텍스트 붙여넣기"로 파일/요소 설명을 채운 뒤 수정 요청 입력 후 "이 요소 수정 요청"으로 전송.
-- **미리보기에서 바로 보내기**: Basalt에서 "미리보기에서 요소 선택"으로 프로젝트 미리보기를 새 창에 연 뒤, **해당 프로젝트**에 react-grab + Basalt용 플러그인을 넣으면, 요소 선택 후 컨텍스트 메뉴 "Basalt로 보내기"로 Basalt 쪽 수정 폼에 자동 반영됩니다. 플러그인 코드는 [docs/react-grab-basalt-plugin.md](docs/react-grab-basalt-plugin.md) 참고.
+**5. 리뷰 제안 생성/적용**  
+코드 검토 결과는 `POST /api/agent/review/suggestions`에서 제안안으로 정제되며, `POST /api/agent/review/apply`로 선택 파일만 선별 적용할 수 있습니다. 또한 `CodeDiffViewer`에서 특정 파일의 내용 편집은 `POST /api/agent/patch-file`로 직접 적용됩니다(테스트/리뷰/완료 상태에서만 허용).
 
-**6. 에이전트 음성 대화 (TTS)**  
+**6. react-grab 연동 (요소 선택 → AI 수정)**  
+- **클립보드 붙여넣기**: 미리보기(에이전트가 만든 앱)에서 [react-grab](https://github.com/aidenybai/react-grab)으로 요소 선택 후 Cmd+C(또는 Ctrl+C)로 복사 → Basalt TaskDetailsModal Changes 탭에서 "요소 컨텍스트 붙여넣기"로 파일/요소 설명을 채운 뒤 수정 요청 입력 후 "이 요소 수정 요청"으로 전송.
+- **미리보기에서 바로 보내기**: Basalt에서 "미리보기에서 요소 선택"으로 프로젝트 미리보기를 새 창에 연 뒤, **해당 프로젝트**에 react-grab + Basalt용 플러그인을 넣으면, 요소 선택 후 컨텍스트 메뉴 "Basalt로 보내기"로 Basalt 쪽 수정 폼에 자동 반영됩니다.
+  - 본 저장소에는 현재 플러그인 문서가 포함되어 있지 않으며, 연동은 별도 플러그인 경로로 적용해야 합니다.
+
+**7. 에이전트 음성 대화 (TTS)**  
 에이전트들의 브레인스토밍 및 팀 채팅 대화를 텍스트뿐 아니라 음성(TTS)으로도 들을 수 있습니다. `edge-tts-universal`(Microsoft Neural TTS)을 주력으로, Web Speech API를 폴백으로 사용하는 이중 구조입니다.
 - **에이전트별 고유 음성**: 각 에이전트 역할에 서로 다른 한국어 Neural 음성이 할당됩니다 (`lib/tts/voice-map.ts`). PM은 `ko-KR-SunHiNeural`(여성), Lead는 `ko-KR-HyunsuMultilingualNeural`(남성), Dev는 `ko-KR-InJoonNeural`(남성) 등.
 - **자동 재생**: Virtual Office(AgentDiscussion)와 Team Chat(ChatChannel)에서 새 메시지가 도착하면 해당 에이전트의 음성으로 자동 재생됩니다.
@@ -194,16 +205,16 @@ TaskDetailsModal "코드 검토 실행" → `POST /api/agent/review` → `deep_c
 - **자동 폴백**: edge-tts API 실패 시 브라우저 내장 Web Speech API로 자동 전환됩니다.
 - **서버 사이드 TTS**: `POST /api/tts` 엔드포인트에서 `edge-tts-universal`로 오디오를 생성하여 MP3 스트림으로 반환합니다. API 키 불필요, 완전 무료.
 
-**7. 실행 토론 시각화 (Execution Discussions)**  
+**8. 실행 토론 시각화 (Execution Discussions)**  
 Orchestrator가 각 step 실행 전에 생성한 토론 인사이트(`metadata.executionDiscussions`)를 `TaskDetailsModal`에서 확인할 수 있습니다.  
 step/action/participants/thoughts/createdAt 정보를 카드 형태로 표시하며, 아코디언 UI(기본 닫힘)로 필요할 때만 확장해 볼 수 있습니다.
 
-**8. 협업 관계 시각화 (Agent Collaboration Matrix)**  
+**9. 협업 관계 시각화 (Agent Collaboration Matrix)**  
 에이전트 간 협업 강도(`metadata.agentCollaboration`, 팀 모드의 경우 `teamState.metadata.collaboration`)를 매트릭스로 시각화합니다.  
 `From -> To` 가중치, row/col 합계를 통해 협업 흐름을 정량적으로 파악할 수 있습니다.
 
 **Tasks.metadata 추가 필드**:  
-`attachedComponentPaths`(string[]), `editInProgress`/`modifyElementInProgress`(락 플래그), `reviewResult`/`reviewAt`(코드 검토 결과), `executionOptions`, `executionDiscussions`, `agentCollaboration`, `executionMetrics`, `budgetPolicy`, `teamExecutionMetrics`.
+`attachedComponentPaths`(string[]), `editInProgress`/`modifyElementInProgress`(락 플래그), `reviewResult`/`reviewAt`(코드 검토 결과), `reviewSuggestions`/`reviewSuggestionsAppliedAt`(리뷰 제안 적용 이력), `executionOptions`, `executionDiscussions`, `agentCollaboration`, `executionMetrics`, `budgetPolicy`, `teamExecutionMetrics`.
 
 ### 운영 시나리오 가이드
 
@@ -234,9 +245,12 @@ step/action/participants/thoughts/createdAt 정보를 카드 형태로 표시하
 | `KanbanBoard` | 6개 컬럼(Request, Plan, Dev, Test, Review, Failed) 칸반 보드. Supabase 실시간 구독. SSE 기반 액션 스트리밍. 스켈레톤 로딩, 에러 토스트, 빈 상태 표시 |
 | `LogViewer` | 실행 로그 실시간 뷰어. 타입별 컬러 구분 (THOUGHT, ACTION, RESULT, ERROR). `taskId` 기반 필터링 및 ID 기반 중복 제거 지원 |
 | `AgentDiscussion` | **Basalt Virtual Office**. 플로팅 카드 형태의 룸들과 점선 그리드 배경을 가진 2.5D 탑다운 가상 오피스. 에이전트들이 작업 상태에 따라 Boardroom, Patio, Engineering Hub 등으로 이동하며, 대기 중일 때는 자연스러운 배회(Wandering) 및 각자의 위치에서 배경 업무(Working Animation)를 수행합니다. 브레인스토밍 전 과정(시작/수립 결론 포함)을 누락 없이 실시간 스트리밍합니다. **TTS 토글**로 에이전트별 고유 음성 자동 재생, 메시지별 개별 재생 버튼, 발화 중 사운드 웨이브 시각 효과 지원 |
+| `DoneTasksArchive` | 완료 상태 태스크 보관 페이지를 제공하는 아카이브 뷰. |
+| `IncomingReactGrabProvider` | `react-grab`에서 전달된 요소 선택 context를 TaskDetails 모달에 전달 |
 | `OfficeLayout` | 점선 그리드(Dotted Grid) 배경 위에 각 공간(Boardroom, Patio, Hub)을 분리된 플로팅 카드로 세련되게 구현한 확장 가능한 오피스 레이아웃 |
 | `AgentAvatar` | 탑다운 시점에서 레고(Lego) 캐릭터 형태로 디자인된 전신 아바타. `framer-motion`을 통해 이동, 발화, 생각(Thought), 배경 업무(Working), 그리고 시선(Gaze) 애니메이션을 역동적으로 처리하는 심리스한 컴포넌트 |
 | `TaskDetailsModal` | 태스크 상세 모달. Details/Live/Changes/Brainstorm/Live Logs 탭 통합. 85vh 고정 높이 레이아웃. **Discussion Controls**(토론 모드/thought 수/prompt 반영), **Execution Discussions**(아코디언), **Agent Collaboration Matrix** 시각화 지원. testing/review/done 시 **코드 수정 요청**, **특정 요소 수정 요청**(Changes 탭), **코드 검토 실행** 및 검토 결과 표시 |
+| `ProjectPreviewPanel` | 프로젝트 미리보기(iframe) + 포트 지정 + 새 창 열기 제공. |
 | `ExecutionDiscussionTimeline` | step별 실행 토론 기록(`executionDiscussions`)을 타임라인 카드로 표시 (참여자, thought type, 생성 시각) |
 | `CreateTaskModal` | 태스크 생성 폼 (Radix Dialog 기반). 8종 템플릿 선택 지원. 제목, 설명, 우선순위. 프로젝트 선택 시 **사용할 컴포넌트 선택**(`components/` 목록, 생성 시 `metadata.attachedComponentPaths` 반영). Cmd+Enter 단축키, 폼 자동 초기화 |
 | `CodeDiffViewer` | 파일 변경 diff 뷰어. 사이드바 파일 목록 + split/unified diff. 신규/수정 파일 구분. 다크모드 지원 |
@@ -253,9 +267,11 @@ step/action/participants/thoughts/createdAt 정보를 카드 형태로 표시하
 | 컴포넌트 | 하는 일 |
 |----------|--------|
 | `AnalyticsDashboard` | 분석 대시보드. 성공률, 에이전트 통계, 에러 분석 |
+| `DailyTokenChart` | 토큰 사용량 일별 추이 차트 |
 | `AgentActivityChart` | Recharts 기반 에이전트 활동 바 차트 |
 | `AgentActionRadarChart` | 에이전트들의 액션 분포 및 전문성 영역(Topology)을 보여주는 방사형 차트 |
 | `ErrorRankingTable` | 빈도순 에러 랭킹 테이블 |
+| `PerformanceBenchmarkPanel` | 기간 기반 태스크 성능 비교 패널 (성공률·토큰·리드타임) |
 | `StatCard` | 통계 카드 (아이콘, 값, 트렌드). API 토큰 사용량 기반 **Cost Saved (비용 절감액)** 추정 기능 지원 |
 | `TeamActivityView` | 팀 활동 라이브 뷰 (3초 폴링). Board / Rounds / Collaboration 탭으로 팀 보드, 라운드 요약(`roundSummaries`), 협업 매트릭스 표시 |
 | `ChatChannel` | 팀 에이전트 간 채팅 인터페이스. 메시지 타입(`chat`/`discussion`/`system`) 필터, handoff 시스템 메시지 강조, TTS 토글/자동 재생/개별 재생 지원 |
@@ -263,7 +279,7 @@ step/action/participants/thoughts/createdAt 정보를 카드 형태로 표시하
 
 **UI 컴포넌트 (shadcn/ui):**
 
-`components/ui/` 아래 Radix UI 기반 재사용 컴포넌트들: Avatar, Badge, Button, Card, Dialog, Input, Label, ScrollArea, Select, Separator, Skeleton, Table, Tabs
+`components/ui/` 아래 Radix UI 기반 재사용 컴포넌트들: Avatar, Badge, Button, Calendar, Card, DateRangePicker, Dialog, Input, Label, Popover, ScrollArea, Select, Separator, Skeleton, Table, Tabs
 
 ---
 
@@ -295,7 +311,8 @@ cd basalt
 npm install
 
 # 환경 변수 설정
-cp .env.example .env.local
+# 환경별 값은 `.env.local`에 직접 작성
+# (현재 저장소에는 `.env.example`이 포함되어 있지 않음)
 # .env.local 편집해서 Supabase 정보 입력
 
 # 개발 서버
@@ -321,7 +338,7 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434    # Ollama 서버 주소 (기본값)
 # --- 선택 (모델 오버라이드) ---
 FAST_MODEL=llama3.2:latest                 # 빠른 응답용
 SMART_MODEL=gemma3:latest                  # 분석/추론용
-CODING_MODEL=gpt-oss:20b                   # 코드 생성용
+CODING_MODEL=qwen2.5-coder:7b               # 코드 생성용
 
 # --- 선택 (개발) ---
 MOCK_LLM=false                             # true로 설정 시 LLM 모킹
@@ -334,10 +351,11 @@ MOCK_LLM=false                             # true로 설정 시 LLM 모킹
 ```
 basalt/
 ├── app/                          # Next.js App Router 기반의 웹 프론트엔드 및 API
+│   ├── done/                      # 완료 태스크 보관함 페이지
 │   ├── analytics/                # 분석 대시보드 페이지 (에이전트 통계, 에러 랭킹 등)
 │   ├── api/                      # 서버측 API 엔드포인트
-│   │   ├── agent/                # 에이전트 제어 (plan, execute, verify, retry, skills, stream, edit-completed, modify-element, review)
-│   │   ├── project/              # 프로젝트 연동 (components)
+│   │   ├── agent/                # 에이전트 제어 (plan, execute, verify, retry, skills, stream, edit-completed, patch-file, modify-element, review, review/suggestions, review/apply, approve, discuss, enhance-prompt)
+│   │   ├── project/              # 프로젝트 연동 (components, dev-server-info)
 │   │   ├── system/               # 시스템 유틸리티 (macOS 다이얼로그 등)
 │   │   ├── team/                 # 팀 협업 오케스트레이션 API
 │   │   └── tts/                  # TTS 음성 생성 API (edge-tts-universal → MP3 스트림)
@@ -423,6 +441,7 @@ basalt/
 | `test-loader.ts` | AgentLoader 기능 테스트 |
 | `test-orchestrator.ts` | Orchestrator 통합 테스트 (plan → execute → verify) |
 | `test-plan-generation.ts` | 워크플로우 생성 테스트 |
+| `test-extraction.ts` | 추출기/파서 유틸 테스트 |
 
 ---
 
