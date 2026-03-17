@@ -17,6 +17,9 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
     const taskId = req.nextUrl.searchParams.get('taskId');
     const action = req.nextUrl.searchParams.get('action');
+    const discussionModeParam = req.nextUrl.searchParams.get('discussionMode');
+    const maxDiscussionThoughtsParam = req.nextUrl.searchParams.get('maxDiscussionThoughts');
+    const carryDiscussionToPromptParam = req.nextUrl.searchParams.get('carryDiscussionToPrompt');
 
     if (!taskId || !action) {
         return new Response(
@@ -38,6 +41,13 @@ export async function GET(req: NextRequest) {
         async start(controller) {
             const emitter = new StreamEmitter();
             emitter.attach(controller);
+            const executionOptions = {
+                discussionMode: (discussionModeParam as 'off' | 'step_handoff' | 'roundtable' | null) || undefined,
+                maxDiscussionThoughts: maxDiscussionThoughtsParam ? Number(maxDiscussionThoughtsParam) : undefined,
+                carryDiscussionToPrompt: carryDiscussionToPromptParam
+                    ? carryDiscussionToPromptParam === 'true'
+                    : undefined,
+            };
 
             // Set up heartbeat to keep connection alive
             const heartbeatInterval = setInterval(() => {
@@ -66,7 +76,7 @@ export async function GET(req: NextRequest) {
                         break;
                     }
                     case 'execute': {
-                        await orchestrator.execute();
+                        await orchestrator.execute(undefined, executionOptions);
                         break;
                     }
                     case 'verify': {
@@ -78,9 +88,10 @@ export async function GET(req: NextRequest) {
                         break;
                     }
                 }
-            } catch (error: any) {
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : 'Unknown error';
                 console.error(`SSE Stream Error [${action}]:`, error);
-                emitter.emit({ type: 'error', message: error.message });
+                emitter.emit({ type: 'error', message });
                 emitter.emit({ type: 'done', status: 'error' });
             } finally {
                 clearInterval(heartbeatInterval);
