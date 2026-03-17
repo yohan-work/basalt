@@ -35,12 +35,32 @@ interface ProgressInfo {
     stepStatus: 'pending' | 'running' | 'completed' | 'failed'; // 현재 step 상태
 }
 
+type DiscussionMode = 'off' | 'step_handoff' | 'roundtable';
+
+interface ExecutionOptions {
+    discussionMode?: DiscussionMode;
+    maxDiscussionThoughts?: number;
+    carryDiscussionToPrompt?: boolean;
+}
+
+type CollaborationGraph = Record<string, Record<string, {
+    weight: number;
+    reasons: string[];
+    updatedAt: string;
+}>>;
+
 export class Orchestrator {
     private taskId: string;
     private mainAgentDef: AgentDefinition;
     private contextManager: ContextManager;
     private profiler: ProjectProfiler;
     private emitter: StreamEmitter | null;
+    private collaborationGraph: CollaborationGraph = {};
+    private executionOptions: Required<ExecutionOptions> = {
+        discussionMode: 'step_handoff',
+        maxDiscussionThoughts: 3,
+        carryDiscussionToPrompt: true,
+    };
 
     // Simple in-memory lock to prevent concurrent executions of the same task
     private static runningTasks = new Set<string>();
@@ -110,6 +130,173 @@ export class Orchestrator {
         const { data, error } = await supabase.from('Tasks').select('*').eq('id', this.taskId).single();
         if (error || !data) return null;
         return data as AgentTask;
+    }
+
+    private normalizeAgentKey(agent: string): string {
+        return String(agent || '')
+            .toLowerCase()
+            .replace(/[\s_]+/g, '-')
+            .trim();
+    }
+
+    private resolveExecutionOptions(taskMetadata: any, runtimeOptions?: ExecutionOptions): Required<ExecutionOptions> {
+        const saved = taskMetadata?.executionOptions || {};
+        const merged = {
+            discussionMode: runtimeOptions?.discussionMode ?? saved.discussionMode ?? 'step_handoff',
+            maxDiscussionThoughts: runtimeOptions?.maxDiscussionThoughts ?? saved.maxDiscussionThoughts ?? 3,
+            carryDiscussionToPrompt: runtimeOptions?.carryDiscussionToPrompt ?? saved.carryDiscussionToPrompt ?? true,
+        };
+
+        const validModes: DiscussionMode[] = ['off', 'step_handoff', 'roundtable'];
+        const discussionMode = validModes.includes(merged.discussionMode) ? merged.discussionMode : 'step_handoff';
+        const maxDiscussionThoughts = Math.max(1, Math.min(8, Number(merged.maxDiscussionThoughts) || 3));
+
+        return {
+            discussionMode,
+            maxDiscussionThoughts,
+            carryDiscussionToPrompt: Boolean(merged.carryDiscussionToPrompt),
+        };
+    }
+
+    private recordCollaboration(from: string | null | undefined, to: string | null | undefined, reason: string) {
+        const src = this.normalizeAgentKey(from || '');
+        const dst = this.normalizeAgentKey(to || '');
+        if (!src || !dst || src === dst) return;
+
+        if (!this.collaborationGraph[src]) {
+            this.collaborationGraph[src] = {};
+        }
+
+        const current = this.collaborationGraph[src][dst] || {
+            weight: 0,
+            reasons: [],
+            updatedAt: new Date().toISOString(),
+        };
+
+        current.weight += 1;
+        if (reason && !current.reasons.includes(reason)) {
+            current.reasons.push(reason);
+        }
+        current.updatedAt = new Date().toISOString();
+        this.collaborationGraph[src][dst] = current;
+    }
+
+    private seedCollaborationFromWorkflow(workflow: any) {
+        if (!workflow?.steps || !Array.isArray(workflow.steps)) return;
+        for (let i = 1; i < workflow.steps.length; i++) {
+            const prev = this.normalizeAgentKey(workflow.steps[i - 1]?.agent || '');
+            const curr = this.normalizeAgentKey(workflow.steps[i]?.agent || '');
+            if (prev && curr) {
+                this.recordCollaboration(prev, curr, 'workflow_transition');
+            }
+        }
+    }
+
+    private resolveDiscussionParticipants(workflow: any, stepIndex: number, currentAgent: string): string[] {
+        const participants = new Set<string>();
+        const current = this.normalizeAgentKey(currentAgent);
+        if (current) participants.add(current);
+        participants.add(this.normalizeAgentKey(this.mainAgentDef.role || this.mainAgentDef.name));
+
+        const prevStepAgent = this.normalizeAgentKey(workflow?.steps?.[stepIndex - 1]?.agent || '');
+        const nextStepAgent = this.normalizeAgentKey(workflow?.steps?.[stepIndex + 1]?.agent || '');
+
+        if (this.executionOptions.discussionMode === 'roundtable') {
+            const requiredAgents = workflow?.requiredAgents || workflow?.required_agents || [];
+            for (const role of requiredAgents) {
+                participants.add(this.normalizeAgentKey(role));
+            }
+        } else {
+            if (prevStepAgent) participants.add(prevStepAgent);
+            if (nextStepAgent) participants.add(nextStepAgent);
+        }
+
+        return Array.from(participants).filter(Boolean);
+    }
+
+    private async runStepDiscussion(task: AgentTask, workflow: any, stepIndex: number, step: any): Promise<string> {
+        if (this.executionOptions.discussionMode === 'off') return '';
+
+        try {
+            const allAgents = AgentLoader.listAgents().filter(a => a.name !== 'git-manager');
+            const participantRoles = this.resolveDiscussionParticipants(workflow, stepIndex, step.agent);
+            const activeAgents = allAgents.filter(a => participantRoles.includes(this.normalizeAgentKey(a.role || a.name)));
+            const participants = activeAgents.length > 0 ? activeAgents : allAgents;
+
+            const analysisForStep = {
+                summary: `Step ${stepIndex + 1} 사전 토론`,
+                required_agents: participants.map(a => a.role),
+                objective: step.description || `${step.action} 실행 품질 고도화`,
+                overallTask: task.description,
+                constraints: [
+                    '다음 step과의 핸드오프 품질 보장',
+                    '파일 경로/스킬 인자 정확성 우선',
+                    '재시도 발생 가능성을 줄이는 선제적 리스크 제거',
+                ],
+            };
+
+            const context = `${await this.profiler.getContextString()}\n\n${this.contextManager.getOptimizedContext(5000)}`;
+
+            this.emitter?.emit({ type: 'skill_execute', skill: 'consult_agents', args: `step-${stepIndex + 1}` });
+            const rawThoughts = await skills.consult_agents(
+                analysisForStep,
+                participants,
+                context,
+                this.emitter
+            );
+            const thoughts = Array.isArray(rawThoughts)
+                ? rawThoughts.slice(0, this.executionOptions.maxDiscussionThoughts)
+                : [];
+
+            if (thoughts.length === 0) return '';
+
+            let prevAgent = this.normalizeAgentKey(step.agent);
+            for (const item of thoughts) {
+                if (!item?.agent || !item?.thought) continue;
+                await this.log(item.agent, `[Step ${stepIndex + 1} 토론] ${item.thought}`, {
+                    type: 'THOUGHT',
+                    thought_type: item.type || 'idea',
+                    step: stepIndex,
+                });
+                const currentAgent = this.normalizeAgentKey(item.agent);
+                this.recordCollaboration(prevAgent, currentAgent, 'step_discussion');
+                prevAgent = currentAgent;
+            }
+
+            const { data: current } = await supabase
+                .from('Tasks')
+                .select('metadata')
+                .eq('id', this.taskId)
+                .single();
+            const existing = Array.isArray(current?.metadata?.executionDiscussions)
+                ? current.metadata.executionDiscussions
+                : [];
+            const entry = {
+                step: stepIndex,
+                action: step.action,
+                createdAt: new Date().toISOString(),
+                participants: participants.map(a => a.role),
+                thoughts,
+            };
+            await this.updateMetadata({
+                executionDiscussions: [...existing, entry],
+                agentCollaboration: this.collaborationGraph,
+            });
+            this.emitter?.emit({
+                type: 'skill_result',
+                skill: 'consult_agents',
+                summary: `Step ${stepIndex + 1} 토론 완료 (${thoughts.length}개 인사이트)`,
+            });
+
+            if (!this.executionOptions.carryDiscussionToPrompt) return '';
+
+            return thoughts
+                .map((t: any) => `- ${t.agent}: ${t.thought}`)
+                .join('\n');
+        } catch (error: any) {
+            await this.log('System', `Step discussion skipped: ${error.message}`, { type: 'WARNING' });
+            return '';
+        }
     }
 
     private getSkillFunction(skillName: string) {
@@ -182,12 +369,14 @@ export class Orchestrator {
                 if (!item.agent || !item.thought) continue;
                 console.log(`[Orchestrator] Logging thought from ${item.agent}: ${item.thought.substring(0, 30)}...`);
                 await this.log(item.agent, item.thought, { type: 'THOUGHT', thought_type: item.type || 'idea' });
+                this.recordCollaboration(mainAgentName, item.agent, 'planning_discussion');
                 // Small delay to make it feel more natural in the UI if needed
                 await new Promise(resolve => setTimeout(resolve, 300));
             }
 
 
             const workflow = await skills.create_workflow(analysis, availableAgents, codebaseContext, this.emitter);
+            this.seedCollaborationFromWorkflow(workflow);
 
             // Log the discussion wrap-up in Korean
             await this.log(mainAgentName, '에이전트 간 협의가 완료되었습니다. 수립된 워크플로우를 저장합니다.', workflow);
@@ -195,7 +384,7 @@ export class Orchestrator {
 
 
             // Save Plan to Metadata
-            await this.updateMetadata({ analysis, workflow });
+            await this.updateMetadata({ analysis, workflow, agentCollaboration: this.collaborationGraph });
 
             // Wait for user confirmation
             await this.log(mainAgentName, 'Plan created. Waiting for user approval.');
@@ -329,7 +518,7 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
         }
     }
 
-    public async execute(startFromStep?: number) {
+    public async execute(startFromStep?: number, options?: ExecutionOptions) {
         try {
             // Check if task exists and its status
             const { data: task, error: fetchError } = await supabase.from('Tasks').select('*').eq('id', this.taskId).single();
@@ -383,6 +572,16 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
             }
 
             const workflow = task.metadata.workflow;
+            this.executionOptions = this.resolveExecutionOptions(task.metadata, options);
+            this.collaborationGraph =
+                task.metadata?.agentCollaboration && typeof task.metadata.agentCollaboration === 'object'
+                    ? (task.metadata.agentCollaboration as CollaborationGraph)
+                    : {};
+            this.seedCollaborationFromWorkflow(workflow);
+            await this.updateMetadata({
+                executionOptions: this.executionOptions,
+                agentCollaboration: this.collaborationGraph
+            });
             await this.updateStatus('working');
             const mainAgentName = this.mainAgentDef.name;
             this.emitter?.emit({ type: 'phase_start', phase: 'execution', taskId: this.taskId });
@@ -463,6 +662,10 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 await this.log(mainAgentName, `Resuming execution from step ${resumeFrom + 1} of ${totalSteps}.`);
             }
 
+            let previousStepAgent: string | null = resumeFrom > 0
+                ? this.normalizeAgentKey(workflow.steps[resumeFrom - 1]?.agent || '')
+                : null;
+
             for (let stepIndex = resumeFrom; stepIndex < workflow.steps.length; stepIndex++) {
                 // Heartbeat/Lock Refresh: Update metadata periodically to show we are still alive
                 if (stepIndex > resumeFrom) {
@@ -472,10 +675,15 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 const step = workflow.steps[stepIndex];
                 const { agent, action } = step;
                 const agentRoleSlug = agent.toLowerCase().replace(/[\s_]+/g, '-');
+                this.recordCollaboration(previousStepAgent, agentRoleSlug, 'step_handoff');
 
                 try {
                     const stepAgentDef = AgentLoader.loadAgent(agentRoleSlug);
                     const skillFunc = this.getSkillFunction(action);
+                    const discussionGuidance = await this.runStepDiscussion(task, workflow, stepIndex, step);
+                    const stepGoalWithDiscussion = discussionGuidance
+                        ? `${step.description || ''}\n\n[팀 토론 인사이트]\n${discussionGuidance}`
+                        : (step.description || task.description);
 
                     // Update progress: step starting
                     await this.updateProgress({
@@ -512,9 +720,7 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
 
                                 // --- SPECIAL HANDLING: write_code uses CODING model directly ---
                                 if (action === 'write_code') {
-                                    const codePrompt = step.description
-                                        ? `${step.description}\n\nOverall task: ${task.description}`
-                                        : task.description;
+                                    const codePrompt = `${stepGoalWithDiscussion}\n\nOverall task: ${task.description}`;
 
                                     await this.log(stepAgentDef.name, `Generating code with CODING model for: ${step.description || task.description}`, { type: 'ACTION' });
                                     this.emitter?.emit({ type: 'skill_execute', skill: action, args: step.description });
@@ -590,7 +796,7 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                                     }
                                 } else {
                                     let args = await this.generateSkillArguments(
-                                        action, task.description, projectPath, techStack, step.description
+                                        action, task.description, projectPath, techStack, stepGoalWithDiscussion
                                     );
 
                                     const filesystemSkills = ['read_codebase', 'run_shell_command', 'manage_git', 'list_directory'];
@@ -662,6 +868,8 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                         completedSteps: [...completedSteps, action],
                         stepStatus: 'completed'
                     });
+                    await this.updateMetadata({ agentCollaboration: this.collaborationGraph });
+                    previousStepAgent = agentRoleSlug;
 
                     // Emit step_complete with ETA
                     const eta = this.emitter?.calculateETA(stepIndex, totalSteps) || 0;
