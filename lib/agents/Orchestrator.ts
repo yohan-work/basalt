@@ -370,6 +370,153 @@ export class Orchestrator {
         return Array.from(participants).filter(Boolean);
     }
 
+    private buildActionCatalog(): Map<string, string> {
+        const catalog = new Map<string, string>();
+
+        for (const key of Object.keys(skills)) {
+            if (typeof key === 'string' && key.trim()) {
+                catalog.set(this.normalizeAgentKey(key), key);
+            }
+        }
+
+        try {
+            const skillBriefs = AgentLoader.listSkillsBrief();
+            for (const skill of skillBriefs) {
+                catalog.set(this.normalizeAgentKey(skill.name), skill.name);
+            }
+        } catch (error) {
+            console.error('Failed to load skill briefs for action catalog:', error);
+        }
+
+        const fallbackActions = [
+            'analyze_task',
+            'create_workflow',
+            'consult_agents',
+            'read_codebase',
+            'write_code',
+            'verify_final_output',
+            'run_shell_command',
+            'lint_code',
+            'typecheck',
+            'refactor_code',
+            'check_responsive',
+            'check_environment',
+            'list_directory',
+            'apply_design_system',
+            'generate_scss',
+            'search_npm_package',
+        ];
+        for (const action of fallbackActions) {
+            catalog.set(this.normalizeAgentKey(action), action);
+        }
+
+        return catalog;
+    }
+
+    private resolveExecutionAgent(rawAgent: unknown, availableAgents: AgentDefinition[]): {
+        agentDef: AgentDefinition | null;
+        repairedAgent: string;
+        repairs: string[];
+    } {
+        const repairs: string[] = [];
+        const fallbackAgent = availableAgents.find(a => a.role === 'main-agent')
+            || availableAgents.find(a => a.role === 'software-engineer')
+            || availableAgents[0];
+
+        if (!fallbackAgent) {
+            return {
+                agentDef: null,
+                repairedAgent: '',
+                repairs: ['No available agents found for execution'],
+            };
+        }
+
+        const fallbackAgentName = fallbackAgent.role;
+        if (typeof rawAgent !== 'string' || !rawAgent.trim()) {
+            repairs.push('step.agent missing -> fallback agent used');
+            return { agentDef: fallbackAgent, repairedAgent: fallbackAgentName, repairs };
+        }
+
+        const normalized = this.normalizeAgentKey(rawAgent);
+        const exactRole = availableAgents.find(agent => this.normalizeAgentKey(agent.role) === normalized);
+        if (exactRole) {
+            return { agentDef: exactRole, repairedAgent: exactRole.role, repairs };
+        }
+
+        const exactName = availableAgents.find(agent => this.normalizeAgentKey(agent.name) === normalized);
+        if (exactName) {
+            return { agentDef: exactName, repairedAgent: exactName.role, repairs };
+        }
+
+        repairs.push(`Unknown agent "${rawAgent}" -> fallback`);
+        return { agentDef: fallbackAgent, repairedAgent: fallbackAgentName, repairs };
+    }
+
+    private resolveExecutionAction(
+        rawAction: unknown,
+        actionCatalog: Map<string, string>
+    ): {
+        action: string;
+        repaired: boolean;
+        repairs: string[];
+    } {
+        const repairs: string[] = [];
+        if (typeof rawAction !== 'string' || !rawAction.trim()) {
+            repairs.push('Missing action -> read_codebase fallback');
+            return { action: 'read_codebase', repaired: true, repairs };
+        }
+
+        const normalized = this.normalizeAgentKey(rawAction);
+        const canonicalAction = actionCatalog.get(normalized)
+            || actionCatalog.get(normalized.replace(/-/g, '_'))
+            || actionCatalog.get(normalized.replace(/_/g, '-'));
+        if (!canonicalAction) {
+            repairs.push(`Unsupported action "${rawAction}" -> read_codebase fallback`);
+            return { action: 'read_codebase', repaired: true, repairs };
+        }
+
+        if (canonicalAction !== rawAction) {
+            repairs.push(`Action "${rawAction}" normalized to "${canonicalAction}"`);
+        }
+        return { action: canonicalAction, repaired: false, repairs };
+    }
+
+    private normalizeExecutionStep(
+        step: any,
+        availableAgents: AgentDefinition[],
+        actionCatalog: Map<string, string>
+    ) {
+        const repairs: string[] = [];
+        if (!step || typeof step !== 'object') {
+            const fallback = { agent: 'software-engineer', action: 'read_codebase', description: 'Fallback step' };
+            return {
+                resolvedStep: fallback,
+                stepAgentDef: this.resolveExecutionAgent(fallback.agent, availableAgents).agentDef,
+                repairs: [...repairs, 'Invalid step shape -> replaced with fallback'],
+            };
+        }
+
+        const agentResult = this.resolveExecutionAgent(step.agent, availableAgents);
+        const actionResult = this.resolveExecutionAction(step.action, actionCatalog);
+        repairs.push(...agentResult.repairs, ...actionResult.repairs);
+
+        const resolvedStep = {
+            ...step,
+            agent: agentResult.repairedAgent,
+            action: actionResult.action,
+            description:
+                typeof step.description === 'string' && step.description.trim()
+                    ? step.description.trim()
+                    : 'Task execution step',
+        };
+
+        return {
+            resolvedStep,
+            stepAgentDef: agentResult.agentDef,
+            repairs,
+        };
+    }
+
     private sanitizePlannedWorkflow(
         workflow: any,
         analysis: any,
@@ -896,7 +1043,23 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 }
             }
 
-            const workflow = task.metadata.workflow;
+            const workflowAgents = AgentLoader.listAgents();
+            const workflowSanity = this.sanitizePlannedWorkflow(task.metadata?.workflow, task.metadata?.analysis, workflowAgents);
+            const workflow = workflowSanity.workflow;
+            if (workflowSanity.repairs.length > 0) {
+                await this.updateMetadata({
+                    executionRepairs: [
+                        ...(task.metadata?.executionRepairs || []),
+                        ...workflowSanity.repairs.map((repair, idx) => ({
+                            stage: 'runtime',
+                            step: idx,
+                            repair,
+                            at: new Date().toISOString(),
+                        })),
+                    ],
+                });
+                await this.log(mainAgentName, `워크플로우 실행 시작 전 정합성 보정 적용: ${workflowSanity.reason}`, { type: 'WARNING' });
+            }
             this.executionOptions = this.resolveExecutionOptions(task.metadata, options);
             this.budgetPolicy = this.resolveBudgetPolicy(task.metadata, this.executionOptions.strategyPreset);
             const existingMetrics = task.metadata?.executionMetrics;
@@ -1011,6 +1174,8 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
             let previousStepAgent: string | null = resumeFrom > 0
                 ? this.normalizeAgentKey(workflow.steps[resumeFrom - 1]?.agent || '')
                 : null;
+            const stepExecutionAgents = workflowAgents;
+            const actionCatalog = this.buildActionCatalog();
 
             for (let stepIndex = resumeFrom; stepIndex < workflow.steps.length; stepIndex++) {
                 // Heartbeat/Lock Refresh: Update metadata periodically to show we are still alive
@@ -1018,9 +1183,26 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                     await this.updateMetadata({ lock: { held_since: Date.now(), process_id: process.pid } }, false);
                 }
 
-                const step = workflow.steps[stepIndex];
-                const { agent, action } = step;
-                const agentRoleSlug = agent.toLowerCase().replace(/[\s_]+/g, '-');
+                const normalizedStep = this.normalizeExecutionStep(workflow.steps[stepIndex], stepExecutionAgents, actionCatalog);
+                const step = normalizedStep.resolvedStep;
+                const stepAgentDef = normalizedStep.stepAgentDef;
+                if (!stepAgentDef) {
+                    await this.log('System', `No executable agent found for step ${stepIndex + 1}`, { type: 'ERROR' });
+                    await this.updateMetadata({
+                        executionRepairs: [
+                            ...(task.metadata?.executionRepairs || []),
+                            {
+                                step: stepIndex,
+                                action: step.action,
+                                repairs: normalizedStep.repairs,
+                                timestamp: new Date().toISOString(),
+                            },
+                        ],
+                    });
+                    return;
+                }
+                const action = step.action;
+                const agentRoleSlug = this.normalizeAgentKey(stepAgentDef.role);
                 const stepPolicy = resolveStepPolicy({
                     strategyPreset: this.executionOptions.strategyPreset,
                     discussionMode: this.executionOptions.discussionMode,
@@ -1031,10 +1213,24 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                     currentTotalTokens: this.executionMetrics.totalTokens,
                     budgetPolicy: this.budgetPolicy,
                 });
+                if (normalizedStep.repairs.length > 0) {
+                    await this.updateMetadata({
+                        workflowRepairs: [
+                            ...(task.metadata?.workflowRepairs || []),
+                            ...normalizedStep.repairs.map((repair: string) => ({
+                                step: stepIndex,
+                                repair,
+                                at: new Date().toISOString(),
+                            })),
+                        ],
+                    });
+                    for (const repair of normalizedStep.repairs) {
+                        await this.log(mainAgentName, `[실행 정규화] Step ${stepIndex + 1}: ${repair}`, { type: 'WARNING' });
+                    }
+                }
                 this.recordCollaboration(previousStepAgent, agentRoleSlug, 'step_handoff');
 
                 try {
-                    const stepAgentDef = AgentLoader.loadAgent(agentRoleSlug);
                     this.activeStepIndex = stepIndex;
                     const stepMetric = this.ensureStepMetric(stepIndex, action, stepAgentDef.name);
                     stepMetric.status = 'running';
