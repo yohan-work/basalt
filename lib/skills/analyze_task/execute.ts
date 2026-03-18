@@ -1,6 +1,57 @@
 import { AgentDefinition, AgentLoader } from '@/lib/agent-loader';
 import * as llm from '@/lib/llm';
 
+function normalizeAgentKey(value: string): string {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[\s_]+/g, '-')
+        .trim();
+}
+
+function resolveRequiredAgents(raw: any, availableAgents: AgentDefinition[]): string[] {
+    const normalizedAgents = new Set<string>();
+    const requested = Array.isArray(raw) ? raw : [];
+    const availableByRole = new Map<string, AgentDefinition>();
+    const availableByName = new Map<string, AgentDefinition>();
+
+    for (const agent of availableAgents) {
+        availableByRole.set(normalizeAgentKey(agent.role), agent);
+        availableByName.set(normalizeAgentKey(agent.name), agent);
+    }
+
+    for (const candidate of requested) {
+        if (typeof candidate !== 'string') continue;
+        const normalized = normalizeAgentKey(candidate);
+        const found = availableByRole.get(normalized) || availableByName.get(normalized);
+        if (found) {
+            normalizedAgents.add(normalizeAgentKey(found.role));
+        }
+    }
+
+    const result = Array.from(normalizedAgents);
+    if (result.length > 0) return result;
+
+    const fallbackAgent = availableByRole.get('software-engineer')?.role || availableAgents[0]?.role || 'main-agent';
+    return fallbackAgent ? [normalizeAgentKey(fallbackAgent)] : ['main-agent'];
+}
+
+function sanitizeAnalysis(raw: any, taskDescription: string, availableAgents: AgentDefinition[]) {
+    const analysis = raw || {};
+    const complexity = ['low', 'medium', 'high'].includes(analysis?.complexity) ? analysis.complexity : 'medium';
+    const requiredAgents = resolveRequiredAgents(analysis?.required_agents || [], availableAgents);
+    const summary =
+        typeof analysis?.summary === 'string' && analysis.summary.trim().length > 0
+            ? analysis.summary
+            : `요청: ${taskDescription}`;
+
+    return {
+        ...analysis,
+        complexity,
+        required_agents: requiredAgents,
+        summary,
+    };
+}
+
 export async function analyze_task(
     taskDescription: string,
     availableAgents?: AgentDefinition[],
@@ -37,14 +88,15 @@ ${skillsInfo}
 }`;
 
         const analysis = await llm.generateJSONStream(systemPrompt, taskDescription, schema, emitter);
-        return analysis;
+        return sanitizeAnalysis(analysis, taskDescription, agents);
 
     } catch (e) {
         console.error('LLM Analysis Failed, falling back to heuristic', e);
+        const fallbackRequired = resolveRequiredAgents([], agents);
         return {
             complexity: 'medium',
-            required_agents: ['software-engineer'],
-            summary: 'Fallback analysis due to LLM error.'
+            required_agents: fallbackRequired,
+            summary: `Fallback analysis due to LLM error on task: ${taskDescription}`
         };
     }
 }

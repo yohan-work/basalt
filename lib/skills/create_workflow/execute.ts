@@ -1,6 +1,131 @@
 import { AgentDefinition, AgentLoader } from '@/lib/agent-loader';
 import * as llm from '@/lib/llm';
 
+function normalizeAgentKey(value: string): string {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[\s_]+/g, '-')
+        .trim();
+}
+
+function resolveAgentOrDefault(
+    candidate: unknown,
+    availableAgents: AgentDefinition[],
+    fallback: string
+): string {
+    if (typeof candidate !== 'string' || !candidate.trim()) return fallback;
+    const normalized = normalizeAgentKey(candidate);
+    const match = availableAgents.find((agent) =>
+        normalizeAgentKey(agent.role) === normalized || normalizeAgentKey(agent.name) === normalized
+    );
+    return match ? match.role : fallback;
+}
+
+function sanitizeWorkflow(workflow: any, analysis: any, availableAgents: AgentDefinition[]) {
+    const fallbackAgent =
+        availableAgents.find(agent => agent.role === 'main-agent')?.role
+        || availableAgents.find(agent => agent.role === 'software-engineer')?.role
+        || availableAgents[0]?.role
+        || 'main-agent';
+
+    const requiredAgentsRaw = Array.isArray(analysis?.required_agents) ? analysis.required_agents : [];
+    const requiredSet = new Set<string>([
+        'main-agent',
+        ...requiredAgentsRaw
+            .map((candidate) =>
+                availableAgents.find(agent =>
+                    normalizeAgentKey(agent.role) === normalizeAgentKey(String(candidate)) ||
+                    normalizeAgentKey(agent.name) === normalizeAgentKey(String(candidate))
+                )?.role || null
+            )
+            .filter((value): value is string => Boolean(value))
+    ]);
+
+    const sanitized: any = { ...(workflow || {}) };
+    const repairs: string[] = [];
+    const safeSteps = Array.isArray(sanitized.steps) ? sanitized.steps : [];
+    const actionMap = new Map<string, string>();
+    for (const skill of AgentLoader.listSkillsBrief()) {
+        const normalizedAction = normalizeAgentKey(skill.name);
+        actionMap.set(normalizedAction, skill.name);
+    }
+    // Ensure execute-critical defaults are available even if listSkillsBrief is empty
+    for (const action of ['analyze_task', 'create_workflow', 'consult_agents', 'read_codebase', 'write_code', 'verify_final_output', 'run_shell_command', 'lint_code', 'typecheck']) {
+        const normalizedAction = normalizeAgentKey(action);
+        actionMap.set(normalizedAction, action);
+    }
+
+    const normalizedSteps = [];
+    for (let i = 0; i < safeSteps.length; i++) {
+        const step = safeSteps[i];
+        if (!step || typeof step !== 'object') {
+            repairs.push(`Step ${i + 1}: invalid step object replaced with fallback`);
+            normalizedSteps.push({
+                agent: fallbackAgent,
+                action: 'read_codebase',
+                description: `Fallback step ${i + 1}`,
+            });
+            continue;
+        }
+
+        const normalizedAgent = resolveAgentOrDefault(step.agent, availableAgents, fallbackAgent);
+        if (normalizeAgentKey(String(step.agent || '')) !== normalizeAgentKey(normalizedAgent)) {
+            repairs.push(`Step ${i + 1}: agent "${step.agent}" replaced with "${normalizedAgent}"`);
+        }
+
+        const rawAction = typeof step.action === 'string' ? step.action.trim() : '';
+        const normalizedAction = normalizeAgentKey(rawAction);
+        const canonicalAction = actionMap.get(normalizedAction);
+        const resolvedAction = canonicalAction || 'read_codebase';
+        if (!rawAction || !actionMap.has(normalizedAction)) {
+            repairs.push(`Step ${i + 1}: action "${rawAction || '<empty>'}" normalized to "read_codebase"`);
+        }
+
+        normalizedSteps.push({
+            agent: normalizedAgent,
+            action: resolvedAction,
+            description: typeof step.description === 'string' && step.description.trim().length > 0
+                ? step.description.trim()
+                : `Step ${i + 1}`,
+            ...(step || {}),
+            agent: normalizedAgent,
+            action: resolvedAction,
+        });
+    }
+
+    const dedupedSteps = [];
+    let hasVerify = false;
+    for (const step of normalizedSteps) {
+        if (step.action === 'verify_final_output') {
+            if (hasVerify) {
+                repairs.push('중복된 verify_final_output 단계는 제거했습니다.');
+                continue;
+            }
+            hasVerify = true;
+        }
+        dedupedSteps.push(step);
+    }
+
+    if (!hasVerify) {
+        repairs.push('workflow에 verify_final_output 누락되어 추가했습니다.');
+        dedupedSteps.push({
+            agent: fallbackAgent,
+            action: 'verify_final_output',
+            description: '최종 검증',
+        });
+    }
+
+    sanitized.steps = dedupedSteps;
+    sanitized.required_agents = Array.from(requiredSet);
+    sanitized._sanity = {
+        requiredAgentsCount: requiredSet.size,
+        normalizedSteps: sanitized.steps.length,
+        repairs,
+    };
+
+    return { workflow: sanitized, repairs };
+}
+
 export async function create_workflow(
     taskAnalysis: any,
     availableAgents?: AgentDefinition[],
@@ -10,8 +135,34 @@ export async function create_workflow(
     try {
         const agents = availableAgents?.length ? availableAgents : AgentLoader.listAgents();
         const requiredAgents = taskAnalysis.required_agents || [];
-        const agentsInfo = agents
-            .filter(a => requiredAgents.includes(a.name) || a.role === 'main-agent')
+        const normalizedAvailableAgents = agents.map(agent => ({
+            ...agent,
+            normalizedRole: normalizeAgentKey(agent.role),
+            normalizedName: normalizeAgentKey(agent.name),
+        }));
+        const normalizedRequiredAgents = Array.from(new Set(
+            requiredAgents
+                .map(agent => normalizeAgentKey(agent))
+                .filter(Boolean)
+        ));
+        const requiredSet = new Set<string>([
+            'main-agent',
+            ...normalizedRequiredAgents,
+            ...normalizedAvailableAgents
+                .filter(agent => agent.role === 'main-agent' || normalizedRequiredAgents.includes(agent.normalizedRole))
+                .map(agent => agent.role),
+        ]);
+        const requiredAgentSet = new Set<string>(
+            normalizedAvailableAgents
+                .filter(agent =>
+                    requiredSet.has(agent.role) ||
+                    requiredSet.has(agent.normalizedRole) ||
+                    requiredSet.has(agent.normalizedName)
+                )
+                .map(agent => agent.name)
+        );
+        const agentsInfo = normalizedAvailableAgents
+            .filter(a => requiredAgentSet.has(a.role) || requiredAgentSet.has(a.name))
             .map(a => `- ${a.name}: [${a.skills.join(', ')}]`)
             .join('\n');
 
@@ -37,18 +188,8 @@ ${agentsInfo}
     ]
 }`;
 
-        const workflow = await llm.generateJSONStream(systemPrompt, `Task Analysis: ${JSON.stringify(taskAnalysis)} `, schema, emitter);
-
-        // Ensure steps exists
-        if (!workflow.steps || !Array.isArray(workflow.steps)) {
-            workflow.steps = [];
-        }
-
-        // Ensure verify step exists
-        if (!workflow.steps.find((s: any) => s.action === 'verify_final_output')) {
-            workflow.steps.push({ agent: 'main-agent', action: 'verify_final_output' });
-        }
-
+        const workflowRaw = await llm.generateJSONStream(systemPrompt, `Task Analysis: ${JSON.stringify(taskAnalysis)} `, schema, emitter);
+        const { workflow } = sanitizeWorkflow(workflowRaw, taskAnalysis, agents);
         return workflow;
 
     } catch (e) {

@@ -370,6 +370,132 @@ export class Orchestrator {
         return Array.from(participants).filter(Boolean);
     }
 
+    private sanitizePlannedWorkflow(
+        workflow: any,
+        analysis: any,
+        availableAgents: AgentDefinition[]
+    ): { workflow: any; repairs: string[]; reason: string } {
+        const repairs: string[] = [];
+        const safeWorkflow = workflow && typeof workflow === 'object' ? { ...workflow } : {};
+        const fallbackAgent = availableAgents.find(a => a.role === 'main-agent')?.role
+            || availableAgents.find(a => a.role === 'software-engineer')?.role
+            || availableAgents[0]?.role
+            || 'main-agent';
+
+        const normalizedAgents = availableAgents.map((agent) => ({
+            role: this.normalizeAgentKey(agent.role),
+            name: this.normalizeAgentKey(agent.name),
+            originalRole: agent.role,
+        }));
+        const validRoles = new Set(normalizedAgents.map(a => a.role));
+        const resolveAgentRole = (raw: unknown): string => {
+            if (typeof raw !== 'string' || !raw.trim()) {
+                return fallbackAgent;
+            }
+            const normalized = this.normalizeAgentKey(raw);
+            const exact = normalizedAgents.find(a => a.role === normalized || a.name === normalized);
+            if (exact) return exact.originalRole;
+            return fallbackAgent;
+        };
+
+        const rawSteps = Array.isArray(safeWorkflow.steps) ? safeWorkflow.steps : [];
+        if (rawSteps.length === 0) {
+            repairs.push('workflow.steps가 비어 있어 기본 워크플로우로 보완했습니다.');
+            return {
+                workflow: {
+                    ...safeWorkflow,
+                    required_agents: ['software-engineer', 'main-agent'],
+                    steps: [
+                        { agent: 'software-engineer', action: 'read_codebase', description: '코드베이스 읽기' },
+                        { agent: 'software-engineer', action: 'write_code', description: '핵심 코드 구현' },
+                        { agent: 'main-agent', action: 'verify_final_output', description: '최종 검증' },
+                    ],
+                },
+                repairs,
+                reason: 'empty-steps',
+            };
+        }
+
+        const normalizedSteps = [];
+        for (let index = 0; index < rawSteps.length; index++) {
+            const step = rawSteps[index];
+            if (!step || typeof step !== 'object') {
+                repairs.push(`Step ${index + 1}: 잘못된 step 객체를 기본값으로 대체했습니다.`);
+                normalizedSteps.push({
+                    agent: fallbackAgent,
+                    action: 'read_codebase',
+                    description: `Step ${index + 1} fallback`,
+                });
+                continue;
+            }
+
+            const normalizedAgent = resolveAgentRole(step.agent);
+            if (this.normalizeAgentKey(String(step.agent || '')) !== this.normalizeAgentKey(normalizedAgent)) {
+                repairs.push(`Step ${index + 1}: agent "${String(step.agent)}" -> "${normalizedAgent}"로 보정`);
+            }
+
+            const action = typeof step.action === 'string' && step.action.trim() ? step.action.trim() : '';
+            const resolvedAction = action || 'read_codebase';
+            if (!action) {
+                repairs.push(`Step ${index + 1}: action이 없어 read_codebase로 보정`);
+            }
+
+            normalizedSteps.push({
+                ...step,
+                agent: normalizedAgent,
+                action: resolvedAction,
+                description: typeof step.description === 'string' && step.description.trim()
+                    ? step.description
+                    : `Step ${index + 1}`,
+            });
+        }
+
+        const dedupedSteps = [];
+        let hasVerify = false;
+        for (const step of normalizedSteps) {
+            if (step.action === 'verify_final_output') {
+                if (hasVerify) {
+                    repairs.push('중복된 verify_final_output step 제거');
+                    continue;
+                }
+                hasVerify = true;
+            }
+            dedupedSteps.push(step);
+        }
+
+        if (!hasVerify) {
+            dedupedSteps.push({ agent: fallbackAgent, action: 'verify_final_output', description: '최종 검증' });
+            repairs.push('workflow에서 verify_final_output이 없어 추가');
+        }
+
+        const normalizedRequiredAgents = Array.isArray(analysis?.required_agents)
+            ? analysis.required_agents
+                .map((agent: string) => {
+                    const normalized = this.normalizeAgentKey(agent);
+                    if (validRoles.has(normalized)) return normalized;
+                    const exact = normalizedAgents.find(a => a.name === normalized);
+                    return exact?.originalRole || null;
+                })
+                .filter((agent): agent is string => Boolean(agent))
+                .filter((agent, idx, arr) => arr.indexOf(agent) === idx)
+            : [];
+
+        if (normalizedRequiredAgents.length === 0) {
+            normalizedRequiredAgents.push('software-engineer', 'main-agent');
+            repairs.push('required_agents가 비어 있어 기본값으로 대체');
+        }
+
+        return {
+            workflow: {
+                ...safeWorkflow,
+                required_agents: normalizedRequiredAgents,
+                steps: dedupedSteps,
+            },
+            repairs,
+            reason: repairs.length > 0 ? 'repaired' : 'ok',
+        };
+    }
+
     private async runStepDiscussion(
         task: AgentTask,
         workflow: any,
@@ -546,7 +672,8 @@ export class Orchestrator {
 
 
             const workflow = await skills.create_workflow(analysis, availableAgents, codebaseContext, this.emitter);
-            this.seedCollaborationFromWorkflow(workflow);
+            const workflowSanity = this.sanitizePlannedWorkflow(workflow, analysis, availableAgents);
+            this.seedCollaborationFromWorkflow(workflowSanity.workflow);
 
             // Log the discussion wrap-up in Korean
             await this.log(mainAgentName, '에이전트 간 협의가 완료되었습니다. 수립된 워크플로우를 저장합니다.', workflow);
@@ -554,7 +681,16 @@ export class Orchestrator {
 
 
             // Save Plan to Metadata
-            await this.updateMetadata({ analysis, workflow, agentCollaboration: this.collaborationGraph });
+            await this.updateMetadata({
+                analysis,
+                workflow: workflowSanity.workflow,
+                workflowSanity: {
+                    source: workflowSanity.reason,
+                    repairs: workflowSanity.repairs,
+                    required_agents: workflowSanity.workflow.required_agents,
+                },
+                agentCollaboration: this.collaborationGraph,
+            });
 
             // Wait for user confirmation
             await this.log(mainAgentName, 'Plan created. Waiting for user approval.');
