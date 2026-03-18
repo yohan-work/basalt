@@ -13,7 +13,8 @@ import {
     DialogDescription,
     DialogFooter,
 } from '@/components/ui/dialog';
-import { TASK_TEMPLATES, type TaskTemplate } from '@/lib/task-templates';
+import { TASK_TEMPLATES, type TaskTemplate, type TemplateFieldValues, getPatternPreset, serializeProps } from '@/lib/task-templates';
+import { TemplateFormRenderer } from '@/components/TemplateFormRenderer';
 import {
     LayoutGrid, Globe, Bug, RefreshCw, FileText,
     Paintbrush, TestTube, BookOpen, ChevronDown, ChevronUp, FileEdit, Wand2, Package,
@@ -55,6 +56,7 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
     const [components, setComponents] = useState<ComponentItem[]>([]);
     const [selectedComponentPaths, setSelectedComponentPaths] = useState<string[]>([]);
     const [componentsLoading, setComponentsLoading] = useState(false);
+    const [templateFieldValues, setTemplateFieldValues] = useState<TemplateFieldValues>({});
 
     // Fetch components when project is selected
     useEffect(() => {
@@ -84,14 +86,37 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
             setSelectedTemplateId(null);
             setShowTemplates(true);
             setSelectedComponentPaths([]);
+            setTemplateFieldValues({});
         }
     }, [open]);
+
+    const selectedTemplate = selectedTemplateId
+        ? TASK_TEMPLATES.find(t => t.id === selectedTemplateId) ?? null
+        : null;
+    const hasSpecializedForm = !!(selectedTemplate?.fields && selectedTemplate.fields.length > 0);
+
+    const initFieldDefaults = (template: TaskTemplate): TemplateFieldValues => {
+        const defaults: TemplateFieldValues = {};
+        for (const field of template.fields || []) {
+            if (field.defaultValue !== undefined) {
+                defaults[field.key] = field.defaultValue;
+            }
+        }
+        return defaults;
+    };
 
     const handleSelectTemplate = (template: TaskTemplate) => {
         setSelectedTemplateId(template.id);
         setTitle(template.titlePrefix);
-        setDescription(template.description);
         setPriority(template.priority);
+        if (template.fields && template.fields.length > 0) {
+            const defaults = initFieldDefaults(template);
+            setTemplateFieldValues(defaults);
+            setDescription(template.buildDescription?.(defaults) || template.description);
+        } else {
+            setDescription(template.description);
+            setTemplateFieldValues({});
+        }
         setShowTemplates(false);
     };
 
@@ -100,7 +125,25 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
         setTitle('');
         setDescription('');
         setPriority('Medium');
+        setTemplateFieldValues({});
         setShowTemplates(false);
+    };
+
+    const handleFieldValuesChange = (values: TemplateFieldValues) => {
+        const prevPattern = templateFieldValues.pattern;
+        const nextPattern = values.pattern;
+
+        if (prevPattern !== nextPattern && typeof nextPattern === 'string' && nextPattern) {
+            const preset = getPatternPreset(nextPattern);
+            if (preset) {
+                values = { ...values, props: serializeProps(preset.defaultProps) };
+            }
+        }
+
+        setTemplateFieldValues(values);
+        if (selectedTemplate?.buildDescription) {
+            setDescription(selectedTemplate.buildDescription(values));
+        }
     };
 
     const handleSubmit = async () => {
@@ -156,7 +199,7 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-lg" onKeyDown={handleKeyDown}>
+            <DialogContent className={hasSpecializedForm ? "sm:max-w-2xl" : "sm:max-w-lg"} onKeyDown={handleKeyDown}>
                 <DialogHeader>
                     <DialogTitle>Create New Task</DialogTitle>
                     <DialogDescription>
@@ -235,29 +278,65 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
                             aria-required="true"
                         />
                     </div>
-                    <div className="grid gap-2">
-                        <div className="flex items-center justify-between">
-                            <Label htmlFor="task-description">Description</Label>
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleEnhancePrompt}
-                                disabled={isEnhancing || (!title.trim() && !description.trim())}
-                                className="h-6 text-xs px-2 text-primary hover:bg-primary/10"
-                            >
-                                <Wand2 className="w-3 h-3 mr-1" />
-                                {isEnhancing ? 'Enhancing...' : 'AI Enhance'}
-                            </Button>
+                    {hasSpecializedForm && selectedTemplate?.fields ? (
+                        <div className="grid gap-3">
+                            <div className="flex items-center justify-between">
+                                <Label className="text-sm font-semibold">
+                                    {selectedTemplate.name} 상세 설정
+                                </Label>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleEnhancePrompt}
+                                    disabled={isEnhancing || !description.trim()}
+                                    className="h-6 text-xs px-2 text-primary hover:bg-primary/10"
+                                >
+                                    <Wand2 className="w-3 h-3 mr-1" />
+                                    {isEnhancing ? 'Enhancing...' : 'AI Enhance'}
+                                </Button>
+                            </div>
+                            <ScrollArea className="max-h-[320px] pr-3">
+                                <TemplateFormRenderer
+                                    fields={selectedTemplate.fields}
+                                    values={templateFieldValues}
+                                    onChange={handleFieldValuesChange}
+                                />
+                            </ScrollArea>
+                            <details className="group">
+                                <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors select-none">
+                                    생성된 Description 미리보기
+                                </summary>
+                                <pre className="mt-1.5 p-2 text-xs bg-muted/50 border border-border whitespace-pre-wrap max-h-[120px] overflow-y-auto">
+                                    {description || '(필드를 입력하면 자동 생성됩니다)'}
+                                </pre>
+                            </details>
                         </div>
-                        <textarea
-                            id="task-description"
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            className="flex min-h-[120px] w-full border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                            placeholder="Enter detailed task description"
-                        />
-                    </div>
+                    ) : (
+                        <div className="grid gap-2">
+                            <div className="flex items-center justify-between">
+                                <Label htmlFor="task-description">Description</Label>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleEnhancePrompt}
+                                    disabled={isEnhancing || (!title.trim() && !description.trim())}
+                                    className="h-6 text-xs px-2 text-primary hover:bg-primary/10"
+                                >
+                                    <Wand2 className="w-3 h-3 mr-1" />
+                                    {isEnhancing ? 'Enhancing...' : 'AI Enhance'}
+                                </Button>
+                            </div>
+                            <textarea
+                                id="task-description"
+                                value={description}
+                                onChange={(e) => setDescription(e.target.value)}
+                                className="flex min-h-[120px] w-full border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                placeholder="Enter detailed task description"
+                            />
+                        </div>
+                    )}
                     <div className="grid gap-2">
                         <Label htmlFor="task-priority">Priority</Label>
                         <select
