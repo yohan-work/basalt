@@ -35,8 +35,12 @@ export function PropsBuilder({ value, onChange }: PropsBuilderProps) {
     const removeProp = (index: number) => {
         onChange(value.filter((_, i) => i !== index));
         setCustomTypes(prev => {
-            const next = { ...prev };
-            delete next[index];
+            const next: Record<number, string> = {};
+            for (const [k, v] of Object.entries(prev)) {
+                const key = Number(k);
+                if (key < index) next[key] = v;
+                else if (key > index) next[key - 1] = v;
+            }
             return next;
         });
     };

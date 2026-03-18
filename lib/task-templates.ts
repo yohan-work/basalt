@@ -215,9 +215,9 @@ function buildPropsInterface(componentName: string, props: PropDefinition[]): st
     const lines = [`interface ${interfaceName} {`];
     for (const p of props) {
         const opt = p.required ? '' : '?';
-        const desc = p.description ? `  // ${p.description}` : '';
         const def = p.defaultValue ? ` (default: ${p.defaultValue})` : '';
-        lines.push(`  ${p.name}${opt}: ${p.type};${desc}${def}`);
+        const desc = p.description ? `  // ${p.description}${def}` : def ? `  //${def}` : '';
+        lines.push(`  ${p.name}${opt}: ${p.type};${desc}`);
     }
     lines.push('}');
     return lines.join('\n');
