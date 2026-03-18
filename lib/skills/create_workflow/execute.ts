@@ -28,7 +28,9 @@ function sanitizeWorkflow(workflow: any, analysis: any, availableAgents: AgentDe
         || availableAgents[0]?.role
         || 'main-agent';
 
-    const requiredAgentsRaw = Array.isArray(analysis?.required_agents) ? analysis.required_agents : [];
+    const requiredAgentsRaw: string[] = Array.isArray(analysis?.required_agents)
+        ? analysis.required_agents.map((candidate: any) => String(candidate).trim()).filter(Boolean)
+        : [];
     const requiredSet = new Set<string>([
         'main-agent',
         ...requiredAgentsRaw
@@ -38,7 +40,7 @@ function sanitizeWorkflow(workflow: any, analysis: any, availableAgents: AgentDe
                     normalizeAgentKey(agent.name) === normalizeAgentKey(String(candidate))
                 )?.role || null
             )
-            .filter((value): value is string => Boolean(value))
+                .filter((value: string | null): value is string => Boolean(value))
     ]);
 
     const sanitized: any = { ...(workflow || {}) };
@@ -55,7 +57,7 @@ function sanitizeWorkflow(workflow: any, analysis: any, availableAgents: AgentDe
         actionMap.set(normalizedAction, action);
     }
 
-    const normalizedSteps = [];
+    const normalizedSteps: any[] = [];
     for (let i = 0; i < safeSteps.length; i++) {
         const step = safeSteps[i];
         if (!step || typeof step !== 'object') {
@@ -82,14 +84,12 @@ function sanitizeWorkflow(workflow: any, analysis: any, availableAgents: AgentDe
         }
 
         normalizedSteps.push({
+            ...(step || {}),
             agent: normalizedAgent,
             action: resolvedAction,
             description: typeof step.description === 'string' && step.description.trim().length > 0
                 ? step.description.trim()
                 : `Step ${i + 1}`,
-            ...(step || {}),
-            agent: normalizedAgent,
-            action: resolvedAction,
         });
     }
 
@@ -134,7 +134,7 @@ export async function create_workflow(
 ) {
     try {
         const agents = availableAgents?.length ? availableAgents : AgentLoader.listAgents();
-        const requiredAgents = taskAnalysis.required_agents || [];
+        const requiredAgents: unknown[] = Array.isArray(taskAnalysis?.required_agents) ? taskAnalysis.required_agents : [];
         const normalizedAvailableAgents = agents.map(agent => ({
             ...agent,
             normalizedRole: normalizeAgentKey(agent.role),
@@ -142,24 +142,23 @@ export async function create_workflow(
         }));
         const normalizedRequiredAgents = Array.from(new Set(
             requiredAgents
-                .map(agent => normalizeAgentKey(agent))
-                .filter(Boolean)
+                .map((agent: any) => normalizeAgentKey(String(agent || '')))
+                .filter((agent: string): agent is string => Boolean(agent))
         ));
-        const requiredSet = new Set<string>([
-            'main-agent',
-            ...normalizedRequiredAgents,
-            ...normalizedAvailableAgents
-                .filter(agent => agent.role === 'main-agent' || normalizedRequiredAgents.includes(agent.normalizedRole))
-                .map(agent => agent.role),
-        ]);
+        const requiredSet = new Set<string>(['main-agent', ...normalizedRequiredAgents]);
+        for (const availableAgent of normalizedAvailableAgents) {
+            if (availableAgent.role === 'main-agent' || normalizedRequiredAgents.includes(availableAgent.normalizedRole)) {
+                requiredSet.add(availableAgent.role);
+            }
+        }
         const requiredAgentSet = new Set<string>(
             normalizedAvailableAgents
-                .filter(agent =>
+                .filter((agent: any) =>
                     requiredSet.has(agent.role) ||
                     requiredSet.has(agent.normalizedRole) ||
                     requiredSet.has(agent.normalizedName)
                 )
-                .map(agent => agent.name)
+                .map((agent: { name: string }) => agent.name)
         );
         const agentsInfo = normalizedAvailableAgents
             .filter(a => requiredAgentSet.has(a.role) || requiredAgentSet.has(a.name))

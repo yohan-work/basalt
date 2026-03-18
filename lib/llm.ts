@@ -220,8 +220,21 @@ MANDATORY CODING RULES:
 - Generate COMPLETE, working TypeScript code with all necessary imports.
 - For React components, use proper TypeScript types and export as default.
 - MANDATORY FILE PATH RULE: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/some-feature/page.tsx", NOT "/app/some-feature/page.tsx"). YOU MUST prepend the Router Base Path (e.g., "src/app/", "app/", "src/pages/", "pages/") explicitly mentioned in the [PROJECT CONTEXT].
-- CRITICAL PATH MAPPING RULE: If the user explicitly requests to create a new page at a specific route (e.g., "/post"), you MUST place the file at the correct subfolder path (e.g., "app/post/page.tsx" or "src/app/post/page.tsx"). DO NOT override the root "app/page.tsx" or "src/app/page.tsx" unless the user explicitly asks to edit the Home/Root page.
+- CRITICAL FILE PATH MAPPING RULE:
+  - For NEW feature pages, choose non-root routes by default (e.g., "app/chat/page.tsx").
+  - DO NOT override the root page ("app/page.tsx", "src/app/page.tsx", "pages/index.tsx", "src/pages/index.tsx") unless the task request explicitly names root/Home/Root.
+  - If the user asks a specific route (e.g., "/chat"), place the file in the exact mapped route path.
+- PATH FORMATTING RULE:
+  - If a path is missing a filename or extension, infer a best-fit file path and regenerate.
+  - If a path starts with "/", remove it before writing.
+- UI COMPONENT RULE:
+  - You may import only components that appear in the [PROJECT CONTEXT] \`Available UI Components (shadcn/ui)\` list.
+  - If a required component is missing from that list, use semantic HTML elements with inline styles/Tailwind and document the fallback.
 - Ensure all files are self-contained with correct relative import paths.
+- IMPORT PATH RULE:
+  - NEVER emit imports that begin with "@/app/" (e.g. "@/app/metadata") because aliases are project-specific and often map to app-only trees.
+  - Prefer explicit relative imports inside the app directory (for example: "./metadata", "../metadata", "../../metadata").
+  - If sharing app metadata, keep it in app/metadata.ts and import by relative path from each file.
 - **SEO BEST PRACTICES**:
   - Always include proper \`<title>\` and \`<meta name="description" content="...">\` tags.
   - In App Router, use the \`export const metadata = { title: '...', description: '...' }\` pattern.
@@ -260,6 +273,8 @@ For EACH file you create or modify, you MUST use the following PRECISE format.
 1. The path MUST be on a line starting with "File: " and MUST NOT contain a leading slash. Target the correct framework directory (e.g. File: src/app/route/page.tsx).
 2. The code block MUST follow immediately after the file path line.
 3. DO NOT use markdown headers(###) or bolding(**) for the "File:" line.
+4. If the path is missing router context or appears to target root unintentionally, you MUST regenerate a concrete route-aware non-root path.
+5. When task intent is ambiguous, choose a best-fit feature path and proceed; do not leave placeholders.
 
     Example:
     File: path/to/file.ext

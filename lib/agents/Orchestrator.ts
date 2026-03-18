@@ -2,6 +2,7 @@
 import { supabase } from '@/lib/supabase';
 import * as skills from '@/lib/skills';
 import * as llm from '@/lib/llm';
+import path from 'path';
 import { AgentLoader, AgentDefinition } from '../agent-loader';
 import { ContextManager } from '../context-manager';
 import { StreamEmitter } from '../stream-emitter';
@@ -283,6 +284,149 @@ export class Orchestrator {
             .toLowerCase()
             .replace(/[\s_]+/g, '-')
             .trim();
+    }
+
+    private buildExecutionRepairRecord(stepIndex: number, action: string, detail: string) {
+        return {
+            stage: 'runtime',
+            step: stepIndex,
+            action,
+            detail,
+            at: new Date().toISOString(),
+        };
+    }
+
+    private async getRoutePolicyHintsForWrite() {
+        try {
+            return await this.profiler.getProfileData();
+        } catch {
+            return null;
+        }
+    }
+
+    private isExplicitRootPageRequest(taskDescription: string, stepDescription: string, codePrompt: string): boolean {
+        const combined = [taskDescription, stepDescription, codePrompt]
+            .join(' ')
+            .toLowerCase();
+
+        return [
+            'root page',
+            'home page',
+            'homepage',
+            'root route',
+            'home',
+            '메인',
+            '루트',
+            '메인 페이지',
+        ].some((token) => combined.includes(token));
+    }
+
+    private inferFeatureRouteFromRequest(taskDescription: string, stepDescription: string): string {
+        const source = `${taskDescription || ''} ${stepDescription || ''}`.toLowerCase();
+        const explicit = source.match(/\/([a-z0-9-]+)/);
+        if (explicit) {
+            return explicit[1];
+        }
+
+        const mapping: Array<[RegExp, string]> = [
+            [/\bchat\b|채팅|챗|메신저/u, 'chat'],
+            [/\bdashboard\b|대시보드/u, 'dashboard'],
+            [/\blogin\b|로그인/u, 'login'],
+            [/\bsignup\b|회원가입|회원가입/u, 'signup'],
+            [/\bsettings\b|설정/u, 'settings'],
+            [/\bprofile\b|프로필/u, 'profile'],
+            [/\bsearch\b|검색/u, 'search'],
+            [/\babout\b|소개/u, 'about'],
+            [/\bcontact\b|문의/u, 'contact'],
+        ];
+
+        for (const [pattern, route] of mapping) {
+            if (pattern.test(source)) {
+                return route;
+            }
+        }
+
+        return 'feature';
+    }
+
+    private async normalizeWriteTargetPath(
+        rawPath: string,
+        taskDescription: string,
+        stepDescription: string,
+        codePrompt: string
+    ): {
+        path: string;
+        repairs: string[];
+        failed: boolean;
+        message?: string;
+    } {
+        const repairs: string[] = [];
+        if (!rawPath || typeof rawPath !== 'string') {
+            return {
+                path: rawPath,
+                failed: true,
+                message: 'write_code output path is missing',
+                repairs,
+            };
+        }
+
+        let normalized = rawPath.trim().replace(/\\/g, '/');
+        if (normalized.startsWith('/')) {
+            normalized = normalized.replace(/^\/+/, '');
+            repairs.push(`Removed leading slash from path: ${rawPath}`);
+        }
+        if (normalized.startsWith('..')) {
+            return {
+                path: normalized,
+                failed: true,
+                message: `Unsafe path traversal detected: ${rawPath}`,
+                repairs,
+            };
+        }
+
+        // Keep as-is if not a recognizable route file
+        if (!normalized.includes('app/') && !normalized.includes('pages/') && !normalized.includes('src/app/') && !normalized.includes('src/pages/')) {
+            return { path: normalized, repairs, failed: false };
+        }
+
+        const profile = await this.getRoutePolicyHintsForWrite();
+        if (!profile) {
+            return { path: normalized, repairs, failed: false };
+        }
+
+        const routeBase = (profile as any).routerBase as string | null;
+        if (!routeBase) {
+            return { path: normalized, repairs, failed: false };
+        }
+
+        const normalizedRouteBase = routeBase.endsWith('/') ? routeBase.slice(0, -1) : routeBase;
+        const posix = path.posix.normalize(normalized);
+        const isAppRouter = normalizedRouteBase.includes('app');
+        const appRoot = isAppRouter ? `${normalizedRouteBase}/page.tsx` : `${normalizedRouteBase}/index.tsx`;
+        const targetExtension = isAppRouter ? 'tsx' : 'tsx';
+        const explicitRootRequest = this.isExplicitRootPageRequest(taskDescription, stepDescription, codePrompt);
+
+        if (posix === path.posix.normalize(appRoot)) {
+            if (!explicitRootRequest) {
+                const inferred = this.inferFeatureRouteFromRequest(taskDescription, stepDescription);
+                const candidateBase = `${normalizedRouteBase}/${inferred}`;
+                const rewritten = isAppRouter
+                    ? `${candidateBase}/page.${targetExtension}`
+                    : `${candidateBase}.${targetExtension}`;
+                repairs.push(`Route guard: remapped root target ${rawPath} -> ${rewritten} (non-root feature path inferred)`);
+                return { path: rewritten, repairs, failed: false };
+            }
+        }
+
+        if (!path.extname(posix)) {
+            const rewritten = isAppRouter
+                ? `${posix.replace(/\/?$/, '/')}page.${targetExtension}`
+                : `${posix}.${targetExtension}`;
+            repairs.push(`Added missing extension to route file: ${rewritten}`);
+            return { path: rewritten, repairs, failed: false };
+        }
+
+        return { path: posix, repairs, failed: false };
     }
 
     private resolveExecutionOptions(taskMetadata: any, runtimeOptions?: ExecutionOptions): Required<ExecutionOptions> {
@@ -618,14 +762,15 @@ export class Orchestrator {
 
         const normalizedRequiredAgents = Array.isArray(analysis?.required_agents)
             ? analysis.required_agents
-                .map((agent: string) => {
-                    const normalized = this.normalizeAgentKey(agent);
+                .map((agent: any) => {
+                    const name = typeof agent === 'string' ? agent.trim() : '';
+                    const normalized = this.normalizeAgentKey(name);
                     if (validRoles.has(normalized)) return normalized;
                     const exact = normalizedAgents.find(a => a.name === normalized);
                     return exact?.originalRole || null;
                 })
-                .filter((agent): agent is string => Boolean(agent))
-                .filter((agent, idx, arr) => arr.indexOf(agent) === idx)
+                .filter((agent: string | null): agent is string => Boolean(agent))
+                .filter((agent: string, idx: number, arr: string[]) => arr.indexOf(agent) === idx)
             : [];
 
         if (normalizedRequiredAgents.length === 0) {
@@ -1152,6 +1297,7 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 }
             }
 
+            const mainAgentName = this.mainAgentDef.name;
             const workflowAgents = AgentLoader.listAgents();
             const workflowSanity = this.sanitizePlannedWorkflow(task.metadata?.workflow, task.metadata?.analysis, workflowAgents);
             const workflow = workflowSanity.workflow;
@@ -1201,7 +1347,6 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
             });
             await this.updateStatus('working');
             skills.reset_runtime_caches();
-            const mainAgentName = this.mainAgentDef.name;
             this.emitter?.emit({ type: 'phase_start', phase: 'execution', taskId: this.taskId });
 
             // Create a new branch for this task BEFORE making any changes
@@ -1445,26 +1590,52 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                                     if (codeResult && !codeResult.error && codeResult.files.length > 0) {
                                         const { data: metaForChanges } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
                                         const existingChanges = metaForChanges?.metadata?.fileChanges || [];
+                                        const existingRepairs = metaForChanges?.metadata?.executionRepairs || [];
+                                        const writtenPaths: string[] = [];
 
                                         for (const file of codeResult.files) {
-                                            const writeResult = await skillFunc(file.path, file.content, projectPath);
+                                            const normalizedPath = await this.normalizeWriteTargetPath(
+                                                file.path,
+                                                task.description || '',
+                                                step.description || '',
+                                                stepGoalWithDiscussion
+                                            );
+                                            if (normalizedPath.failed) {
+                                                throw new Error(`write_code path normalization failed: ${normalizedPath.message}`);
+                                            }
+
+                                            if (normalizedPath.repairs.length > 0) {
+                                                existingRepairs.push(this.buildExecutionRepairRecord(stepIndex, action, normalizedPath.repairs.join(' | ')));
+                                                await this.updateMetadata({ executionRepairs: existingRepairs });
+                                            }
+
+                                            const writeResult = await skillFunc(normalizedPath.path, file.content, projectPath);
+                                            if (!writeResult?.success) {
+                                                const detail = writeResult?.message || 'write_code execution returned failure';
+                                                existingRepairs.push(this.buildExecutionRepairRecord(stepIndex, action, detail));
+                                                await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                throw new Error(detail);
+                                            }
+
                                             if (writeResult?.filePath) {
                                                 existingChanges.push({
-                                                    filePath: writeResult.filePath,
+                                                    filePath: normalizedPath.path,
                                                     before: writeResult.before,
                                                     after: writeResult.after,
                                                     isNew: writeResult.isNew,
                                                     agent: stepAgentDef.name,
                                                     stepIndex
                                                 });
+                                                writtenPaths.push(normalizedPath.path);
                                             }
-                                            this.contextManager.addFile(file.path, file.content);
-                                            this.contextManager.addLog(stepAgentDef.name, `Wrote ${file.path}`);
-                                            await this.log(stepAgentDef.name, `Wrote file: ${file.path}`, { type: 'RESULT' });
+                                            const reportPath = normalizedPath.path;
+                                            this.contextManager.addFile(reportPath, file.content);
+                                            this.contextManager.addLog(stepAgentDef.name, `Wrote ${reportPath}`);
+                                            await this.log(stepAgentDef.name, `Wrote file: ${reportPath}`, { type: 'RESULT' });
                                         }
 
                                         await this.updateMetadata({ fileChanges: existingChanges });
-                                        const resultSummary = `Wrote ${codeResult.files.length} file(s): ${codeResult.files.map(f => f.path).join(', ')}`;
+                                        const resultSummary = `Wrote ${writtenPaths.length} file(s): ${writtenPaths.join(', ')}`;
                                         this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
                                     } else {
                                         const errMsg = codeResult?.error ? codeResult.content : 'No files generated by CODING model';

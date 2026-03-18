@@ -3,8 +3,19 @@
 import fs from 'fs';
 import path from 'path';
 import ts from 'typescript';
+import { execSync } from 'child_process';
 
 const projectRoot = process.cwd();
+const cliArgs = new Set(process.argv.slice(2));
+const cliArgsList = process.argv.slice(2);
+const explicitTypecheckFiles = cliArgsList.filter((arg) => !arg.startsWith('--'));
+const runBoundaryCheck = !cliArgs.has('--types-only');
+const runTypecheckMode = !cliArgs.has('--boundary-only');
+const runChangedTypecheck = cliArgs.has('--changed');
+const explicitGitRef = (() => {
+    const gitRefArg = cliArgsList.find((arg) => arg.startsWith('--git-ref='));
+    return gitRefArg ? gitRefArg.replace('--git-ref=', '').trim() || 'HEAD' : 'HEAD';
+})();
 const targets = [
     'app',
     'components'
@@ -12,6 +23,110 @@ const targets = [
 const hookNames = ['useState', 'useEffect', 'useMemo', 'useCallback', 'useReducer', 'useRef', 'useLayoutEffect', 'useTransition', 'useActionState', 'useOptimistic', 'useDeferredValue', 'useId'];
 const hookNameSet = new Set(hookNames);
 const nextHeadPattern = /from\s+['"]next\/head['"]/;
+const tsconfigAliasCache = new Map();
+
+function resolveTypecheckTargets() {
+    if (explicitTypecheckFiles.length > 0) {
+        return explicitTypecheckFiles
+            .map((candidate) => path.resolve(projectRoot, candidate))
+            .filter((candidate) => fs.existsSync(candidate));
+    }
+
+    if (!runChangedTypecheck) return [];
+
+    try {
+        const diffRef = explicitGitRef || 'HEAD';
+        const raw = execSync(`git diff --name-only ${diffRef} --`, {
+            cwd: projectRoot,
+            encoding: 'utf8',
+        });
+        return raw
+            .split('\n')
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0 && /\.(tsx?|jsx?)$/.test(line))
+            .map((line) => path.resolve(projectRoot, line));
+    } catch (error) {
+        return [];
+    }
+}
+
+function getAliasMapping(projectRoot) {
+    if (tsconfigAliasCache.has(projectRoot)) {
+        return tsconfigAliasCache.get(projectRoot);
+    }
+
+    const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
+    if (!fs.existsSync(tsconfigPath)) {
+        tsconfigAliasCache.set(projectRoot, { raw: null });
+        return tsconfigAliasCache.get(projectRoot);
+    }
+
+    try {
+        const raw = JSON.parse(fs.readFileSync(tsconfigPath, 'utf8'));
+        const aliasPattern = raw?.compilerOptions?.paths?.['@/*'];
+        tsconfigAliasCache.set(projectRoot, {
+            raw: Array.isArray(aliasPattern) && aliasPattern[0] ? aliasPattern[0] : null
+        });
+    } catch (err) {
+        tsconfigAliasCache.set(projectRoot, { raw: null });
+    }
+
+    return tsconfigAliasCache.get(projectRoot);
+}
+
+function resolveAliasImportPath(projectRoot, importPath) {
+    if (!importPath.startsWith('@/')) {
+        return null;
+    }
+
+    const aliasConfig = getAliasMapping(projectRoot)?.raw;
+    if (!aliasConfig || typeof aliasConfig !== 'string') {
+        const fallback = path.join(projectRoot, importPath.replace('@/', './').replace(/\\/g, '/'));
+        return [fallback + '.ts', fallback + '.tsx', fallback + '.js', fallback + '.jsx'];
+    }
+
+    const starIndex = aliasConfig.indexOf('*');
+    if (starIndex === -1) return null;
+
+    const aliasBase = aliasConfig.slice(0, starIndex);
+    const importSuffix = importPath.slice(2);
+    const resolved = path.join(projectRoot, aliasBase, importSuffix);
+    return [resolved + '.ts', resolved + '.tsx', resolved + '.js', resolved + '.jsx', resolved];
+}
+
+function hasAliasResolution(importPath, projectRoot) {
+    const candidates = resolveAliasImportPath(projectRoot, importPath);
+    if (!candidates || !Array.isArray(candidates)) return false;
+    return candidates.some((candidate) => fs.existsSync(candidate));
+}
+
+function hasAppMetadataFile(projectRoot) {
+    const metadataCandidates = [
+        path.join(projectRoot, 'app', 'metadata.ts'),
+        path.join(projectRoot, 'app', 'metadata.tsx'),
+        path.join(projectRoot, 'app', 'metadata.js'),
+        path.join(projectRoot, 'app', 'metadata.jsx')
+    ];
+    return metadataCandidates.some((file) => fs.existsSync(file));
+}
+
+function validateAppMetadataAliasImport(sourceFile, projectRoot) {
+    const aliasImports = [];
+    const targetPattern = /^@\/app\/metadata(?:\.(?:ts|tsx|js|jsx))?$/;
+
+    const visit = (node) => {
+        if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+            const importPath = node.moduleSpecifier.text;
+            if (targetPattern.test(importPath) && hasAppMetadataFile(projectRoot) && !hasAliasResolution(importPath, projectRoot)) {
+                aliasImports.push(importPath);
+            }
+        }
+        ts.forEachChild(node, visit);
+    };
+
+    visit(sourceFile);
+    return aliasImports;
+}
 
 function getScriptKind(filePath) {
     const ext = path.extname(filePath).toLowerCase();
@@ -117,6 +232,26 @@ function collectReactHookUsage(sourceFile) {
     return { usesHooks, hasReactImport };
 }
 
+function hasClientIncompatibleMetadataExport(sourceFile, hasClientDirective) {
+    if (!hasClientDirective) return false;
+
+    let hasMetadataExport = false;
+    const visit = (node) => {
+        if (ts.isVariableStatement(node) && node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+            for (const declaration of node.declarationList.declarations) {
+                if (declaration.name && ts.isIdentifier(declaration.name) && declaration.name.text === 'metadata') {
+                    hasMetadataExport = true;
+                    return;
+                }
+            }
+        }
+        ts.forEachChild(node, visit);
+    };
+
+    visit(sourceFile);
+    return hasMetadataExport;
+}
+
 function scanDir(dir, problems) {
     if (!fs.existsSync(dir)) return;
     const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -140,6 +275,8 @@ function scanDir(dir, problems) {
         );
         const { hasClientDirective, hasServerDirective } = getBoundaryDirectives(sourceFile.statements);
         const { usesHooks, hasReactImport } = collectReactHookUsage(sourceFile);
+        const badMetadataAliasImports = validateAppMetadataAliasImport(sourceFile, projectRoot);
+        const invalidMetadataExport = hasClientIncompatibleMetadataExport(sourceFile, hasClientDirective);
         const usesNextHead = nextHeadPattern.test(content);
 
         if (usesNextHead) {
@@ -159,6 +296,22 @@ function scanDir(dir, problems) {
             continue;
         }
 
+        for (const importPath of badMetadataAliasImports) {
+            problems.push({
+                type: 'INVALID_ALIAS_IMPORT',
+                file: nextPath,
+                message: `Alias import "${importPath}" does not resolve under current tsconfig. Use a relative path for app/metadata import.`,
+            });
+        }
+
+        if (invalidMetadataExport) {
+            problems.push({
+                type: 'INVALID_METADATA_EXPORT',
+                file: nextPath,
+                message: 'Client Component exports `metadata`. App Router forbids export const metadata in client components.',
+            });
+        }
+
         if (usesHooks && !hasReactImport) {
             problems.push({
                 type: 'MISSING_REACT_IMPORT',
@@ -169,14 +322,98 @@ function scanDir(dir, problems) {
     }
 }
 
+function runTypeCheck(problems, targetFiles = []) {
+    const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
+    if (!fs.existsSync(tsconfigPath)) {
+        return;
+    }
+
+    const rawConfig = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+    if (rawConfig.error) {
+        const msg = ts.flattenDiagnosticMessageText(rawConfig.error.messageText, ' ');
+        problems.push({
+            type: 'TYPECHECK_FAILED',
+            file: tsconfigPath,
+            message: `[TS${rawConfig.error.code}] ${msg}`,
+        });
+        return;
+    }
+
+    const parsed = ts.parseJsonConfigFileContent(rawConfig.config, ts.sys, projectRoot);
+    const requestedFiles = targetFiles.length > 0
+        ? targetFiles.map((candidate) => path.resolve(projectRoot, candidate))
+        : parsed.fileNames;
+
+    const validTargets = requestedFiles.filter((candidate) => /\.(tsx?|jsx?)$/i.test(candidate));
+    if (validTargets.length === 0) return;
+
+    const requestedSet = new Set(validTargets.map((candidate) => path.resolve(candidate)));
+    const program = ts.createProgram({
+        rootNames: validTargets,
+        options: {
+            ...parsed.options,
+            noEmit: true,
+            pretty: false,
+        },
+        projectReferences: parsed.projectReferences,
+    });
+
+    const diagnostics = ts.getPreEmitDiagnostics(program);
+    for (const diagnostic of diagnostics) {
+        const file = diagnostic.file;
+        if (!file) {
+            continue;
+        }
+
+        const sourceFile = path.resolve(file.fileName);
+        if (targetFiles.length > 0 && !requestedSet.has(sourceFile)) {
+            continue;
+        }
+
+        const { line, character } = file.getLineAndCharacterOfPosition(diagnostic.start || 0);
+        const messageText = ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ');
+        const lineNumber = line + 1;
+        const columnNumber = character + 1;
+        problems.push({
+            type: 'TYPE_ERROR',
+            file: sourceFile,
+            message: `[TS${diagnostic.code}] ${messageText} (line ${lineNumber}:${columnNumber})`,
+        });
+    }
+
+    for (const diag of parsed.errors) {
+        const msg = ts.flattenDiagnosticMessageText(diag.messageText, ' ');
+        const file = diag.file ? path.resolve(diag.file.fileName) : tsconfigPath;
+        if (targetFiles.length > 0 && diag.file && !requestedSet.has(file)) continue;
+        problems.push({
+            type: 'TYPE_ERROR',
+            file,
+            message: `[TS${diag.code}] ${msg}`,
+        });
+    }
+}
+
 async function main() {
     const problems = [];
-    for (const target of targets) {
-        scanDir(path.join(projectRoot, target), problems);
+    if (runBoundaryCheck) {
+        for (const target of targets) {
+            scanDir(path.join(projectRoot, target), problems);
+        }
+    }
+
+    if (runTypecheckMode) {
+        const typecheckTargets = resolveTypecheckTargets();
+        runTypeCheck(problems, typecheckTargets);
     }
 
     if (problems.length === 0) {
-        console.log('[validate-client-boundary] No React hook boundary issues found.');
+        if (runBoundaryCheck && runTypecheckMode) {
+            console.log('[validate-client-boundary] No React boundary or TypeScript issues found.');
+        } else if (runTypecheckMode) {
+            console.log('[validate-client-boundary] No TypeScript issues found.');
+        } else {
+            console.log('[validate-client-boundary] No React hook boundary issues found.');
+        }
         return;
     }
 

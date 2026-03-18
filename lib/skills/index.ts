@@ -2,10 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import * as ts from 'typescript';
 
 import { AgentDefinition, AgentLoader } from '../agent-loader';
 import * as llm from '../llm';
 import { MODEL_CONFIG } from '../model-config';
+import { ProjectProfiler } from '../profiler';
 
 const execAsync = promisify(exec);
 const READ_CACHE = new Map<string, string>();
@@ -28,6 +30,242 @@ const REACT_HOOK_NAMES = [
 ];
 const HOOK_USAGE_RE = new RegExp(`\\b(?:${REACT_HOOK_NAMES.join('|')})\\s*\\(`);
 const REACT_NAMESPACE_HOOK_USAGE_RE = new RegExp(`\\b(?:React|[A-Za-z_$][\\w$]*)\\.\\s*(?:${REACT_HOOK_NAMES.join('|')})\\s*\\(`);
+const APP_METADATA_IMPORT_RE = /from\s+(['"])(@\/app\/metadata(?:\.(?:t|j)sx?)?)(\1)/g;
+
+const MAX_IMPORT_VALIDATION_UI_HINT = 12;
+const IMPORT_VALIDATION_FILE_SUFFIXES = ['.ts', '.tsx', '.js', '.jsx', '.d.ts', '.mjs', '.cjs', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
+
+function normalizeImportPathWithAlias(specifier: string, projectRoot: string): string | null {
+    if (!specifier || specifier.startsWith('.') || specifier.startsWith('/')) {
+        return null;
+    }
+
+    if (!specifier.startsWith('@/')) {
+        return null;
+    }
+
+    return path.join(projectRoot, specifier.replace(/^@\//, ''));
+}
+
+function parseTsconfigPathAliases(projectRoot: string): Array<{ pattern: string; target: string; wildcard: boolean }> {
+    const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
+    if (!fs.existsSync(tsconfigPath)) return [];
+
+    try {
+        const tsconfigFile = fs.readFileSync(tsconfigPath, 'utf-8');
+        const parsed = ts.parseConfigFileTextToJson(tsconfigPath, tsconfigFile);
+        const paths = parsed.config?.compilerOptions?.paths;
+        if (!paths || typeof paths !== 'object' || Array.isArray(paths)) return [];
+
+        const entries: Array<{ pattern: string; target: string; wildcard: boolean }> = [];
+        for (const [pattern, targetValues] of Object.entries(paths)) {
+            if (typeof targetValues !== 'object' || targetValues === null) continue;
+            const targets = Array.isArray(targetValues) ? targetValues : [targetValues];
+            if (targets.length === 0 || typeof targets[0] !== 'string') continue;
+            entries.push({
+                pattern: String(pattern),
+                target: String(targets[0]),
+                wildcard: String(pattern).endsWith('/*')
+            });
+        }
+        return entries;
+    } catch {
+        return [];
+    }
+}
+
+function resolveAliasImportPath(specifier: string, projectRoot: string): string | null {
+    const aliases = parseTsconfigPathAliases(projectRoot);
+    if (aliases.length === 0) {
+        return normalizeImportPathWithAlias(specifier, projectRoot);
+    }
+
+    const fallbackAlias = normalizeImportPathWithAlias(specifier, projectRoot);
+
+    for (const alias of aliases) {
+        const pattern = alias.pattern;
+        const hasWildcard = alias.wildcard;
+
+        if (hasWildcard) {
+            const base = pattern.slice(0, -2);
+            if (!specifier.startsWith(base + '/')) {
+                continue;
+            }
+
+            const tail = specifier.slice(base.length + 1);
+            const target = alias.target.includes('*') ? alias.target.replace('*', tail) : alias.target;
+            const normalized = target.replace(/^\.\//, '');
+            return path.join(projectRoot, normalized);
+        }
+
+        if (specifier === pattern) {
+            const normalized = alias.target.replace(/^\.\//, '');
+            return path.join(projectRoot, normalized);
+        }
+    }
+
+    return fallbackAlias;
+}
+
+function resolveModuleCandidates(absBase: string): string[] {
+    const candidates: string[] = [];
+
+    if (path.extname(absBase)) {
+        candidates.push(absBase);
+        return candidates;
+    }
+
+    candidates.push(absBase);
+    for (const suffix of IMPORT_VALIDATION_FILE_SUFFIXES) {
+        candidates.push(`${absBase}${suffix}`);
+    }
+
+    return candidates;
+}
+
+async function getAvailableUiComponentNames(projectRoot: string): Promise<Set<string>> {
+    const profiler = new ProjectProfiler(projectRoot);
+    const profile = await profiler.getProfileData();
+    return new Set(profile.availableUIComponents.map((name: string) => name.toLowerCase()));
+}
+
+function getAvailableImportSource(node: ts.Node): string | null {
+    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
+        if (node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+            return node.moduleSpecifier.text.trim();
+        }
+    }
+    return null;
+}
+
+function isExternalPackageImport(specifier: string): boolean {
+    return !specifier.startsWith('.') &&
+        !specifier.startsWith('/') &&
+        !specifier.startsWith('@/') &&
+        !specifier.startsWith('~/' ) &&
+        !specifier.startsWith('@@/') &&
+        !specifier.includes(':');
+}
+
+function shouldValidateImportPath(specifier: string): boolean {
+    return !isExternalPackageImport(specifier);
+}
+
+async function validateImportsExistence(
+    content: string,
+    filePath: string,
+    baseDir: string
+): Promise<{ valid: boolean; message?: string }> {
+    const normalized = path.normalize(filePath).replace(/^\/+/, '');
+    if (!/\.(tsx|ts|jsx|js)$/.test(normalized)) return { valid: true };
+
+    const fullPath = path.join(baseDir, normalized);
+    const containingDir = path.dirname(fullPath);
+    const sourceFile = ts.createSourceFile(fullPath, content, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX);
+    const aliases = parseTsconfigPathAliases(baseDir);
+    const uiComponents = await getAvailableUiComponentNames(baseDir);
+    const uiComponentImports: string[] = [];
+    const missingImports: string[] = [];
+
+    const visitNode = (node: ts.Node) => {
+        const candidateSpecifier = getAvailableImportSource(node);
+        if (!candidateSpecifier || !shouldValidateImportPath(candidateSpecifier)) {
+            return;
+        }
+
+        let resolvedBase: string | null = null;
+        if (candidateSpecifier.startsWith('.')) {
+            resolvedBase = path.resolve(containingDir, candidateSpecifier);
+        } else if (candidateSpecifier.startsWith('/')) {
+            resolvedBase = path.join(baseDir, candidateSpecifier.replace(/^\/+/, ''));
+        } else if (candidateSpecifier.startsWith('@/')) {
+            resolvedBase = resolveAliasImportPath(candidateSpecifier, baseDir);
+        } else if (aliases.length > 0 && aliases.some((alias) => candidateSpecifier.startsWith(alias.pattern.replace('*', '')))) {
+            resolvedBase = resolveAliasImportPath(candidateSpecifier, baseDir);
+        } else if (candidateSpecifier.startsWith('~/') || candidateSpecifier.startsWith('@@/')) {
+            resolvedBase = null;
+        }
+
+        if (!resolvedBase) {
+            return;
+        }
+
+        const exists = resolveModuleCandidates(resolvedBase).some((candidate) => fs.existsSync(candidate));
+        if (exists) {
+            return;
+        }
+
+        if (candidateSpecifier.includes('/components/ui/')) {
+            const componentName = path.basename(candidateSpecifier).toLowerCase();
+            uiComponentImports.push(componentName);
+            if (!uiComponents.has(componentName)) {
+                const availableUi = Array.from(uiComponents).slice(0, MAX_IMPORT_VALIDATION_UI_HINT).join(', ') || 'None';
+                missingImports.push(
+                    `${candidateSpecifier} (UI component not found; available: ${availableUi})`
+                );
+                return;
+            }
+        }
+
+        missingImports.push(candidateSpecifier);
+    };
+
+    sourceFile.forEachChild((node) => {
+        visitNode(node);
+        ts.forEachChild(node, visitNode);
+    });
+
+    if (missingImports.length > 0) {
+        const detail =
+            `Missing module imports detected in ${filePath}: ${missingImports.join(', ')}` +
+            (uiComponentImports.length > 0 ? ` | UI import candidates: ${uiComponentImports.join(', ')}` : '');
+        return { valid: false, message: detail };
+    }
+
+    return { valid: true };
+}
+
+function resolveRelativeImportToMetadata(filePath: string, projectRoot: string): string | null {
+    const normalizedFile = filePath.replace(/^\/+/, '').replace(/\\/g, '/');
+    const appMetadataCandidates = [
+        path.join(projectRoot, 'app', 'metadata.ts'),
+        path.join(projectRoot, 'app', 'metadata.tsx'),
+        path.join(projectRoot, 'app', 'metadata.jsx'),
+        path.join(projectRoot, 'app', 'metadata.js'),
+    ];
+
+    const metadataFile = appMetadataCandidates.find((candidate) => fs.existsSync(candidate));
+    if (!metadataFile) {
+        return null;
+    }
+
+    const fileDir = path.dirname(path.join(projectRoot, normalizedFile));
+    const relative = path.relative(fileDir, metadataFile).replace(/\\/g, '/');
+    const withoutExt = relative.replace(/\.(tsx?|jsx?)$/, '');
+    return withoutExt.startsWith('.') ? withoutExt : `./${withoutExt}`;
+}
+
+function sanitizeMetadataImportAliases(content: string, filePath: string, projectRoot: string): string {
+    const normalizedImportPath = resolveRelativeImportToMetadata(filePath, projectRoot);
+    if (!normalizedImportPath) {
+        return content;
+    }
+
+    let mutated = false;
+    const replaced = content.replace(APP_METADATA_IMPORT_RE, (match, quote, importPath, _endQuote) => {
+        if (importPath.startsWith('@/app/metadata')) {
+            mutated = true;
+            return `from ${quote}${normalizedImportPath}${quote}`;
+        }
+        return match;
+    });
+
+    if (!mutated) {
+        return content;
+    }
+
+    return replaced;
+}
 
 function stripCommentsAndStringsForHookScan(source: string): string {
     return source
@@ -75,6 +313,32 @@ function getFirstNonEmptyCodeLine(content: string): string | null {
         return trimmed;
     }
     return null;
+}
+
+async function validateGeneratedTypeSafety(relativePath: string, baseDir: string, fileLabel: string): Promise<{ valid: boolean; message?: string }> {
+    const ext = path.extname(relativePath).toLowerCase();
+    if (!['.ts', '.tsx', '.js', '.jsx'].includes(ext)) {
+        return { valid: true };
+    }
+
+    const scriptPath = path.join(baseDir, 'scripts', 'validate-client-boundary.mjs');
+    if (!fs.existsSync(scriptPath)) {
+        return { valid: true };
+    }
+
+    const normalizedPath = path.resolve(baseDir, relativePath);
+    try {
+        await execAsync(`node "${scriptPath}" --types-only "${normalizedPath}"`, {
+            cwd: baseDir,
+            encoding: 'utf8',
+            maxBuffer: 1024 * 1024,
+        });
+        return { valid: true };
+    } catch (error: any) {
+        const raw = `${error.stdout || ''}${error.stderr || ''}`.trim();
+        const fallback = `Failed to validate TypeScript for ${fileLabel}.`;
+        return { valid: false, message: raw || error.message || fallback };
+    }
 }
 
 function ensureClientDirectiveForReactHooks(filePath: string, rawContent: string): string {
@@ -270,7 +534,17 @@ export async function write_code(filePath: string, content: string, baseDir: str
         const relativePath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
         const fullPath = path.resolve(baseDir, relativePath);
         const dir = path.dirname(fullPath);
-        const sanitizedContent = ensureClientDirectiveForReactHooks(filePath, content);
+        const withClientDirective = ensureClientDirectiveForReactHooks(filePath, content);
+        const sanitizedContent = sanitizeMetadataImportAliases(withClientDirective, relativePath, baseDir);
+
+        const importValidation = await validateImportsExistence(sanitizedContent, relativePath, baseDir);
+        if (!importValidation.valid) {
+            return {
+                success: false,
+                message: importValidation.message || `Invalid imports for ${filePath}`,
+                filePath,
+            };
+        }
 
         // Capture before content if file exists (for diff viewer)
         let before: string | null = null;
@@ -282,6 +556,17 @@ export async function write_code(filePath: string, content: string, baseDir: str
             fs.mkdirSync(dir, { recursive: true });
         }
         fs.writeFileSync(fullPath, sanitizedContent, 'utf-8');
+        const typeSafety = await validateGeneratedTypeSafety(relativePath, baseDir, filePath);
+        if (!typeSafety.valid) {
+            return {
+                success: false,
+                message: typeSafety.message || `Type validation failed for ${filePath}`,
+                filePath,
+                before,
+                after: sanitizedContent,
+                isNew: before === null
+            };
+        }
         const cacheKey = `${baseDir}:${relativePath}`;
         READ_CACHE.set(cacheKey, sanitizedContent);
 
@@ -326,7 +611,25 @@ Return the refactored code ONLY, with NO explanations.
             refactoredContent = result.content;
         }
 
-        return ensureClientDirectiveForReactHooks(targetFilePath, refactoredContent);
+        const withClientDirective = ensureClientDirectiveForReactHooks(targetFilePath, refactoredContent);
+        const sanitizedRefactorContent = targetFilePath
+            ? sanitizeMetadataImportAliases(withClientDirective, targetFilePath, process.cwd())
+            : withClientDirective;
+
+        if (targetFilePath) {
+            const relativePath = targetFilePath.startsWith('/') ? targetFilePath.substring(1) : targetFilePath;
+            const refactorImportValidation = await validateImportsExistence(sanitizedRefactorContent, relativePath, process.cwd());
+            if (!refactorImportValidation.valid) {
+                return `Error during refactoring: ${refactorImportValidation.message || `Invalid imports for ${targetFilePath}`}`;
+            }
+
+            const typeSafety = await validateGeneratedTypeSafety(relativePath, process.cwd(), targetFilePath);
+            if (!typeSafety.valid) {
+                return `Error during refactoring: ${typeSafety.message}`;
+            }
+        }
+
+        return sanitizedRefactorContent;
     } catch (error: any) {
         return `Error during refactoring: ${error.message}`;
     }
