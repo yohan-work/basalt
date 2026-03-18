@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npm run lint:rsc && next build",
+    "build": "npm run lint:rsc && npm run lint:types && next build",
     "start": "next start",
-    "lint:rsc": "node ./scripts/validate-client-boundary.mjs",
-    "lint": "npm run lint:rsc && eslint",
+    "lint:rsc": "node ./scripts/validate-client-boundary.mjs --boundary-only",
+    "lint:types": "node ./scripts/validate-client-boundary.mjs --types-only",
+    "lint:types:changed": "node ./scripts/validate-client-boundary.mjs --types-only --changed",
+    "lint": "npm run lint:rsc && npm run lint:types && eslint",
     "test": "echo 'No tests specified' && exit 0"
   },
   "dependencies": {
