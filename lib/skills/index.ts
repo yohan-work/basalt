@@ -10,6 +10,90 @@ import { MODEL_CONFIG } from '../model-config';
 const execAsync = promisify(exec);
 const READ_CACHE = new Map<string, string>();
 const DIR_CACHE = new Map<string, string[] | string>();
+const CLIENT_DIRECTIVE_RE = /^\s*['"]use client['"]/;
+const SERVER_DIRECTIVE_RE = /^\s*['"]use server['"]/;
+const REACT_HOOK_NAMES = [
+    'useState',
+    'useEffect',
+    'useMemo',
+    'useCallback',
+    'useReducer',
+    'useRef',
+    'useLayoutEffect',
+    'useTransition',
+    'useActionState',
+    'useOptimistic',
+    'useDeferredValue',
+    'useId',
+];
+const HOOK_USAGE_RE = new RegExp(`\\b(?:${REACT_HOOK_NAMES.join('|')})\\s*\\(`);
+const REACT_NAMESPACE_HOOK_USAGE_RE = new RegExp(`\\b(?:React|[A-Za-z_$][\\w$]*)\\.\\s*(?:${REACT_HOOK_NAMES.join('|')})\\s*\\(`);
+
+function stripCommentsAndStringsForHookScan(source: string): string {
+    return source
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/\/\/.*$/gm, ' ')
+        .replace(/(["'`])(?:\\.|(?!\1).)*\1/g, ' ')
+        .replace(/`[\s\S]*?`/g, ' ');
+}
+
+function hasHookUsageForBoundary(content: string): boolean {
+    const cleaned = stripCommentsAndStringsForHookScan(content);
+    return HOOK_USAGE_RE.test(cleaned) || REACT_NAMESPACE_HOOK_USAGE_RE.test(cleaned);
+}
+
+function getFirstNonEmptyCodeLine(content: string): string | null {
+    const lines = content.split('\n');
+    let inBlockComment = false;
+    for (const line of lines) {
+        let trimmed = line.trim();
+        if (!trimmed) continue;
+
+        if (inBlockComment) {
+            if (trimmed.includes('*/')) {
+                const afterComment = trimmed.split('*/')[1]?.trim();
+                inBlockComment = false;
+                if (!afterComment) continue;
+                trimmed = afterComment;
+            } else {
+                continue;
+            }
+        }
+
+        if (trimmed.startsWith('/*')) {
+            if (trimmed.includes('*/')) {
+                const afterComment = trimmed.split('*/')[1]?.trim();
+                if (!afterComment) continue;
+                trimmed = afterComment;
+            } else {
+                inBlockComment = true;
+                continue;
+            }
+        }
+
+        if (!trimmed || trimmed.startsWith('//')) continue;
+        return trimmed;
+    }
+    return null;
+}
+
+function ensureClientDirectiveForReactHooks(filePath: string, rawContent: string): string {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    if (!/\.(tsx|jsx)$/.test(normalizedPath)) {
+        return rawContent;
+    }
+
+    if (!hasHookUsageForBoundary(rawContent)) {
+        return rawContent;
+    }
+
+    const firstNonEmpty = getFirstNonEmptyCodeLine(rawContent);
+    if (firstNonEmpty && (CLIENT_DIRECTIVE_RE.test(firstNonEmpty) || SERVER_DIRECTIVE_RE.test(firstNonEmpty))) {
+        return rawContent;
+    }
+
+    return `'use client';\n\n${rawContent}`;
+}
 
 export function reset_runtime_caches() {
     READ_CACHE.clear();
@@ -186,6 +270,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         const relativePath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
         const fullPath = path.resolve(baseDir, relativePath);
         const dir = path.dirname(fullPath);
+        const sanitizedContent = ensureClientDirectiveForReactHooks(filePath, content);
 
         // Capture before content if file exists (for diff viewer)
         let before: string | null = null;
@@ -196,16 +281,16 @@ export async function write_code(filePath: string, content: string, baseDir: str
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
-        fs.writeFileSync(fullPath, content, 'utf-8');
+        fs.writeFileSync(fullPath, sanitizedContent, 'utf-8');
         const cacheKey = `${baseDir}:${relativePath}`;
-        READ_CACHE.set(cacheKey, content);
+        READ_CACHE.set(cacheKey, sanitizedContent);
 
         return {
             success: true,
             message: `Successfully wrote to ${filePath} `,
             filePath,
             before,
-            after: content,
+            after: sanitizedContent,
             isNew: before === null
         };
     } catch (error: any) {
@@ -213,7 +298,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
     }
 }
 
-export async function refactor_code(code: string, instructions: string) {
+export async function refactor_code(code: string, instructions: string, targetFilePath: string = '') {
     try {
         const systemPrompt = `
 You are an expert Refactoring Agent.
@@ -234,11 +319,14 @@ Return the refactored code ONLY, with NO explanations.
 
         // result.files will likely contain the refactored content if LLM followed "File:" format,
         // but since we want the raw content or the first file:
+        let refactoredContent: string;
         if (result.files && result.files.length > 0) {
-            return result.files[0].content;
+            refactoredContent = result.files[0].content;
+        } else {
+            refactoredContent = result.content;
         }
 
-        return result.content;
+        return ensureClientDirectiveForReactHooks(targetFilePath, refactoredContent);
     } catch (error: any) {
         return `Error during refactoring: ${error.message}`;
     }

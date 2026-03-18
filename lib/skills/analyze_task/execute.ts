@@ -92,7 +92,8 @@ ${skillsInfo}
 
     } catch (e) {
         console.error('LLM Analysis Failed, falling back to heuristic', e);
-        const fallbackRequired = resolveRequiredAgents([], agents);
+        const available = (availableAgents && availableAgents.length > 0) ? availableAgents : AgentLoader.listAgents();
+        const fallbackRequired = resolveRequiredAgents([], available);
         return {
             complexity: 'medium',
             required_agents: fallbackRequired,

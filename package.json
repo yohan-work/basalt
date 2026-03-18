@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npm run lint:rsc && next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint:rsc": "node ./scripts/validate-client-boundary.mjs",
+    "lint": "npm run lint:rsc && eslint",
     "test": "echo 'No tests specified' && exit 0"
   },
   "dependencies": {
