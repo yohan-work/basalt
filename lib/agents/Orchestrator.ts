@@ -91,6 +91,7 @@ export class Orchestrator {
     private metadataCache: Record<string, any> | null = null;
     private metadataLastFlushedAt = 0;
     private readonly METADATA_FLUSH_INTERVAL_MS = 1500;
+    private readonly skillArgCache = new Map<string, any[]>();
 
     // Simple in-memory lock to prevent concurrent executions of the same task
     private static runningTasks = new Set<string>();
@@ -856,6 +857,94 @@ export class Orchestrator {
         'lint_code', 'typecheck', 'check_responsive'
     ];
 
+    private buildArgCacheKey(
+        skillName: string,
+        taskDescription: string,
+        projectPath: string,
+        techStack: string,
+        stepDescription?: string
+    ): string {
+        return [
+            this.normalizeAgentKey(skillName),
+            this.normalizeAgentKey(taskDescription || ''),
+            this.normalizeAgentKey(projectPath || ''),
+            this.normalizeAgentKey(techStack || ''),
+            this.normalizeAgentKey(stepDescription || ''),
+        ].join('|');
+    }
+
+    private buildFastPathArgs(
+        skillName: string,
+        taskDescription: string,
+        stepDescription?: string
+    ): { arguments: any[]; cached: boolean } | null {
+        const normalized = this.normalizeAgentKey(skillName);
+        const baseText = `${stepDescription || ''} ${taskDescription || ''}`;
+
+        const extractLikelyPath = (input: string): string | null => {
+            const quotedMatch = input.match(/['"`]([^'"`]+)['"`]/);
+            if (quotedMatch && quotedMatch[1]) {
+                const value = quotedMatch[1].trim();
+                if (value && /[./]/.test(value) && !value.startsWith('http')) {
+                    return value;
+                }
+            }
+
+            const tokens = input
+                .split(/\s+/)
+                .map((token) => token.replace(/[.,)]$/, '').trim())
+                .filter(Boolean);
+            const pathLike = tokens.find((token) =>
+                /(?:^|\/)([A-Za-z0-9._-]+\/?)+/.test(token) && (/\.[A-Za-z0-9]+$/.test(token) || token === '.' || token === 'app' || token === 'src')
+            );
+            return pathLike || null;
+        };
+
+        if (normalized === 'read_codebase') {
+            const pathArg = extractLikelyPath(baseText) || 'package.json';
+            return { arguments: [pathArg], cached: true };
+        }
+
+        if (normalized === 'list_directory') {
+            const pathArg = extractLikelyPath(baseText) || '.';
+            return { arguments: [pathArg], cached: true };
+        }
+
+        if (normalized === 'manage_git') {
+            const lower = baseText.toLowerCase();
+            if (lower.includes('status')) return { arguments: ['status'], cached: true };
+            if (lower.includes('add')) return { arguments: ['.'], cached: true };
+            if (lower.includes('checkout')) return { arguments: ['.'], cached: true };
+            if (lower.includes('commit')) {
+                const quoteMatch = /"([^"]+)"|'([^']+)'/.exec(baseText);
+                const commitMessage = quoteMatch ? (quoteMatch[1] || quoteMatch[2] || '').trim() : `${this.taskId.slice(0, 8)} changes`;
+                return { arguments: ['commit', commitMessage], cached: true };
+            }
+            if (lower.includes('push')) return { arguments: ['push'], cached: true };
+            if (lower.includes('merge')) return { arguments: [''], cached: true };
+            return { arguments: ['status'], cached: true };
+        }
+
+        if (normalized === 'lint_code') {
+            return { arguments: ['.'], cached: true };
+        }
+
+        if (normalized === 'typecheck') {
+            return { arguments: ['.', 'tsconfig.json'], cached: true };
+        }
+
+        if (normalized === 'check_environment') {
+            return { arguments: [], cached: true };
+        }
+
+        if (normalized === 'check_responsive') {
+            const pathArg = extractLikelyPath(baseText) || '/';
+            return { arguments: [pathArg], cached: true };
+        }
+
+        return null;
+    }
+
     private async generateSkillArguments(
         skillName: string,
         taskDescription: string,
@@ -869,6 +958,19 @@ export class Orchestrator {
             await this.log('System', `[Budget] ${skillName} 인자 생성을 건너뜁니다.`, { type: 'WARNING' });
             return [];
         }
+
+        const cacheKey = this.buildArgCacheKey(skillName, taskDescription, projectPath, techStack, stepDescription);
+        const cachedArgs = this.skillArgCache.get(cacheKey);
+        if (cachedArgs) {
+            return cachedArgs;
+        }
+
+        const fastPath = this.buildFastPathArgs(skillName, taskDescription, stepDescription);
+        if (fastPath) {
+            this.skillArgCache.set(cacheKey, fastPath.arguments);
+            return fastPath.arguments;
+        }
+
         const skillDef = AgentLoader.loadSkill(skillName);
         const inputsDef = skillDef.inputs ? `\nInputs Definition:\n${skillDef.inputs}` : '';
 
@@ -931,9 +1033,16 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 await this.accumulateTokens(response.__tokens.prompt_eval_count, response.__tokens.eval_count);
             }
 
-            return response.arguments || [];
+            const args = Array.isArray((response as any)?.arguments) ? response.arguments : [];
+            this.skillArgCache.set(cacheKey, args);
+            return args;
         } catch (e: any) {
             console.error(`Failed to generate arguments for ${skillName}`, e);
+            const fallback = this.buildFastPathArgs(skillName, taskDescription, stepDescription);
+            if (fallback) {
+                this.skillArgCache.set(cacheKey, fallback.arguments);
+                return fallback.arguments;
+            }
             return [];
         }
     }
