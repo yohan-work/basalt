@@ -8,6 +8,7 @@ import { ContextManager } from '../context-manager';
 import { StreamEmitter } from '../stream-emitter';
 import { ProjectProfiler } from '../profiler';
 import { MODEL_CONFIG } from '../model-config';
+import { isAgentBrowserAvailable } from '../browser/agent-browser';
 import {
     BudgetEvent,
     DEFAULT_BUDGET_POLICY,
@@ -354,12 +355,12 @@ export class Orchestrator {
         taskDescription: string,
         stepDescription: string,
         codePrompt: string
-    ): {
+    ): Promise<{
         path: string;
         repairs: string[];
         failed: boolean;
         message?: string;
-    } {
+    }> {
         const repairs: string[] = [];
         if (!rawPath || typeof rawPath !== 'string') {
             return {
@@ -545,6 +546,10 @@ export class Orchestrator {
             'typecheck',
             'refactor_code',
             'check_responsive',
+            'visual_test',
+            'e2e_test',
+            'browse_web',
+            'screenshot_page',
             'check_environment',
             'list_directory',
             'apply_design_system',
@@ -999,7 +1004,7 @@ export class Orchestrator {
     // Skills that only need a file path or simple string — FAST model is sufficient
     private static readonly FAST_ARG_SKILLS = [
         'read_codebase', 'list_directory', 'check_environment', 'manage_git',
-        'lint_code', 'typecheck', 'check_responsive'
+        'lint_code', 'typecheck', 'check_responsive', 'screenshot_page'
     ];
 
     private buildArgCacheKey(
@@ -1082,9 +1087,9 @@ export class Orchestrator {
             return { arguments: [], cached: true };
         }
 
-        if (normalized === 'check_responsive') {
-            const pathArg = extractLikelyPath(baseText) || '/';
-            return { arguments: [pathArg], cached: true };
+        if (normalized === 'check_responsive' || normalized === 'screenshot_page') {
+            const devUrl = process.env.DEV_SERVER_URL || 'http://localhost:3000';
+            return { arguments: [devUrl], cached: true };
         }
 
         return null;
@@ -1842,6 +1847,37 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
             this.emitter?.emit({ type: 'skill_result', skill: 'verify_final_output', summary: verification.verified ? 'Verified' : 'Failed' });
 
             if (verification.verified) {
+                // Browser-based visual verification (non-blocking)
+                const browserAvailable = await isAgentBrowserAvailable();
+                if (browserAvailable) {
+                    try {
+                        const devServerUrl = process.env.DEV_SERVER_URL || 'http://localhost:3000';
+                        this.emitter?.emit({ type: 'skill_execute', skill: 'screenshot_page' });
+                        const screenshotResult = await skills.screenshot_page(devServerUrl, true);
+                        if (screenshotResult.success) {
+                            await this.log(mainAgentName, 'Page screenshot captured', { screenshotPath: screenshotResult.screenshotPath });
+                        }
+
+                        this.emitter?.emit({ type: 'skill_execute', skill: 'check_responsive' });
+                        const responsiveResult = await skills.check_responsive(devServerUrl);
+                        await this.log(mainAgentName, 'Responsive check completed', { summary: responsiveResult.summary });
+
+                        await this.updateMetadata({
+                            visualVerification: {
+                                screenshotPath: screenshotResult.screenshotPath,
+                                responsiveSummary: responsiveResult.summary,
+                                mobile: responsiveResult.mobile?.ok,
+                                tablet: responsiveResult.tablet?.ok,
+                                desktop: responsiveResult.desktop?.ok,
+                                checkedAt: new Date().toISOString(),
+                            },
+                        });
+                        this.emitter?.emit({ type: 'skill_result', skill: 'check_responsive', summary: responsiveResult.summary });
+                    } catch (browserErr: any) {
+                        await this.log('System', `Browser visual verification skipped: ${browserErr.message}`);
+                    }
+                }
+
                 await this.log(mainAgentName, 'Verification Successful. Starting Git Automation...');
                 this.emitter?.emit({ type: 'skill_execute', skill: 'manage_git' });
 

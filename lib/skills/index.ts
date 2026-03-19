@@ -35,6 +35,53 @@ const APP_METADATA_IMPORT_RE = /from\s+(['"])(@\/app\/metadata(?:\.(?:t|j)sx?)?)
 const MAX_IMPORT_VALIDATION_UI_HINT = 12;
 const IMPORT_VALIDATION_FILE_SUFFIXES = ['.ts', '.tsx', '.js', '.jsx', '.d.ts', '.mjs', '.cjs', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
 
+const BUILTIN_NODE_MODULES = new Set([
+    'assert', 'buffer', 'child_process', 'cluster', 'console', 'constants',
+    'crypto', 'dgram', 'dns', 'domain', 'events', 'fs', 'http', 'http2',
+    'https', 'module', 'net', 'os', 'path', 'perf_hooks', 'process',
+    'punycode', 'querystring', 'readline', 'repl', 'stream', 'string_decoder',
+    'sys', 'timers', 'tls', 'tty', 'url', 'util', 'v8', 'vm', 'wasi',
+    'worker_threads', 'zlib',
+]);
+
+const installedPackagesCache = new Map<string, Set<string>>();
+
+function getInstalledPackages(projectRoot: string): Set<string> {
+    if (installedPackagesCache.has(projectRoot)) {
+        return installedPackagesCache.get(projectRoot)!;
+    }
+
+    const pkgPath = path.join(projectRoot, 'package.json');
+    if (!fs.existsSync(pkgPath)) {
+        const empty = new Set<string>();
+        installedPackagesCache.set(projectRoot, empty);
+        return empty;
+    }
+
+    try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        const allDeps = new Set<string>([
+            ...Object.keys(pkg.dependencies || {}),
+            ...Object.keys(pkg.devDependencies || {}),
+            ...Object.keys(pkg.peerDependencies || {}),
+        ]);
+        installedPackagesCache.set(projectRoot, allDeps);
+        return allDeps;
+    } catch {
+        const empty = new Set<string>();
+        installedPackagesCache.set(projectRoot, empty);
+        return empty;
+    }
+}
+
+function getBasePackageName(specifier: string): string {
+    if (specifier.startsWith('@')) {
+        const parts = specifier.split('/');
+        return parts.length >= 2 ? `${parts[0]}/${parts[1]}` : specifier;
+    }
+    return specifier.split('/')[0];
+}
+
 function normalizeImportPathWithAlias(specifier: string, projectRoot: string): string | null {
     if (!specifier || specifier.startsWith('.') || specifier.startsWith('/')) {
         return null;
@@ -164,12 +211,25 @@ async function validateImportsExistence(
     const sourceFile = ts.createSourceFile(fullPath, content, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX);
     const aliases = parseTsconfigPathAliases(baseDir);
     const uiComponents = await getAvailableUiComponentNames(baseDir);
+    const installedPkgs = getInstalledPackages(baseDir);
     const uiComponentImports: string[] = [];
     const missingImports: string[] = [];
+    const missingPackages: string[] = [];
 
     const visitNode = (node: ts.Node) => {
         const candidateSpecifier = getAvailableImportSource(node);
-        if (!candidateSpecifier || !shouldValidateImportPath(candidateSpecifier)) {
+        if (!candidateSpecifier) return;
+
+        if (isExternalPackageImport(candidateSpecifier)) {
+            const basePkg = getBasePackageName(candidateSpecifier);
+            if (BUILTIN_NODE_MODULES.has(basePkg) || candidateSpecifier.startsWith('node:')) return;
+            if (installedPkgs.size > 0 && !installedPkgs.has(basePkg)) {
+                missingPackages.push(candidateSpecifier);
+            }
+            return;
+        }
+
+        if (!shouldValidateImportPath(candidateSpecifier)) {
             return;
         }
 
@@ -215,11 +275,27 @@ async function validateImportsExistence(
         ts.forEachChild(node, visitNode);
     });
 
+    const allErrors: string[] = [];
+
+    if (missingPackages.length > 0) {
+        const installed = installedPkgs.size > 0
+            ? Array.from(installedPkgs).sort().join(', ')
+            : 'N/A';
+        allErrors.push(
+            `Uninstalled npm package imports in ${filePath}: ${missingPackages.join(', ')}. ` +
+            `Only packages listed in package.json may be used. Installed: ${installed}`
+        );
+    }
+
     if (missingImports.length > 0) {
-        const detail =
+        allErrors.push(
             `Missing module imports detected in ${filePath}: ${missingImports.join(', ')}` +
-            (uiComponentImports.length > 0 ? ` | UI import candidates: ${uiComponentImports.join(', ')}` : '');
-        return { valid: false, message: detail };
+            (uiComponentImports.length > 0 ? ` | UI import candidates: ${uiComponentImports.join(', ')}` : '')
+        );
+    }
+
+    if (allErrors.length > 0) {
+        return { valid: false, message: allErrors.join(' | ') };
     }
 
     return { valid: true };
@@ -362,6 +438,7 @@ function ensureClientDirectiveForReactHooks(filePath: string, rawContent: string
 export function reset_runtime_caches() {
     READ_CACHE.clear();
     DIR_CACHE.clear();
+    installedPackagesCache.clear();
 }
 
 function getDynamicSkillModel(skillName: string): string {
@@ -655,9 +732,11 @@ export async function generate_scss(moduleName: string) {
 `;
 }
 
-export async function check_responsive(url: string) {
-    return { mobile: true, desktop: true };
-}
+export { check_responsive } from './check_responsive/execute';
+export { visual_test } from './visual_test/execute';
+export { e2e_test } from './e2e_test/execute';
+export { browse_web } from './browse_web/execute';
+export { screenshot_page } from './screenshot_page/execute';
 
 // --- QA & Debugger Skills ---
 export async function run_shell_command(command: string, cwd: string = process.cwd()) {
@@ -739,9 +818,16 @@ export async function manage_git(action: 'checkout' | 'commit' | 'merge' | 'add'
 
 
 export async function check_environment() {
+    let agentBrowser = false;
+    try {
+        const { stdout } = await execAsync('agent-browser --version', { timeout: 5_000 });
+        agentBrowser = !!stdout.trim();
+    } catch { /* not installed */ }
+
     return {
         node: process.version,
-        supabase: !!process.env.NEXT_PUBLIC_SUPABASE_URL
+        supabase: !!process.env.NEXT_PUBLIC_SUPABASE_URL,
+        agentBrowser,
     };
 }
 

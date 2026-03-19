@@ -33,6 +33,7 @@ export class ProjectProfiler {
         return {
             techStack: packageInfo.stack,
             dependencies: packageInfo.deps,
+            depsWithVersions: packageInfo.depsWithVersions,
             availableUIComponents: componentsInfo.names,
             availableUIComponentsByPath: componentsInfo.components,
             hasNamedExports: componentsInfo.hasNamedExports,
@@ -49,7 +50,7 @@ export class ProjectProfiler {
     private getPackageInfo() {
         try {
             const pkgPath = path.join(this.projectRoot, 'package.json');
-            if (!fs.existsSync(pkgPath)) return { stack: 'unknown', deps: [] };
+            if (!fs.existsSync(pkgPath)) return { stack: 'unknown', deps: [], depsWithVersions: {} as Record<string, string> };
 
             const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
             const deps = { ...pkg.dependencies, ...pkg.devDependencies };
@@ -60,10 +61,11 @@ export class ProjectProfiler {
 
             return {
                 stack,
-                deps: Object.keys(deps)
+                deps: Object.keys(deps),
+                depsWithVersions: deps as Record<string, string>,
             };
         } catch (e) {
-            return { stack: 'unknown', deps: [] };
+            return { stack: 'unknown', deps: [], depsWithVersions: {} as Record<string, string> };
         }
     }
 
@@ -201,6 +203,88 @@ export class ProjectProfiler {
     }
 
     /**
+     * Returns a concise, human-readable summary of the project's tech stack
+     * suitable for injecting into LLM prompt constraints.
+     */
+    public async getStackSummary(): Promise<string> {
+        const data = await this.getProfileData();
+        const versions = data.depsWithVersions;
+
+        const KEY_PACKAGES = [
+            'next', 'react', 'vue', 'nuxt', 'svelte', '@sveltejs/kit', 'angular',
+            'typescript', 'tailwindcss', 'sass', 'styled-components', '@emotion/react',
+            'shadcn-ui', '@mui/material', 'antd', 'vuetify', 'chakra-ui',
+            'zod', 'prisma', '@supabase/supabase-js', 'drizzle-orm',
+            'framer-motion', 'three', 'd3', 'recharts',
+        ];
+
+        const detectedPackages = KEY_PACKAGES
+            .filter(pkg => versions[pkg])
+            .map(pkg => `${pkg} ${versions[pkg]}`);
+
+        const hasShadcnUi = data.availableUIComponents.length > 0
+            || data.dependencies.some(d => d.includes('radix-ui'));
+
+        const lines: string[] = [];
+
+        lines.push(`프레임워크/런타임: ${data.techStack}`);
+
+        if (versions['react']) lines.push(`React: ${versions['react']}`);
+        if (versions['vue']) lines.push(`Vue: ${versions['vue']}`);
+
+        if (versions['typescript']) {
+            lines.push(`언어: TypeScript ${versions['typescript']}`);
+        } else {
+            lines.push('언어: JavaScript');
+        }
+
+        if (data.hasTailwind) {
+            lines.push(`스타일링: Tailwind CSS ${versions['tailwindcss'] || ''}`);
+        } else if (versions['sass']) {
+            lines.push(`스타일링: Sass/SCSS ${versions['sass']}`);
+        } else if (versions['styled-components']) {
+            lines.push(`스타일링: styled-components ${versions['styled-components']}`);
+        } else if (versions['@emotion/react']) {
+            lines.push(`스타일링: Emotion ${versions['@emotion/react']}`);
+        } else {
+            lines.push('스타일링: 일반 CSS');
+        }
+
+        if (hasShadcnUi) {
+            const componentList = data.availableUIComponents.slice(0, 15).join(', ');
+            lines.push(`UI 라이브러리: shadcn/ui (사용 가능한 컴포넌트: ${componentList || 'N/A'})`);
+        } else if (versions['@mui/material']) {
+            lines.push(`UI 라이브러리: MUI ${versions['@mui/material']}`);
+        } else if (versions['antd']) {
+            lines.push(`UI 라이브러리: Ant Design ${versions['antd']}`);
+        }
+
+        lines.push(`라우터 구조: ${data.structure}`);
+
+        if (data.structure.includes('app-router')) {
+            lines.push('Client Component: 인터랙티브 요소(hooks, 이벤트 핸들러 등) 사용 시 반드시 "use client" 디렉티브 필요');
+        }
+
+        const otherNotable = detectedPackages.filter(
+            p => !['next', 'react', 'vue', 'typescript', 'tailwindcss', 'sass',
+                'styled-components', '@emotion/react', '@mui/material', 'antd'].some(
+                    k => p.startsWith(k)
+                )
+        );
+        if (otherNotable.length > 0) {
+            lines.push(`주요 의존성: ${otherNotable.join(', ')}`);
+        }
+
+        const allDeps = data.dependencies.sort().join(', ');
+        if (allDeps) {
+            lines.push(`설치된 전체 패키지: ${allDeps}`);
+            lines.push('중요: 위 목록에 없는 npm 패키지는 절대 import하지 마세요. 설치되지 않은 패키지를 사용하면 빌드 에러가 발생합니다.');
+        }
+
+        return lines.join('\n');
+    }
+
+    /**
      * Formats the profile into a string for LLM prompts.
      */
     public async getContextString(): Promise<string> {
@@ -230,6 +314,8 @@ export class ProjectProfiler {
             ? data.availableUIComponentsByPath.map((entry: AvailableUiComponent) => path.basename(entry.absolutePath)).join(', ')
             : availableComponentNames;
 
+        const allDeps = data.dependencies.sort().join(', ') || 'None';
+
         return `
 [PROJECT CONTEXT]
 - Tech Stack: ${data.techStack}
@@ -241,7 +327,8 @@ export class ProjectProfiler {
 - Route Policy Hint: ${routePolicyHint}
 - Available UI Components (shadcn/ui): ${availableComponentNames}
 - Available UI Component Files: ${availableComponentFiles}
-- Important Dependencies: ${data.dependencies.filter(d => ['lucide', 'framer-motion', 'clsx'].some(k => d.includes(k))).join(', ')}
+- INSTALLED PACKAGES (package.json): ${allDeps}
+- CRITICAL: You MUST ONLY import npm packages that appear in the INSTALLED PACKAGES list above. Do NOT use any package that is not listed. If a package is missing, use built-in alternatives (e.g., use native fetch instead of axios, use URLSearchParams instead of qs).
 `.trim();
     }
 

@@ -212,6 +212,16 @@ GENERAL PRINCIPLE:
 - Do NOT stick to a fixed template. Adapt your component choices to the specific requirements.
 
 MANDATORY CODING RULES:
+- 🚨 PACKAGE IMPORT RULE (ZERO TOLERANCE) 🚨:
+  - You may ONLY import npm packages that are explicitly listed in the [PROJECT CONTEXT] under "INSTALLED PACKAGES (package.json)".
+  - If a package is NOT in that list, you MUST NOT import it. Use built-in alternatives instead:
+    - NO axios → use native \`fetch()\`
+    - NO lodash → use native JS methods (map, filter, reduce, structuredClone)
+    - NO moment/dayjs → use native \`Date\` or \`Intl.DateTimeFormat\`
+    - NO uuid → use \`crypto.randomUUID()\`
+    - NO classnames/clsx → use template literals (unless clsx IS installed)
+    - NO qs → use \`URLSearchParams\`
+  - Violating this rule causes a FATAL "Module not found" build error that crashes the entire application.
 - Use shadcn/ui components from @/components/ui/ ONLY IF they are explicitly listed as available in the [PROJECT CONTEXT] (Button, Input, etc.).
 - Use Tailwind CSS for layout and spacing ONLY IF "Tailwind CSS IS installed" is explicitly mentioned in the [PROJECT CONTEXT].
 - If Tailwind is NOT present, DO NOT use tailwind classes (e.g., no "flex", "grid", "gap-4", "p-4"). Use standard CSS or inline styles.
