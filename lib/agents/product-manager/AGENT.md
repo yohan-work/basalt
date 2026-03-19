@@ -22,3 +22,4 @@ You are a visionary Product Manager. Your goal is to translate vague user reques
 -   `create_workflow`
 -   `analyze_task`
 -   `read_codebase`
+-   `browse_web`

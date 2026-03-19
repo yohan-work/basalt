@@ -1,7 +1,45 @@
-import { list_directory } from '@/lib/skills/index'; // Import from local index if needed, or implement here
+import { list_directory } from '@/lib/skills/index';
 import { AgentLoader } from '@/lib/agent-loader';
 import * as llm from '@/lib/llm';
 import { MODEL_CONFIG } from '@/lib/model-config';
+import { AgentBrowser, isAgentBrowserAvailable } from '@/lib/browser/agent-browser';
+
+interface VisualVerification {
+    snapshotSummary?: string;
+    screenshotPath?: string;
+    annotations?: string[];
+}
+
+async function tryVisualVerification(projectPath: string): Promise<VisualVerification | null> {
+    const available = await isAgentBrowserAvailable();
+    if (!available) return null;
+
+    const devServerUrl = process.env.DEV_SERVER_URL || 'http://localhost:3000';
+    const sessionId = `verify-${Date.now()}`;
+    const browser = new AgentBrowser(sessionId);
+
+    try {
+        const openResult = await browser.open(devServerUrl);
+        if (!openResult.success) return null;
+
+        await browser.waitForLoad('networkidle');
+
+        const snap = await browser.snapshot({ interactive: true, compact: true });
+        const snapshotSummary = snap.success ? (snap.snapshot ?? '').slice(0, 2000) : undefined;
+
+        const shot = await browser.screenshot(`verify-${Date.now()}.png`, { annotate: true });
+
+        return {
+            snapshotSummary,
+            screenshotPath: shot.success ? shot.path : undefined,
+            annotations: shot.annotations,
+        };
+    } catch {
+        return null;
+    } finally {
+        await browser.close().catch(() => {});
+    }
+}
 
 export async function verify_final_output(taskDescription: string, projectPath: string = process.cwd()) {
     try {
@@ -10,28 +48,45 @@ export async function verify_final_output(taskDescription: string, projectPath: 
 
         const skillDef = AgentLoader.loadSkill('verify_final_output');
 
+        const visual = await tryVisualVerification(projectPath);
+
+        let visualContext = '';
+        if (visual?.snapshotSummary) {
+            visualContext = `\n\n--- Live Page Accessibility Snapshot (from agent-browser) ---\n${visual.snapshotSummary}\n`;
+        }
+        if (visual?.annotations && visual.annotations.length > 0) {
+            visualContext += `\n--- Annotated Elements ---\n${visual.annotations.join('\n')}\n`;
+        }
+
         const systemPrompt = `${skillDef.instructions}
 
 Task Description: ${taskDescription}
 Current Project Files(Top Level):
 ${fileListStr.slice(0, 1000)}
-`;
+${visualContext}`;
 
         const schema = AgentLoader.extractSection(skillDef.instructions, 'Schema') || `{ "verified": true, "notes": "" }`;
 
         const verification = await llm.generateJSON(
             systemPrompt,
-            "Verify task completion against project structure.",
+            "Verify task completion against project structure and live page state.",
             schema,
             MODEL_CONFIG.SMART_MODEL
         );
+
+        if (visual) {
+            verification.visualVerification = {
+                screenshotPath: visual.screenshotPath,
+                browserUsed: true,
+            };
+        }
 
         return verification;
     } catch (e: any) {
         console.warn('Verification LLM failed, defaulting to success with warning.');
         return {
             verified: true,
-            notes: `Verification logic failed but defaulting to true to avoid blocking.Error: ${e.message} `
+            notes: `Verification logic failed but defaulting to true to avoid blocking. Error: ${e.message}`
         };
     }
 }
