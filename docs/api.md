@@ -39,7 +39,7 @@
 | POST | `/api/agent/modify-element` | 특정 요소 기준 수정 요청 |
 | POST | `/api/agent/approve` | Review 태스크 최종 승인 |
 | POST | `/api/agent/discuss` | 브레인스토밍 대화 생성 |
-| POST | `/api/agent/enhance-prompt` | 사용자 프롬프트 고도화 |
+| POST | `/api/agent/enhance-prompt` | 사용자 프롬프트 고도화 (프로젝트 스택 동적 분석) |
 | POST | `/api/agent/skills` | 스킬 직접 실행 |
 | GET | `/api/agent/stream` | SSE 진행 스트리밍 |
 

@@ -60,6 +60,36 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - `discuss` 엔드포인트로 실행 전후 브레인스토밍 대화 생성
 - `enhance-prompt`로 사용자 초안 품질 향상
 
+## 11) 동적 기술 스택 분석 기반 프롬프트 보강
+
+- `enhance-prompt` API가 대상 프로젝트의 `package.json`을 실제로 분석하여 제약 조건을 동적으로 생성
+- `CreateTaskModal`에서 `selectedProjectId`를 `enhance-prompt`에 전달
+- 서버 측에서 `ProjectProfiler.getStackSummary()`를 호출하여 프레임워크, 언어, 스타일링, UI 라이브러리, 라우터 구조, 전체 설치 패키지 목록을 한국어로 요약
+- `projectId`가 없는 경우 기존 범용 프롬프트로 폴백하여 하위 호환성 유지
+- 적용 파일: `components/CreateTaskModal.tsx`, `app/api/agent/enhance-prompt/route.ts`, `lib/profiler.ts`
+
+## 12) 미설치 패키지 import 방어 (4중 방어 체계)
+
+LLM이 프로젝트에 설치되지 않은 npm 패키지(예: `axios`, `lodash`)를 import하는 코드를 생성하여 `Module not found` 빌드 에러가 발생하는 문제를 근본적으로 차단합니다.
+
+### 방어 계층 1: 하드 밸리데이션 (`lib/skills/index.ts`)
+- `validateImportsExistence()`가 외부 npm 패키지 import도 `package.json` 기반으로 검증
+- 미설치 패키지를 import하면 파일 쓰기 자체가 거부되어 재시도/보정 루프 유도
+- Node.js 빌트인 모듈(`fs`, `path`, `crypto` 등)은 허용 리스트로 제외
+- `installedPackagesCache`로 반복 조회 비용 최소화, `reset_runtime_caches()`에서 함께 초기화
+
+### 방어 계층 2: LLM 컨텍스트 (`lib/profiler.ts` — `getContextString()`)
+- `[PROJECT CONTEXT]`에 **INSTALLED PACKAGES (package.json)** 전체 목록 명시
+- "여기 없는 패키지는 절대 import하지 마라"는 CRITICAL 지시문 포함
+
+### 방어 계층 3: 코드 생성 시스템 프롬프트 (`lib/llm.ts`)
+- `CODE_GENERATION_SYSTEM_RULES`에 **PACKAGE IMPORT RULE (ZERO TOLERANCE)** 섹션 추가
+- `axios → fetch()`, `lodash → native JS`, `moment → Date` 등 구체적 대체 방법 명시
+
+### 방어 계층 4: enhance-prompt 스택 요약 (`lib/profiler.ts` — `getStackSummary()`)
+- 전체 설치 패키지 목록 + 미설치 패키지 사용 금지 경고 포함
+- `enhance-prompt` 시스템 프롬프트에도 "설치되지 않은 패키지를 제약 조건에 넣지 마라" 명시
+
 ## 8) react-grab 연동
 
 - 클립보드 기반 요소 컨텍스트 붙여넣기 지원

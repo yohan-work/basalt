@@ -21,7 +21,7 @@
 ### 실행 기능
 
 - `features.md`  
-  - 완료 수정, 요소 수정, 리뷰 제안, approve, discuss, enhance-prompt, react-grab 연동, TTS, 실행 시각화
+  - 완료 수정, 요소 수정, 리뷰 제안, approve, discuss, enhance-prompt, react-grab 연동, TTS, 실행 시각화, 동적 기술 스택 분석, 미설치 패키지 방어
 - `api.md`  
   - `/app/api/**/route.ts` 기준 전체 엔드포인트 목록 및 사용 사례
 - `agents-skills.md`  

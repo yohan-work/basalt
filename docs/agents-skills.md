@@ -33,12 +33,13 @@
 - 스킬은 `lib/skills/SKILL.md` + 각 스킬 폴더의 `SKILL.md`로 정의됩니다.
 - 런타임은 `Universal Skill Executor` 형태로, 하드코딩된 TS 호출 대신 프롬프트 기반 동적 실행을 기본으로 합니다.
 - 코드 작성 시 `ProjectProfiler`를 통해 라우터/스타일/컴포넌트 컨텍스트를 반영하고, 신규 페이지 생성은 기본적으로 루트 페이지가 아닌 비루트 라우트 경로를 선택합니다.
-- `write_code`는 사전 검증으로 존재하지 않는 import 경로(`@/components/ui/*`, 상대/별칭 경로)를 감지해 실패를 발생시켜 재시도/보정 루프를 유도합니다.
-- 안정화 정책은 아래 4개 축으로 운영됩니다.
+- `write_code`는 사전 검증으로 존재하지 않는 import 경로(`@/components/ui/*`, 상대/별칭 경로) 및 **미설치 npm 패키지**를 감지해 실패를 발생시켜 재시도/보정 루프를 유도합니다.
+- 안정화 정책은 아래 5개 축으로 운영됩니다.
   1. `라우팅 정책`: 요청이 신규 기능 페이지일 때 `app/page.tsx`, `pages/index.tsx` 같은 루트 덮어쓰기를 기본 금지하고, 적합한 비루트 경로로 재매핑.
   2. `RSC 경계 준수`: React Hook(`useState`, `useEffect`) 사용 시 클라이언트 컴포넌트 경계(`"use client"`)를 강제하고, 경로 기반 라우터 규칙과 연계해 서버 컴포넌트 오염을 방지.
   3. `임포트 존재성`: `@/`, 상대/별칭 경로 및 `@/components/ui/*` 임포트가 실제 파일/내보내기 존재성 검사에 통과하지 않으면 쓰기를 실패 처리.
-  4. `실패 기록/복구`: 실행 중 `write_code` 실패는 즉시 메타데이터 `executionRepairs`에 기록하고, 경로 정규화/검증 실패를 다음 스텝에서 보정 대상화.
+  4. `외부 패키지 검증`: npm 패키지 import가 `package.json`의 `dependencies`/`devDependencies`에 실제 존재하는지 검증. 미설치 패키지(`axios`, `lodash` 등) import 시 파일 쓰기를 거부하여 `Module not found` 빌드 에러를 사전 차단. Node.js 빌트인 모듈은 허용 리스트로 제외.
+  5. `실패 기록/복구`: 실행 중 `write_code` 실패는 즉시 메타데이터 `executionRepairs`에 기록하고, 경로 정규화/검증 실패를 다음 스텝에서 보정 대상화.
 
 ### 적용 파일(반영 위치)
 - `lib/profiler.ts`: 라우터/스타일/컴포넌트 컨텍스트 강화
