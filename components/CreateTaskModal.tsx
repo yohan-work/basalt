@@ -132,7 +132,7 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
             const res = await fetch('/api/agent/enhance-prompt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, description })
+                body: JSON.stringify({ title, description, projectId: selectedProjectId })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Failed to enhance prompt');
