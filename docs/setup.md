@@ -28,6 +28,9 @@ FAST_MODEL=llama3.2:latest
 SMART_MODEL=gemma3:latest
 CODING_MODEL=qwen2.5-coder:7b
 MOCK_LLM=false
+
+# consult_agents 참가자 상한 (기본 8, 최대 16)
+# CONSULT_MAX_PARTICIPANTS=8
 ```
 
 ## 사용 예시

@@ -10,7 +10,9 @@ const root = path.join(__dirname, '..');
 
 const REQUIRED_PATHS = [
     'lib/agents/Orchestrator.ts',
+    'lib/agent-roster-heuristics.ts',
     'lib/skills/index.ts',
+    'docs/templates/new-agent-AGENT.md',
     'lib/pre-execution/gates.ts',
     'lib/pre-execution/task-context.ts',
     'app/api/agent/clarify/generate/route.ts',

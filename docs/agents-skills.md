@@ -24,9 +24,24 @@
 
 ## 에이전트
 
-- `lib/agents/AGENT.md` 기반으로 역할별 에이전트가 정의됩니다.
+- `lib/agents/<role>/AGENT.md` 기반으로 역할별 에이전트가 정의됩니다.
 - 주요 역할: `main-agent`, `software-engineer`, `product-manager`, `qa`, `devops-engineer`, `style-architect`, `technical-writer`, `database-administrator`, `git-manager`
 - 각 역할은 태스크 특성에 맞는 스킬 체인을 선택합니다.
+
+### analyze_task → create_workflow → consult_agents 흐름
+
+- `analyze_task`는 디스크의 전체 에이전트 목록을 보고 `required_agents`를 고릅니다. 동일 요청 텍스트에 대해 `lib/agent-roster-heuristics.ts`가 키워드로 `required_agents`를 보강할 수 있습니다.
+- `create_workflow`는 분석에 나온 역할 위주로 `Available Agents` 블록을 구성합니다.
+- `consult_agents`는 `required_agents`·요약/목표 텍스트 키워드·(복잡도 high 시) QA·코어 4역할을 우선순위로 합친 뒤, `CONSULT_MAX_PARTICIPANTS`(기본 8, 최대 16)로 잘라 참가자 목록을 만듭니다. 구현: `lib/agent-roster-heuristics.ts`, 호출부 `lib/skills/consult_agents/execute.ts`.
+
+### 신규 에이전트 추가 체크리스트
+
+1. `lib/agents/<role-slug>/AGENT.md` 추가(frontmatter + `## Available Skills`).
+2. 스킬 이름이 실제 `lib/skills/<name>/`와 일치하는지 확인.
+3. 토론/분석에 키워드로 끌어올지 결정 → 필요 시 `lib/agent-roster-heuristics.ts`의 `ROLE_KEYWORD_HINTS` 또는 `resolveTargetedConsultRole` 갱신.
+4. `lib/skills/analyze_task/SKILL.md` 치트시트에 역할 한 줄 설명 추가 검토.
+5. 이 문서의 역할 목록(위 bullet) 업데이트.
+6. 템플릿은 `docs/templates/new-agent-AGENT.md` 참고.
 
 ## 스킬 시스템
 
