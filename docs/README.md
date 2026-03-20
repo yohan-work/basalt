@@ -4,13 +4,15 @@
 
 ## 빠른 진입
 
-- `README.md`는 프로젝트 개요, 설치/실행, 주요 링크만 유지합니다.
+- `README.md`는 문제 정의·AI 역할 요약·퀵스타트·문서 인덱스를 담고, 세부는 아래 문서로 분리합니다.
 - 아래 문서에서 세부 내용을 확인하세요.
 
 ## 문서 인덱스
 
 ### 아키텍처
 
+- `architecture/overview.md`  
+  - 시스템 구성도·디렉터리 맵(루브릭 P6용 1페이지 요약)
 - `architecture/orchestrator.md`  
   - Orchestrator/상태 흐름/재시도/잠금/메타데이터 저장 규칙
 - `architecture/team-orchestrator.md`  
