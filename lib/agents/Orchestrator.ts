@@ -18,6 +18,12 @@ import {
     StrategyPreset,
 } from '../orchestration/metrics';
 import { applyPresetDefaults, resolveStepPolicy } from '../orchestration/policy';
+import {
+    formatClarificationForPlan,
+    generateImpactPreviewJson,
+    buildDefaultImpactPreview,
+    type ImpactPreviewPayload,
+} from '../pre-execution/gates';
 
 interface AgentTask {
     id: string; // Supabase UUID
@@ -938,13 +944,16 @@ export class Orchestrator {
                 }
             }
 
+            const clarifyBlock = formatClarificationForPlan((task as any)?.metadata?.clarifyingGate);
+            const effectiveDescription = `${taskDescription}${clarifyBlock}`;
+
             // Load all available agents, excluding git-manager which is reserved for Orchestrator automation
             const availableAgents = AgentLoader.listAgents().filter(a => a.name !== 'git-manager');
             await this.log(mainAgentName, `Loaded ${availableAgents.length} potential agents.`);
 
             // Analyze with context
             this.emitter?.emit({ type: 'skill_execute', skill: 'analyze_task' });
-            const analysis = await skills.analyze_task(taskDescription, availableAgents, codebaseContext, this.emitter);
+            const analysis = await skills.analyze_task(effectiveDescription, availableAgents, codebaseContext, this.emitter);
             await this.log(mainAgentName, 'Task Analysis Completed', analysis);
             this.emitter?.emit({ type: 'skill_result', skill: 'analyze_task', summary: analysis.summary || 'Analysis complete' });
 
@@ -977,6 +986,41 @@ export class Orchestrator {
             await this.log(mainAgentName, '에이전트 간 협의가 완료되었습니다. 수립된 워크플로우를 저장합니다.', workflow);
             this.emitter?.emit({ type: 'skill_result', skill: 'create_workflow', summary: `${workflow.steps?.length || 0}개 단계의 워크플로우가 생성되었습니다.` });
 
+            const workflowSteps =
+                workflowSanity.workflow.steps
+                    ?.map((s: { agent: string; action: string }, i: number) => `${i + 1}. [${s.agent}] ${s.action}`)
+                    .join('\n') || '';
+            const analysisSummary =
+                typeof (analysis as any)?.summary === 'string'
+                    ? (analysis as any).summary
+                    : JSON.stringify(analysis).slice(0, 2000);
+
+            this.emitter?.emit({ type: 'skill_execute', skill: 'impact_preview' });
+            const previewAt = new Date().toISOString();
+            let impactCore: ImpactPreviewPayload;
+            try {
+                impactCore = await generateImpactPreviewJson({
+                    taskDescription: effectiveDescription,
+                    analysisSummary,
+                    workflowSteps,
+                    codebaseSnippet: codebaseContext,
+                });
+            } catch (previewErr: any) {
+                await this.log(
+                    'System',
+                    `Impact preview failed: ${previewErr?.message || previewErr}`,
+                    { type: 'WARNING' }
+                );
+                impactCore = buildDefaultImpactPreview(
+                    '영향 미리보기를 생성하지 못했습니다. 플랜 단계를 직접 확인한 뒤 «영향 범위 확인»을 눌러 주세요.'
+                );
+            }
+            const impactPreview = { ...impactCore, generatedAt: previewAt };
+            this.emitter?.emit({
+                type: 'skill_result',
+                skill: 'impact_preview',
+                summary: impactPreview.summary.slice(0, 200),
+            });
 
             // Save Plan to Metadata
             await this.updateMetadata({
@@ -988,6 +1032,12 @@ export class Orchestrator {
                     required_agents: workflowSanity.workflow.required_agents,
                 },
                 agentCollaboration: this.collaborationGraph,
+                impactPreview,
+                executionPreflight: {
+                    requiresImpactAck: true,
+                    impactAcknowledgedAt: null,
+                    impactPreviewGeneratedAt: previewAt,
+                },
             });
 
             // Wait for user confirmation
@@ -1258,6 +1308,18 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 return;
             }
             this.metadataCache = task.metadata || {};
+
+            const preflight = task.metadata?.executionPreflight as
+                | { requiresImpactAck?: boolean; impactAcknowledgedAt?: string | null }
+                | undefined;
+            if (preflight?.requiresImpactAck === true && !preflight.impactAcknowledgedAt) {
+                const msg =
+                    '실행 전에 태스크 상세에서 «영향 범위 확인»을 눌러 예상 변경 범위를 확인해 주세요.';
+                await this.log('System', msg, { type: 'WARNING' });
+                this.emitter?.emit({ type: 'error', message: msg });
+                this.emitter?.emit({ type: 'done', status: 'blocked_preflight' });
+                return;
+            }
 
             // --- Persistent Lock Check ---
             const currentLock = task.metadata?.lock;
