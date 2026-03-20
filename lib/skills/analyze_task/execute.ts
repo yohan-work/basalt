@@ -1,12 +1,6 @@
+import { augmentRequiredAgentsFromTaskText, normalizeAgentKey } from '@/lib/agent-roster-heuristics';
 import { AgentDefinition, AgentLoader } from '@/lib/agent-loader';
 import * as llm from '@/lib/llm';
-
-function normalizeAgentKey(value: string): string {
-    return String(value || '')
-        .toLowerCase()
-        .replace(/[\s_]+/g, '-')
-        .trim();
-}
 
 function resolveRequiredAgents(raw: any, availableAgents: AgentDefinition[]): string[] {
     const normalizedAgents = new Set<string>();
@@ -39,6 +33,7 @@ function sanitizeAnalysis(raw: any, taskDescription: string, availableAgents: Ag
     const analysis = raw || {};
     const complexity = ['low', 'medium', 'high'].includes(analysis?.complexity) ? analysis.complexity : 'medium';
     const requiredAgents = resolveRequiredAgents(analysis?.required_agents || [], availableAgents);
+    const widenedAgents = augmentRequiredAgentsFromTaskText(taskDescription, requiredAgents, availableAgents);
     const summary =
         typeof analysis?.summary === 'string' && analysis.summary.trim().length > 0
             ? analysis.summary
@@ -47,7 +42,7 @@ function sanitizeAnalysis(raw: any, taskDescription: string, availableAgents: Ag
     return {
         ...analysis,
         complexity,
-        required_agents: requiredAgents,
+        required_agents: widenedAgents,
         summary,
     };
 }

@@ -840,7 +840,9 @@ export class Orchestrator {
                 analysisForStep,
                 participants,
                 context,
-                this.emitter
+                this.emitter,
+                [],
+                { extraHintText: [task.description, step.description, step.action].filter(Boolean).join('\n') }
             );
             const thoughts = Array.isArray(rawThoughts)
                 ? rawThoughts.slice(0, this.executionOptions.maxDiscussionThoughts)
@@ -964,7 +966,14 @@ export class Orchestrator {
             await this.log(mainAgentName, "에이전트 그룹 논의 시작: 작업 범위를 확정하고 최적의 실행 계획을 수립합니다.", { type: 'THOUGHT' });
             this.emitter?.emit({ type: 'skill_execute', skill: 'consult_agents' });
 
-            const discussion = await skills.consult_agents(analysis, availableAgents, codebaseContext, this.emitter);
+            const discussion = await skills.consult_agents(
+                analysis,
+                availableAgents,
+                codebaseContext,
+                this.emitter,
+                [],
+                { extraHintText: effectiveDescription }
+            );
 
             // Log each individual thought from the discussion
             console.log(`[Orchestrator] Saving ${discussion.length} discussion items to DB...`);

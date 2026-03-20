@@ -1,20 +1,28 @@
 import { AgentDefinition, AgentLoader } from '@/lib/agent-loader';
+import { pickConsultParticipantRoles, resolveTargetedConsultRole } from '@/lib/agent-roster-heuristics';
 import * as llm from '@/lib/llm';
 import { MODEL_CONFIG } from '@/lib/model-config';
+
+export type ConsultAgentsOptions = {
+    /** Merged into keyword heuristics (e.g. raw task description). */
+    extraHintText?: string;
+};
 
 export async function consult_agents(
     taskAnalysis: any,
     availableAgents: AgentDefinition[],
     codebaseContext: string,
     emitter: any = null,
-    pastThoughts: any[] = []
+    pastThoughts: any[] = [],
+    consultOptions?: ConsultAgentsOptions
 ) {
     try {
-        const requiredAgents = taskAnalysis.required_agents || [];
-        const CORE_UI_AGENTS = ['product-manager', 'main-agent', 'software-engineer', 'style-architect'];
-        const activeRoles = Array.from(new Set([...requiredAgents, ...CORE_UI_AGENTS]));
-        const agents = availableAgents.filter(a => activeRoles.includes(a.role));
+        const participantRoles = pickConsultParticipantRoles(taskAnalysis, availableAgents, {
+            extraHintText: consultOptions?.extraHintText,
+        });
+        const agents = availableAgents.filter((a) => participantRoles.includes(a.role));
         const agentsList = agents.map(a => `- ${a.name} (Role: ${a.role}, Expertise: ${a.skills.join(', ')})`).join('\n');
+        console.log(`[Consultation] participants (${agents.length}): ${participantRoles.join(', ')}`);
 
         const contextDiscussion = pastThoughts.length > 0
             ? `Previous Discussion History:\n${pastThoughts.map(t => `[${t.agent_role || t.agent}] ${t.message || t.thought}`).join('\n')}\n`
@@ -24,16 +32,9 @@ export async function consult_agents(
         const lastUserThought = pastThoughts.filter(t => t.agent_role === 'user').pop();
         const lastUserMessage = lastUserThought ? (lastUserThought.message || lastUserThought.thought || '') : '';
 
-        let targetedAgentRole = null;
-        const msgLower = lastUserMessage.toLowerCase();
-        if (msgLower.includes('디자이너') || msgLower.includes('스타일') || msgLower.includes('디자인')) {
-            targetedAgentRole = 'style-architect';
-        } else if (msgLower.includes('엔지니어') || msgLower.includes('개발') || msgLower.includes('프론트') || msgLower.includes('백엔드')) {
-            targetedAgentRole = 'software-engineer';
-        } else if (msgLower.includes('pm') || msgLower.includes('기획') || msgLower.includes('피엠')) {
-            targetedAgentRole = 'product-manager';
-        } else if (msgLower.includes('리드') || msgLower.includes('팀장') || msgLower.includes('메인')) {
-            targetedAgentRole = 'main-agent';
+        let targetedAgentRole = resolveTargetedConsultRole(lastUserMessage);
+        if (targetedAgentRole && !participantRoles.includes(targetedAgentRole)) {
+            targetedAgentRole = null;
         }
 
         const targetedRule = targetedAgentRole

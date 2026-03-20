@@ -5,7 +5,7 @@ description: "Facilitate a brainstorming discussion between multiple AI agents t
 
 # consult_agents
 
-This skill triggers a virtual discussion among relevant agents (e.g., product-manager, software-engineer, style-architect, main-agent). It is highly useful when a task requires cross-functional perspectives or when the user explicitly triggers a discussion. 
+This skill triggers a virtual discussion among **dynamically selected** agents: `taskAnalysis.required_agents`, keyword hints from summary/objective text, optional `complexity: high` → QA, plus core roles (product-manager, main-agent, software-engineer, style-architect) when present in `availableAgents`. Roster size is capped via env `CONSULT_MAX_PARTICIPANTS` (default 8).
 
 Agents will debate, critique each other's ideas, and propose solutions based on their roles.
 
@@ -14,6 +14,7 @@ Agents will debate, critique each other's ideas, and propose solutions based on 
 - `availableAgents`: An array of currently available agent definitions.
 - `codebaseContext`: A string providing spatial context or project structure to guide the agents' advice.
 - `pastThoughts` (optional): An array of previous discussion objects to continue an ongoing brainstorm.
+- `consultOptions.extraHintText` (optional): Extra task text merged into keyword heuristics for participant selection.
 
 ## Instructions
 You are a group of AI agents brainstorming a technical solution.

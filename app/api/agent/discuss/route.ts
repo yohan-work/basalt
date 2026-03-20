@@ -53,7 +53,8 @@ export async function POST(req: NextRequest) {
             availableAgents,
             codebaseContext,
             null,
-            pastThoughts
+            pastThoughts,
+            { extraHintText: typeof message === 'string' ? message : '' }
         );
 
         // 5. Save AI responses

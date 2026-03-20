@@ -17,6 +17,7 @@ Use ONLY the available agents and their specific skills.
 
 IMPORTANT:
 - Use the exact agent role slugs (e.g. "software-engineer", "product-manager", "qa").
+- Every `agent` field MUST be one of the roles listed under **Available Agents and their skills** above. Do not invent new role names.
 - MANDATORY: Use the 'codebaseContext' provided above to determine actual file paths and folder structures.
 - For new pages, check if the project uses 'app/' (App Router) or 'pages/' (Page Router) and follow that pattern.
 - Each 'description' MUST be UNIQUE, SPECIFIC and ACTIONABLE for the designated agent.
