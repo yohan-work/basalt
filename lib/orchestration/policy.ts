@@ -98,7 +98,7 @@ export function applyPresetDefaults(preset: StrategyPreset): {
                 maxDiscussionThoughts: 5,
                 carryDiscussionToPrompt: true,
                 budgetPolicy: {
-                    maxTokensPerTask: 26000,
+                    maxTokensPerTask: 42000,
                     maxDiscussionCalls: 18,
                     maxSkillRetries: 2,
                 },
@@ -109,7 +109,7 @@ export function applyPresetDefaults(preset: StrategyPreset): {
                 maxDiscussionThoughts: 2,
                 carryDiscussionToPrompt: false,
                 budgetPolicy: {
-                    maxTokensPerTask: 12000,
+                    maxTokensPerTask: 22000,
                     maxDiscussionCalls: 4,
                     maxSkillRetries: 1,
                 },
@@ -120,7 +120,7 @@ export function applyPresetDefaults(preset: StrategyPreset): {
                 maxDiscussionThoughts: 1,
                 carryDiscussionToPrompt: false,
                 budgetPolicy: {
-                    maxTokensPerTask: 9000,
+                    maxTokensPerTask: 14000,
                     maxDiscussionCalls: 2,
                     maxSkillRetries: 0,
                 },
@@ -131,7 +131,7 @@ export function applyPresetDefaults(preset: StrategyPreset): {
                 maxDiscussionThoughts: 3,
                 carryDiscussionToPrompt: true,
                 budgetPolicy: {
-                    maxTokensPerTask: 18000,
+                    maxTokensPerTask: 32000,
                     maxDiscussionCalls: 10,
                     maxSkillRetries: 1,
                 },

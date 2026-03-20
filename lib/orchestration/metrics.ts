@@ -61,7 +61,8 @@ export interface TeamExecutionMetrics {
 }
 
 export const DEFAULT_BUDGET_POLICY: ExecutionBudgetPolicy = {
-    maxTokensPerTask: 18000,
+    /** 플랜·토론·read_codebase·코드 생성 재시도까지 포함하면 18k는 쉽게 소진됨 */
+    maxTokensPerTask: 32000,
     maxDiscussionCalls: 10,
     maxSkillRetries: 1,
     maxDbWritesPerTask: 200,

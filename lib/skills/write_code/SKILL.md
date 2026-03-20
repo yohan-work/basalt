@@ -25,6 +25,7 @@ Writes string content to a specified file path.
 8.  **NO BROWSER APIS IN SSR**: Never access `window`, `document`, or `localStorage` directly in a component body. Always wrap them in `useEffect`.
 9.  **NO `<a>` TAGS**: Use `import Link from 'next/link'` for all internal navigation to prevent SPA reloads.
 10. **IMPORT EXISTENCE VALIDATION**: `@/components/ui/*`, 별칭 경로, 상대 경로 import는 실제 존재하는 파일만 사용한다. 존재하지 않는 import는 코드 저장 시 실패 처리하고, 회복 가능한 경우 HTML/CSS 대체안을 제안한다.
+11. **NPM DEPENDENCIES (CRITICAL)**: External packages (`date-fns`, `lodash`, `axios`, etc.) MUST already appear in the target project's `package.json` `dependencies` or `devDependencies`. If a package is not installed, `write_code` will reject the file. Before importing, infer from `[PROJECT CONTEXT]` / `package.json` which libraries exist. Prefer **no new dependencies**: e.g. format dates with `Intl.DateTimeFormat` or native `Date` instead of `date-fns` unless the project already uses it.
 
 ## UI Component Guidelines (MANDATORY)
 

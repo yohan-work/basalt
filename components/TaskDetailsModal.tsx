@@ -30,6 +30,23 @@ import { ExecutionDiscussionTimeline } from './ExecutionDiscussionTimeline';
 import { CollaborationMatrix } from './analytics/team/CollaborationMatrix';
 import { getTaskPerformanceBenchmark, type TaskPerformanceBenchmark } from '@/lib/analytics';
 import type { ReviewSuggestionSet } from '@/lib/types/review-actions';
+import type { QaSignoffStored } from '@/lib/qa/signoff-report';
+import { QA_ARTIFACT_SLOTS, type QaArtifactSlot } from '@/lib/qa/artifact-slots';
+
+function qaSlotLabelKo(slot: QaArtifactSlot): string {
+    switch (slot) {
+        case 'main':
+            return '메인(전체 페이지)';
+        case 'mobile':
+            return '모바일 뷰포트';
+        case 'tablet':
+            return '태블릿 뷰포트';
+        case 'desktop':
+            return '데스크톱 뷰포트';
+        default:
+            return slot;
+    }
+}
 import type {
     ExecuteStreamOptions,
     ExecutionDiscussionEntry,
@@ -294,7 +311,7 @@ export function TaskDetailsModal({
     onExecutionOptionsChange,
     onExecute,
 }: TaskDetailsModalProps) {
-    const [view, setView] = useState<'details' | 'logs' | 'changes' | 'live' | 'brainstorm'>('details'); // Updated state type
+    const [view, setView] = useState<'details' | 'logs' | 'changes' | 'live' | 'brainstorm' | 'signoff'>('details');
     const [isRetrying, setIsRetrying] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isApproving, setIsApproving] = useState(false);
@@ -401,6 +418,16 @@ export function TaskDetailsModal({
         };
     }, [open, task?.id, task?.project_id]);
 
+    useEffect(() => {
+        if (!open || !task) return;
+        const qs = (task.metadata as Record<string, unknown> | undefined)?.qaSignoff;
+        const allowSignoff =
+            Boolean(qs) || ['testing', 'review', 'done'].includes(task.status);
+        if (view === 'signoff' && !allowSignoff) {
+            setView('details');
+        }
+    }, [open, task, view]);
+
     if (!task) return null;
 
     const metadata = (task.metadata || {}) as Record<string, unknown> & {
@@ -431,6 +458,9 @@ export function TaskDetailsModal({
     const analysis = metadata.analysis as { complexity?: string; required_agents?: string[]; summary?: string } | undefined;
     const workflow = metadata.workflow as { steps: Array<{ action: string; agent: string }> } | undefined;
     const verification = metadata.verification as { verified: boolean; notes: string } | undefined;
+    const qaSignoff = metadata.qaSignoff as QaSignoffStored | undefined;
+    const showQaSignoffTab =
+        Boolean(qaSignoff) || ['testing', 'review', 'done'].includes(task.status);
     const progress = metadata.progress as ProgressInfo | undefined;
     const fileChanges = metadata.fileChanges as FileChange[] | undefined;
     const isFailed = task.status === 'failed';
@@ -863,6 +893,16 @@ export function TaskDetailsModal({
                                 >
                                     <Sparkles className={`w-3 h-3 inline mr-1 text-blue-500`} /> Brainstorm
                                 </button>
+                                {showQaSignoffTab && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setView('signoff')}
+                                        className={`px-3 py-1 text-xs rounded-sm font-medium transition-all ${view === 'signoff' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                                        aria-pressed={view === 'signoff'}
+                                    >
+                                        <ShieldCheck className="w-3 h-3 inline mr-1 text-emerald-600" /> 검수 완료
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => setView('logs')}
 
@@ -1651,6 +1691,92 @@ export function TaskDetailsModal({
                                         <p className="text-sm">No plan generated yet.</p>
                                         <p className="text-xs">Click &quot;Confirm &amp; Plan&quot; to generate.</p>
                                     </div>
+                                )}
+                            </div>
+                        ) : view === 'signoff' ? (
+                            <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-8">
+                                {!qaSignoff ? (
+                                    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground text-center space-y-2">
+                                        <ShieldCheck className="h-10 w-10 opacity-25" />
+                                        <p className="text-sm">검수 데이터가 아직 없습니다.</p>
+                                        <p className="text-xs max-w-md">
+                                            Dev 실행이 끝나면 Test 칸반으로 넘어가기 직전에 QA 스모크·캡처·검수 요약이 기록됩니다. 이 메시지가 보이면 아직 해당 파이프라인이 끝나지 않았거나(실행 중)·실패했을 수 있습니다. 대상 앱 dev 서버(예: 3001)와 agent-browser가 필요합니다.
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="space-y-2">
+                                            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                                                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                                                최종 판정
+                                            </h3>
+                                            <p className="text-sm leading-relaxed border rounded-md p-3 bg-muted/30">
+                                                {qaSignoff.finalVerdictKo}
+                                            </p>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <h3 className="text-sm font-semibold text-muted-foreground">검수 요약</h3>
+                                            <pre className="whitespace-pre-wrap text-xs leading-relaxed border rounded-md p-3 bg-muted/20 font-sans">
+                                                {qaSignoff.narrativeKo}
+                                            </pre>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <h3 className="text-sm font-semibold text-muted-foreground">대상 URL · 시각</h3>
+                                            <p className="text-xs text-muted-foreground break-all">{qaSignoff.targetUrl}</p>
+                                            <p className="text-[10px] text-muted-foreground">
+                                                기록 시각: {new Date(qaSignoff.checkedAt).toLocaleString()}
+                                            </p>
+                                        </div>
+                                        {qaSignoff.incidents.length > 0 && (
+                                            <div className="space-y-2">
+                                                <h3 className="text-sm font-semibold text-muted-foreground">이슈 · 보정 기록</h3>
+                                                <ul className="space-y-2">
+                                                    {qaSignoff.incidents.map((inc, idx) => (
+                                                        <li
+                                                            key={`${inc.source}-${idx}-${inc.title.slice(0, 24)}`}
+                                                            className="text-xs border rounded-md p-3 bg-background"
+                                                        >
+                                                            <div className="flex items-center gap-2 mb-1">
+                                                                <Badge variant="outline" className="text-[10px]">
+                                                                    {inc.source}
+                                                                </Badge>
+                                                                <span className="font-medium">{inc.title}</span>
+                                                            </div>
+                                                            <p className="text-muted-foreground whitespace-pre-wrap">{inc.detailKo}</p>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                        <div className="space-y-3">
+                                            <h3 className="text-sm font-semibold text-muted-foreground">스크린샷 (agent-browser)</h3>
+                                            {qaSignoff.artifactSlots.length === 0 ? (
+                                                <p className="text-xs text-muted-foreground">
+                                                    저장된 캡처가 없습니다. 검증 통과 시 브라우저 도구가 있어야 복사됩니다. 프로젝트 경로에{' '}
+                                                    <code className="text-[10px] bg-muted px-1 rounded">.basalt/basalt-qa/{task.id}/</code>{' '}
+                                                    가 생성되는지 확인하세요.
+                                                </p>
+                                            ) : (
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    {QA_ARTIFACT_SLOTS.filter((s) => qaSignoff.artifactSlots.includes(s)).map((slot) => (
+                                                        <div key={slot} className="space-y-1">
+                                                            <p className="text-xs font-medium text-muted-foreground">
+                                                                {qaSlotLabelKo(slot)}
+                                                            </p>
+                                                            <div className="rounded-md border bg-muted/10 overflow-hidden">
+                                                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                                <img
+                                                                    src={`/api/project/qa-artifact?taskId=${encodeURIComponent(task.id)}&slot=${slot}&t=${encodeURIComponent(qaSignoff.checkedAt)}`}
+                                                                    alt={`QA ${slot}`}
+                                                                    className="w-full h-auto max-h-[min(520px,70vh)] object-contain object-top bg-neutral-950/5 dark:bg-neutral-950/40"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
                                 )}
                             </div>
                         ) : (

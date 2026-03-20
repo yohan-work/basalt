@@ -17,6 +17,10 @@ export class ProjectProfiler {
         this.projectRoot = projectRoot;
     }
 
+    public getProjectRoot(): string {
+        return this.projectRoot;
+    }
+
     /**
      * Gets summary of the project environment.
      */

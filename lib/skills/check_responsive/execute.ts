@@ -12,7 +12,7 @@ interface ViewportCheck {
     error?: string;
 }
 
-interface ResponsiveResult {
+export interface ResponsiveResult {
     mobile: ViewportCheck;
     tablet: ViewportCheck;
     desktop: ViewportCheck;

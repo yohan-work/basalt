@@ -281,9 +281,14 @@ async function validateImportsExistence(
         const installed = installedPkgs.size > 0
             ? Array.from(installedPkgs).sort().join(', ')
             : 'N/A';
+        const missingRoots = [...new Set(missingPackages.map((s) => getBasePackageName(s)))];
+        const installHint =
+            missingRoots.length > 0
+                ? ` 복구: 프로젝트 루트에서 \`npm install ${missingRoots.join(' ')}\` 실행 후 같은 단계를 재시도하거나, 해당 import를 제거하고 이미 설치된 패키지·표준 API(예: 날짜는 \`Intl.DateTimeFormat\`)만 사용하세요.`
+                : '';
         allErrors.push(
             `Uninstalled npm package imports in ${filePath}: ${missingPackages.join(', ')}. ` +
-            `Only packages listed in package.json may be used. Installed: ${installed}`
+            `Only packages listed in package.json may be used. Installed: ${installed}.${installHint}`
         );
     }
 

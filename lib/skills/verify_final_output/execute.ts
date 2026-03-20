@@ -1,5 +1,6 @@
 import { list_directory } from '@/lib/skills/index';
 import { AgentLoader } from '@/lib/agent-loader';
+import { resolveQaPageUrl } from '@/lib/project-dev-server';
 import * as llm from '@/lib/llm';
 import { MODEL_CONFIG } from '@/lib/model-config';
 import { AgentBrowser, isAgentBrowserAvailable } from '@/lib/browser/agent-browser';
@@ -10,11 +11,14 @@ interface VisualVerification {
     annotations?: string[];
 }
 
-async function tryVisualVerification(projectPath: string): Promise<VisualVerification | null> {
+async function tryVisualVerification(
+    projectPath: string,
+    taskMetadata?: Record<string, unknown> | null
+): Promise<VisualVerification | null> {
     const available = await isAgentBrowserAvailable();
     if (!available) return null;
 
-    const devServerUrl = process.env.DEV_SERVER_URL || 'http://localhost:3000';
+    const devServerUrl = resolveQaPageUrl(projectPath, taskMetadata);
     const sessionId = `verify-${Date.now()}`;
     const browser = new AgentBrowser(sessionId);
 
@@ -41,14 +45,18 @@ async function tryVisualVerification(projectPath: string): Promise<VisualVerific
     }
 }
 
-export async function verify_final_output(taskDescription: string, projectPath: string = process.cwd()) {
+export async function verify_final_output(
+    taskDescription: string,
+    projectPath: string = process.cwd(),
+    taskMetadata?: Record<string, unknown> | null
+) {
     try {
         const files = await list_directory('.', projectPath);
         const fileListStr = Array.isArray(files) ? files.join('\n') : String(files);
 
         const skillDef = AgentLoader.loadSkill('verify_final_output');
 
-        const visual = await tryVisualVerification(projectPath);
+        const visual = await tryVisualVerification(projectPath, taskMetadata);
 
         let visualContext = '';
         if (visual?.snapshotSummary) {
@@ -78,6 +86,7 @@ ${visualContext}`;
             verification.visualVerification = {
                 screenshotPath: visual.screenshotPath,
                 browserUsed: true,
+                qaDevServerUrl: resolveQaPageUrl(projectPath, taskMetadata),
             };
         }
 

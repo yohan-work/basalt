@@ -9,6 +9,11 @@ import { StreamEmitter } from '../stream-emitter';
 import { ProjectProfiler } from '../profiler';
 import { MODEL_CONFIG } from '../model-config';
 import { isAgentBrowserAvailable } from '../browser/agent-browser';
+import { resolveQaPageUrl } from '../project-dev-server';
+import { persistQaArtifactsFromCapture } from '../qa/artifact-paths';
+import type { QaArtifactSlot } from '../qa/artifact-slots';
+import { runQaPageSmokeCheck, type QaPageCheckResult } from '../qa/page-smoke-check';
+import { buildQaSignoffReport } from '../qa/signoff-report';
 import {
     BudgetEvent,
     DEFAULT_BUDGET_POLICY,
@@ -1147,7 +1152,8 @@ export class Orchestrator {
         }
 
         if (normalized === 'check_responsive' || normalized === 'screenshot_page') {
-            const devUrl = process.env.DEV_SERVER_URL || 'http://localhost:3000';
+            const projectPath = this.profiler?.getProjectRoot() ?? process.cwd();
+            const devUrl = resolveQaPageUrl(projectPath, this.metadataCache || null);
             return { arguments: [devUrl], cached: true };
         }
 
@@ -1617,7 +1623,14 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                                 // --- SPECIAL HANDLING: write_code uses CODING model directly ---
                                 if (action === 'write_code') {
                                     if (!this.checkBudget('tokens')) {
-                                        throw new Error('Token budget exceeded before code generation');
+                                        const used = this.executionMetrics.totalTokens;
+                                        const cap = this.budgetPolicy.maxTokensPerTask;
+                                        throw new Error(
+                                            `Token budget exceeded before code generation (${used}/${cap}). ` +
+                                                `플랜·토론·이전 스텝 LLM 호출로 예산이 소진되었습니다. ` +
+                                                `태스크 metadata.budgetPolicy.maxTokensPerTask 값을 키우거나(예: 50000), ` +
+                                                `실행 옵션에서 strategyPreset을 quality_first로 두거나, discussionMode를 off로 줄인 뒤 재시도하세요.`
+                                        );
                                     }
                                     const codePrompt = `${stepGoalWithDiscussion}\n\nOverall task: ${task.description}`;
 
@@ -1864,6 +1877,21 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
             }
 
             this.executionMetrics.endedAt = new Date().toISOString();
+            // #region agent log
+            fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
+                body: JSON.stringify({
+                    sessionId: 'f89f62',
+                    hypothesisId: 'H1',
+                    location: 'Orchestrator.ts:execute:before_dev_exit_qa',
+                    message: 'execute_workflow_loop_done_before_testing',
+                    data: { taskId: this.taskId, totalSteps: workflow.steps.length },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => {});
+            // #endregion
+            await this.runDevExitQaPipeline(projectPath, task, mainAgentName, techStack, workflow.steps.length);
             await this.updateStatus('testing');
             await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
             // Release lock on success
@@ -1893,6 +1921,377 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
         }
     }
 
+    /**
+     * Dev(working) 종료 직전: 대상 dev URL 스모크 → 오류 시 write_code로 자동 수정(상한) →
+     * verify_final_output → 스크린샷·반응형 캡처·qaSignoff 메타 저장.
+     * Test 칸반 진입 전에 검수 데이터가 준비되도록 한다.
+     */
+    private async runDevExitQaPipeline(
+        projectPath: string,
+        task: any,
+        mainAgentName: string,
+        techStack: string,
+        syntheticStepIndex: number
+    ) {
+        // #region agent log
+        fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
+            body: JSON.stringify({
+                sessionId: 'f89f62',
+                hypothesisId: 'H2',
+                location: 'Orchestrator.ts:runDevExitQaPipeline:entry',
+                message: 'dev_exit_qa_pipeline_start',
+                data: { taskId: this.taskId },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => {});
+        // #endregion
+
+        this.emitter?.emit({ type: 'phase_start', phase: 'dev_exit_qa', taskId: this.taskId });
+
+        const freshTask = (await this.getTask()) || task;
+        const meta = (freshTask as any)?.metadata || task?.metadata || null;
+
+        const qaBaseUrl = resolveQaPageUrl(projectPath, meta);
+        await this.log('System', `Dev 종료 QA 대상 URL: ${qaBaseUrl}`, { type: 'System' });
+
+        const maxRounds = Math.max(1, Math.min(12, parseInt(String(process.env.DEV_QA_MAX_REPAIR_ROUNDS || '5'), 10) || 5));
+        let qaPageCheck: QaPageCheckResult | null = null;
+
+        for (let r = 0; r < maxRounds; r++) {
+            qaPageCheck = await runQaPageSmokeCheck(qaBaseUrl);
+            await this.updateMetadata({ qaPageCheck });
+            await this.log(
+                mainAgentName,
+                `Dev 종료 QA 스모크 (${r + 1}/${maxRounds}): ${qaPageCheck.summary}`,
+                { type: qaPageCheck.passed ? 'System' : 'WARNING' }
+            );
+            this.emitter?.emit({
+                type: 'skill_result',
+                skill: 'qa_page_smoke',
+                summary: qaPageCheck.passed ? 'OK' : qaPageCheck.summary.slice(0, 200),
+            });
+
+            if (qaPageCheck.passed) {
+                break;
+            }
+            if (r === maxRounds - 1) {
+                throw new Error(
+                    `Dev QA: ${maxRounds}회 시도 후에도 대상 페이지가 정상이 아닙니다 (${qaBaseUrl}). ${qaPageCheck.summary}`
+                );
+            }
+
+            await this.log(mainAgentName, `페이지 오류 감지 → 자동 코드 수정 시도 (라운드 ${r + 1})`, {
+                type: 'WARNING',
+            });
+            const repaired = await this.runDevQaRepairWriteCode(
+                projectPath,
+                task,
+                mainAgentName,
+                techStack,
+                qaBaseUrl,
+                qaPageCheck,
+                r,
+                syntheticStepIndex
+            );
+            if (!repaired) {
+                await this.log(mainAgentName, 'Dev QA 자동 수정이 코드를 적용하지 못했습니다. 다음 스모크로 재확인합니다.', {
+                    type: 'WARNING',
+                });
+            }
+        }
+
+        if (!qaPageCheck) {
+            throw new Error('Dev QA: 스모크 결과가 없습니다.');
+        }
+
+        this.emitter?.emit({ type: 'skill_execute', skill: 'verify_final_output' });
+        let verification = await skills.verify_final_output(
+            (freshTask as any)?.description || task?.description || 'No description',
+            projectPath,
+            meta
+        );
+        await this.log(mainAgentName, 'Dev 종료 verify_final_output', verification);
+        await this.updateMetadata({ verification });
+        this.emitter?.emit({
+            type: 'skill_result',
+            skill: 'verify_final_output',
+            summary: verification.verified ? 'Verified' : 'Failed',
+        });
+
+        let qaArtifactSlots: QaArtifactSlot[] = [];
+        const browserAvailable = await isAgentBrowserAvailable();
+        if (browserAvailable) {
+            try {
+                this.emitter?.emit({ type: 'skill_execute', skill: 'screenshot_page' });
+                const screenshotResult = await skills.screenshot_page(qaBaseUrl, true);
+                if (screenshotResult.success) {
+                    await this.log(mainAgentName, 'Dev 종료 페이지 스크린샷 캡처', { screenshotPath: screenshotResult.screenshotPath });
+                }
+
+                this.emitter?.emit({ type: 'skill_execute', skill: 'check_responsive' });
+                const responsiveResult = await skills.check_responsive(qaBaseUrl);
+                await this.log(mainAgentName, 'Dev 종료 반응형 점검', { summary: responsiveResult.summary });
+
+                try {
+                    qaArtifactSlots = await persistQaArtifactsFromCapture(
+                        projectPath,
+                        this.taskId,
+                        screenshotResult.screenshotPath,
+                        responsiveResult
+                    );
+                    if (qaArtifactSlots.length > 0) {
+                        await this.log(
+                            'System',
+                            `Dev 종료 QA 스크린샷 저장: ${qaArtifactSlots.join(', ')}`,
+                            { type: 'System' }
+                        );
+                    }
+                } catch (persistErr: any) {
+                    await this.log('System', `Dev 종료 QA 아티팩트 복사 실패: ${persistErr.message}`, { type: 'WARNING' });
+                }
+
+                await this.updateMetadata({
+                    visualVerification: {
+                        qaDevServerUrl: qaBaseUrl,
+                        screenshotPath: screenshotResult.screenshotPath,
+                        responsiveSummary: responsiveResult.summary,
+                        mobile: responsiveResult.mobile?.ok,
+                        tablet: responsiveResult.tablet?.ok,
+                        desktop: responsiveResult.desktop?.ok,
+                        checkedAt: new Date().toISOString(),
+                    },
+                });
+                this.emitter?.emit({ type: 'skill_result', skill: 'check_responsive', summary: responsiveResult.summary });
+            } catch (browserErr: any) {
+                await this.log('System', `Dev 종료 브라우저 캡처 생략: ${browserErr.message}`, { type: 'WARNING' });
+            }
+        } else {
+            await this.log('System', 'agent-browser 미사용: Dev 종료 스크린샷·반응형 캡처 생략', { type: 'WARNING' });
+        }
+
+        try {
+            const latestTask = await this.getTask();
+            const repairs = Array.isArray((latestTask as any)?.metadata?.executionRepairs)
+                ? (latestTask as any).metadata.executionRepairs
+                : [];
+            const signoffCheckedAt = new Date().toISOString();
+            const qaSignoff = await buildQaSignoffReport({
+                targetUrl: qaBaseUrl,
+                checkedAt: signoffCheckedAt,
+                artifactSlots: qaArtifactSlots,
+                qaPageCheck,
+                verification,
+                executionRepairs: repairs,
+            });
+            await this.updateMetadata({ qaSignoff });
+            // #region agent log
+            fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
+                body: JSON.stringify({
+                    sessionId: 'f89f62',
+                    hypothesisId: 'H3',
+                    location: 'Orchestrator.ts:runDevExitQaPipeline:signoff',
+                    message: 'dev_exit_qa_signoff_written',
+                    data: {
+                        taskId: this.taskId,
+                        artifactSlots: qaArtifactSlots.length,
+                        smokePassed: qaPageCheck.passed,
+                    },
+                    timestamp: Date.now(),
+                }),
+            }).catch(() => {});
+            // #endregion
+        } catch (signoffErr: any) {
+            await this.log('System', `Dev 종료 QA 검수 리포트 저장 실패: ${signoffErr.message}`, { type: 'WARNING' });
+        }
+
+        // #region agent log
+        fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
+            body: JSON.stringify({
+                sessionId: 'f89f62',
+                hypothesisId: 'H2',
+                location: 'Orchestrator.ts:runDevExitQaPipeline:exit',
+                message: 'dev_exit_qa_pipeline_complete',
+                data: { taskId: this.taskId, smokePassed: qaPageCheck.passed },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => {});
+        // #endregion
+    }
+
+    /** Dev QA 스모크 실패 시 한 번의 write_code 사이클로 수정 시도 */
+    private async runDevQaRepairWriteCode(
+        projectPath: string,
+        task: any,
+        mainAgentName: string,
+        techStack: string,
+        qaBaseUrl: string,
+        qaPageCheck: QaPageCheckResult,
+        repairRound: number,
+        syntheticStepIndex: number
+    ): Promise<boolean> {
+        // #region agent log
+        fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
+            body: JSON.stringify({
+                sessionId: 'f89f62',
+                hypothesisId: 'H4',
+                location: 'Orchestrator.ts:runDevQaRepairWriteCode',
+                message: 'dev_qa_repair_attempt',
+                data: { taskId: this.taskId, repairRound, passed: qaPageCheck.passed },
+                timestamp: Date.now(),
+            }),
+        }).catch(() => {});
+        // #endregion
+
+        if (!this.checkBudget('tokens')) {
+            await this.log(mainAgentName, 'Dev QA 수정: 토큰 예산 부족', { type: 'ERROR' });
+            return false;
+        }
+
+        const skillFunc = this.getSkillFunction('write_code');
+        if (typeof skillFunc !== 'function') {
+            await this.log('System', 'write_code 스킬을 찾을 수 없습니다.', { type: 'ERROR' });
+            return false;
+        }
+
+        const seAgent =
+            AgentLoader.listAgents().find((a) => this.normalizeAgentKey(a.role) === 'software-engineer') ||
+            this.mainAgentDef;
+
+        const repairGoal = `[Dev QA 자동 수정] 대상 URL: ${qaBaseUrl}
+스모크 요약: ${qaPageCheck.summary}
+HTTP 상태: ${qaPageCheck.httpStatus ?? 'n/a'}, 연결: ${qaPageCheck.httpReachable ? 'OK' : '실패'}
+페이지 오류 신호: ${qaPageCheck.pageErrorSignals.join(', ') || '(없음)'}
+브라우저 점검 오류: ${qaPageCheck.browserError || '(없음)'}
+
+위 문제를 해결하도록 최소 변경으로 코드를 수정하세요. Next.js/React 런타임·빌드 오류를 우선 해결합니다.`;
+
+        const codePrompt = `${repairGoal}\n\n전체 태스크: ${task.description || ''}`;
+
+        this.emitter?.emit({ type: 'skill_execute', skill: 'write_code', args: 'dev_qa_repair' });
+        await this.log(seAgent.name, `Dev QA 자동 수정용 코드 생성 (라운드 ${repairRound + 1})`, { type: 'ACTION' });
+
+        let codeResult;
+        let contextSize = 3000;
+        let genAttempt = 0;
+        const maxGenAttempts = 3;
+
+        while (genAttempt < maxGenAttempts) {
+            const contextData = this.contextManager.getOptimizedContext(contextSize);
+            let augmentedContext = contextData;
+            if (this.profiler) {
+                const profilerData = await this.profiler.getContextString();
+                augmentedContext = `${profilerData}\n\n${contextData}`;
+            }
+
+            codeResult = await llm.generateCodeStream(
+                codePrompt,
+                augmentedContext,
+                this.emitter,
+                MODEL_CONFIG.CODING_MODEL,
+                techStack,
+                () => this.refreshLock(),
+                this.llmTelemetry({ action: 'write_code', agent: seAgent.name })
+            );
+
+            if (codeResult?.tokens) {
+                await this.accumulateTokens(codeResult.tokens.prompt_eval_count, codeResult.tokens.eval_count);
+            }
+
+            if (!codeResult.error) break;
+
+            if (
+                codeResult.content.includes('timed out') ||
+                codeResult.content.includes('AbortError') ||
+                codeResult.content.includes('too large')
+            ) {
+                genAttempt++;
+                if (genAttempt < maxGenAttempts) {
+                    contextSize = Math.floor(contextSize / 1.5);
+                    continue;
+                }
+            }
+            break;
+        }
+
+        if (!codeResult || codeResult.error || !codeResult.files?.length) {
+            await this.log(seAgent.name, `Dev QA 코드 생성 실패: ${codeResult?.error ? codeResult.content : '파일 없음'}`, {
+                type: 'ERROR',
+            });
+            return false;
+        }
+
+        const { data: metaForChanges } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
+        const existingChanges = metaForChanges?.metadata?.fileChanges || [];
+        const existingRepairs = metaForChanges?.metadata?.executionRepairs || [];
+        let wroteAny = false;
+
+        for (const file of codeResult.files) {
+            const normalizedPath = await this.normalizeWriteTargetPath(
+                file.path,
+                task.description || '',
+                `Dev QA 자동 수정 라운드 ${repairRound + 1}`,
+                codePrompt
+            );
+            if (normalizedPath.failed) {
+                existingRepairs.push(
+                    this.buildExecutionRepairRecord(
+                        syntheticStepIndex,
+                        'dev_qa_repair',
+                        `경로 정규화 실패: ${normalizedPath.message}`
+                    )
+                );
+                await this.updateMetadata({ executionRepairs: existingRepairs });
+                continue;
+            }
+
+            if (normalizedPath.repairs.length > 0) {
+                existingRepairs.push(
+                    this.buildExecutionRepairRecord(
+                        syntheticStepIndex,
+                        'dev_qa_repair',
+                        normalizedPath.repairs.join(' | ')
+                    )
+                );
+                await this.updateMetadata({ executionRepairs: existingRepairs });
+            }
+
+            const writeResult = await skillFunc(normalizedPath.path, file.content, projectPath);
+            if (!writeResult?.success) {
+                const detail = writeResult?.message || 'write_code 실행 실패';
+                existingRepairs.push(this.buildExecutionRepairRecord(syntheticStepIndex, 'dev_qa_repair', detail));
+                await this.updateMetadata({ executionRepairs: existingRepairs });
+                continue;
+            }
+
+            if (writeResult?.filePath) {
+                existingChanges.push({
+                    filePath: normalizedPath.path,
+                    before: writeResult.before,
+                    after: writeResult.after,
+                    isNew: writeResult.isNew,
+                    agent: seAgent.name,
+                    stepIndex: syntheticStepIndex,
+                });
+                this.contextManager.addFile(normalizedPath.path, file.content);
+                await this.log(seAgent.name, `Dev QA 수정 파일 기록: ${normalizedPath.path}`, { type: 'RESULT' });
+                wroteAny = true;
+            }
+        }
+
+        await this.updateMetadata({ fileChanges: existingChanges });
+        const summary = wroteAny ? `Dev QA 수정 적용됨 (${codeResult.files.length}개 제안 중)` : 'Dev QA 수정: 적용된 파일 없음';
+        this.emitter?.emit({ type: 'skill_result', skill: 'write_code', summary });
+        return wroteAny;
+    }
+
     // --- Phase 3: Verification ---
     public async verify() {
         try {
@@ -1911,18 +2310,52 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 }
             }
 
+            const qaBaseUrl = resolveQaPageUrl(projectPath, (task as any)?.metadata || null);
+            await this.log('System', `QA 대상 URL: ${qaBaseUrl}`, { type: 'System' });
+
             this.emitter?.emit({ type: 'skill_execute', skill: 'verify_final_output' });
-            const verification = await skills.verify_final_output(task?.description || 'No description', projectPath);
+            let verification = await skills.verify_final_output(
+                task?.description || 'No description',
+                projectPath,
+                (task as any)?.metadata || null
+            );
+
+            this.emitter?.emit({ type: 'skill_execute', skill: 'qa_page_smoke' });
+            const qaPageCheck = await runQaPageSmokeCheck(qaBaseUrl);
+            await this.log(
+                mainAgentName,
+                `QA 페이지 스모크: ${qaPageCheck.summary}`,
+                { type: qaPageCheck.passed ? 'System' : 'WARNING' }
+            );
+
+            const qaStrict = ['true', '1', 'yes'].includes(
+                String(process.env.QA_FAIL_ON_PAGE_ERRORS || '').toLowerCase()
+            );
+            if (qaStrict && !qaPageCheck.passed) {
+                verification = {
+                    ...verification,
+                    verified: false,
+                    notes: `${verification.notes || ''}\n[QA 페이지 스모크 실패] ${qaPageCheck.summary}`.trim(),
+                };
+            }
+
             await this.log(mainAgentName, 'Final Verification', verification);
-            await this.updateMetadata({ verification });
+            await this.updateMetadata({ verification, qaPageCheck });
             this.emitter?.emit({ type: 'skill_result', skill: 'verify_final_output', summary: verification.verified ? 'Verified' : 'Failed' });
+            this.emitter?.emit({
+                type: 'skill_result',
+                skill: 'qa_page_smoke',
+                summary: qaPageCheck.passed ? 'OK' : qaPageCheck.summary.slice(0, 200),
+            });
+
+            let qaArtifactSlots: QaArtifactSlot[] = [];
 
             if (verification.verified) {
-                // Browser-based visual verification (non-blocking)
+                // Browser-based visual verification (non-blocking) — same URL as QA / verify_final_output
                 const browserAvailable = await isAgentBrowserAvailable();
                 if (browserAvailable) {
                     try {
-                        const devServerUrl = process.env.DEV_SERVER_URL || 'http://localhost:3000';
+                        const devServerUrl = qaBaseUrl;
                         this.emitter?.emit({ type: 'skill_execute', skill: 'screenshot_page' });
                         const screenshotResult = await skills.screenshot_page(devServerUrl, true);
                         if (screenshotResult.success) {
@@ -1933,8 +2366,27 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                         const responsiveResult = await skills.check_responsive(devServerUrl);
                         await this.log(mainAgentName, 'Responsive check completed', { summary: responsiveResult.summary });
 
+                        try {
+                            qaArtifactSlots = await persistQaArtifactsFromCapture(
+                                projectPath,
+                                this.taskId,
+                                screenshotResult.screenshotPath,
+                                responsiveResult
+                            );
+                            if (qaArtifactSlots.length > 0) {
+                                await this.log(
+                                    'System',
+                                    `QA 스크린샷 저장: ${qaArtifactSlots.join(', ')} → ${projectPath}/.basalt/basalt-qa/${this.taskId}/`,
+                                    { type: 'System' }
+                                );
+                            }
+                        } catch (persistErr: any) {
+                            await this.log('System', `QA 아티팩트 복사 실패: ${persistErr.message}`, { type: 'WARNING' });
+                        }
+
                         await this.updateMetadata({
                             visualVerification: {
+                                qaDevServerUrl: devServerUrl,
                                 screenshotPath: screenshotResult.screenshotPath,
                                 responsiveSummary: responsiveResult.summary,
                                 mobile: responsiveResult.mobile?.ok,
@@ -2051,6 +2503,25 @@ Use 'feat:', 'fix:', 'refactor:' conventions for commit messages.
                 this.emitter?.emit({ type: 'done', status: 'review' });
             } else {
                 this.emitter?.emit({ type: 'done', status: 'verification_failed' });
+            }
+
+            try {
+                const latestTask = await this.getTask();
+                const repairs = Array.isArray((latestTask as any)?.metadata?.executionRepairs)
+                    ? (latestTask as any).metadata.executionRepairs
+                    : [];
+                const signoffCheckedAt = new Date().toISOString();
+                const qaSignoff = await buildQaSignoffReport({
+                    targetUrl: qaBaseUrl,
+                    checkedAt: signoffCheckedAt,
+                    artifactSlots: qaArtifactSlots,
+                    qaPageCheck,
+                    verification,
+                    executionRepairs: repairs,
+                });
+                await this.updateMetadata({ qaSignoff });
+            } catch (signoffErr: any) {
+                await this.log('System', `QA 검수 리포트 저장 건너뜀: ${signoffErr.message}`, { type: 'WARNING' });
             }
         } catch (error: any) {
             await this.log('System', `Verification Phase Failed: ${error.message}`, { type: 'ERROR' });
