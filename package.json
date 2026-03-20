@@ -10,7 +10,7 @@
     "lint:types": "node ./scripts/validate-client-boundary.mjs --types-only",
     "lint:types:changed": "node ./scripts/validate-client-boundary.mjs --types-only --changed",
     "lint": "npm run lint:rsc && npm run lint:types && eslint",
-    "test": "echo 'No tests specified' && exit 0"
+    "test": "npm run lint:rsc && npm run lint:types && node ./scripts/smoke-check.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

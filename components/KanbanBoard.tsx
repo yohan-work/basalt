@@ -225,7 +225,21 @@ export function KanbanBoard() {
         startStreamAction(e, task, 'plan');
     };
 
+    const taskNeedsImpactAck = (task: Task): boolean => {
+        const p = task.metadata?.executionPreflight as
+            | { requiresImpactAck?: boolean; impactAcknowledgedAt?: string | null }
+            | undefined;
+        return p?.requiresImpactAck === true && !p?.impactAcknowledgedAt;
+    };
+
     const handleStartDev = (e: React.MouseEvent, task: Task) => {
+        if (taskNeedsImpactAck(task)) {
+            e.stopPropagation();
+            showActionError('실행 전 태스크 상세에서 «영향 범위 확인»을 눌러 주세요.');
+            setSelectedTask(task);
+            setIsDetailsOpen(true);
+            return;
+        }
         const options = getTaskExecutionOptions(task);
         startStreamAction(e, task, 'execute', options);
     };
@@ -253,6 +267,11 @@ export function KanbanBoard() {
     const handleExecuteFromModal = (taskId: string, options: ExecuteStreamOptions) => {
         const task = tasks.find((item) => item.id === taskId);
         if (!task) return;
+
+        if (taskNeedsImpactAck(task)) {
+            showActionError('실행 전 태스크 상세에서 «영향 범위 확인»을 눌러 주세요.');
+            return;
+        }
 
         setExecutionOptionsByTask(prev => ({
             ...prev,
@@ -346,12 +365,20 @@ export function KanbanBoard() {
                         <Search className="mr-2 h-3 w-3" /> Confirm & Plan
                     </Button>
                 );
-            case 'planning':
+            case 'planning': {
+                const blocked = taskNeedsImpactAck(task);
                 return (
-                    <Button size="sm" onClick={(e) => handleStartDev(e, task)} className="w-full text-xs h-7 bg-amber-600 hover:bg-amber-700">
-                        <Play className="mr-2 h-3 w-3" /> Start Dev
+                    <Button
+                        size="sm"
+                        onClick={(e) => handleStartDev(e, task)}
+                        disabled={blocked}
+                        title={blocked ? '먼저 태스크 상세에서 영향 범위를 확인하세요' : undefined}
+                        className="w-full text-xs h-7 bg-amber-600 hover:bg-amber-700 disabled:opacity-50"
+                    >
+                        <Play className="mr-2 h-3 w-3" /> {blocked ? '영향 범위 확인 필요' : 'Start Dev'}
                     </Button>
                 );
+            }
             case 'working':
                 // Could be auto? But manual for now
                 return (

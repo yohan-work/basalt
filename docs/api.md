@@ -42,6 +42,9 @@
 | POST | `/api/agent/enhance-prompt` | 사용자 프롬프트 고도화 (프로젝트 스택 동적 분석) |
 | POST | `/api/agent/skills` | 스킬 직접 실행 |
 | GET | `/api/agent/stream` | SSE 진행 스트리밍 |
+| POST | `/api/agent/clarify/generate` | pending 태스크용 명확화 질문 생성 → `metadata.clarifyingGate` |
+| POST | `/api/agent/clarify/submit` | 질문 답변 저장 또는 명확화 건너뛰기 |
+| POST | `/api/agent/execution/acknowledge-impact` | 플랜 후 영향 범위 확인 → `execute` 허용 |
 
 ## Project API
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp, Pencil, Search, ClipboardPaste, ExternalLink, ChevronDown } from 'lucide-react';
+import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp, Pencil, Search, ClipboardPaste, ExternalLink, ChevronDown, HelpCircle, ShieldCheck } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { StepProgress, type ProgressInfo } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
@@ -317,6 +317,10 @@ export function TaskDetailsModal({
     const [draftExecutionOptions, setDraftExecutionOptions] = useState<Required<ExecuteStreamOptions>>(
         DEFAULT_EXECUTION_OPTIONS
     );
+    const [clarifyDraftAnswers, setClarifyDraftAnswers] = useState<Record<string, string>>({});
+    const [isGeneratingClarify, setIsGeneratingClarify] = useState(false);
+    const [isSubmittingClarify, setIsSubmittingClarify] = useState(false);
+    const [isAckImpact, setIsAckImpact] = useState(false);
 
     const { payload: incomingReactGrabPayload, clearPayload: clearIncomingReactGrab } = useIncomingReactGrab();
 
@@ -350,6 +354,26 @@ export function TaskDetailsModal({
         if (!open) return;
         setIsDiscussionAccordionOpen(false);
     }, [open, task?.id]);
+
+    const clarifyingGateSig =
+        task && typeof task.metadata === 'object' && task.metadata !== null
+            ? JSON.stringify(
+                  (task.metadata as Record<string, unknown>).clarifyingGate ?? null,
+                  ['generatedAt', 'status', 'questions']
+              )
+            : '';
+
+    useEffect(() => {
+        if (!open || !task) return;
+        const gate = (task.metadata as Record<string, unknown> | undefined)?.clarifyingGate as
+            | { questions?: Array<{ id: string }>; answers?: Record<string, string> }
+            | undefined;
+        const next: Record<string, string> = {};
+        for (const q of gate?.questions || []) {
+            next[q.id] = (gate?.answers && gate.answers[q.id]) || '';
+        }
+        setClarifyDraftAnswers(next);
+    }, [open, task?.id, clarifyingGateSig]);
 
     useEffect(() => {
         if (!open || !task?.id) return;
@@ -418,10 +442,38 @@ export function TaskDetailsModal({
         ? metadata.executionDiscussions
         : [];
     const collaboration = metadata.agentCollaboration;
+    const clarifyingGate = metadata.clarifyingGate as
+        | {
+              version?: number;
+              status?: string;
+              questions?: Array<{ id: string; prompt: string }>;
+              answers?: Record<string, string>;
+              note?: string;
+              generatedAt?: string;
+          }
+        | undefined;
+    const impactPreview = metadata.impactPreview as
+        | {
+              summary?: string;
+              likelyTouchedPaths?: string[];
+              riskLevel?: string;
+              assumptions?: string[];
+              outOfScopeNote?: string;
+              generatedAt?: string;
+              parseError?: boolean;
+          }
+        | undefined;
+    const executionPreflight = metadata.executionPreflight as
+        | { requiresImpactAck?: boolean; impactAcknowledgedAt?: string | null }
+        | undefined;
+    const needsImpactAck =
+        executionPreflight?.requiresImpactAck === true && !executionPreflight?.impactAcknowledgedAt;
+
     const canRunExecuteFromModal =
         (task.status === 'planning' || task.status === 'working')
         && Array.isArray(workflow?.steps)
-        && workflow.steps.length > 0;
+        && workflow.steps.length > 0
+        && !needsImpactAck;
 
     const handleEditCompleted = async () => {
         if (!editInstructions.trim()) return;
@@ -578,12 +630,93 @@ export function TaskDetailsModal({
     const handleExecuteWithOptions = () => {
         if (!task) return;
 
+        if (needsImpactAck) {
+            setActionError('실행 전에 아래 «영향 범위 확인»을 눌러 주세요.');
+            return;
+        }
+
         if (onExecute) {
             onExecute(task.id, draftExecutionOptions);
         } else {
             stream?.start(task.id, 'execute', draftExecutionOptions);
         }
         setView('live');
+    };
+
+    const handleGenerateClarify = async () => {
+        if (!task) return;
+        setIsGeneratingClarify(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/clarify/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'generate failed');
+        } catch (e) {
+            setActionError(e instanceof Error ? e.message : '질문 생성에 실패했습니다.');
+        } finally {
+            setIsGeneratingClarify(false);
+        }
+    };
+
+    const handleSubmitClarify = async () => {
+        if (!task) return;
+        setIsSubmittingClarify(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/clarify/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id, answers: clarifyDraftAnswers }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'submit failed');
+        } catch (e) {
+            setActionError(e instanceof Error ? e.message : '답변 저장에 실패했습니다.');
+        } finally {
+            setIsSubmittingClarify(false);
+        }
+    };
+
+    const handleSkipClarify = async () => {
+        if (!task) return;
+        setIsSubmittingClarify(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/clarify/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id, skipped: true }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'skip failed');
+        } catch (e) {
+            setActionError(e instanceof Error ? e.message : '건너뛰기에 실패했습니다.');
+        } finally {
+            setIsSubmittingClarify(false);
+        }
+    };
+
+    const handleAckImpact = async () => {
+        if (!task) return;
+        setIsAckImpact(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/execution/acknowledge-impact', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'ack failed');
+        } catch (e) {
+            setActionError(e instanceof Error ? e.message : '확인 처리에 실패했습니다.');
+        } finally {
+            setIsAckImpact(false);
+        }
     };
 
     const isStreaming = stream?.isActive;
@@ -907,6 +1040,83 @@ export function TaskDetailsModal({
                                         </div>
                                     )}
                                 </div>
+
+                                {task.status === 'pending' && (
+                                    <div className="space-y-3 rounded-md border border-blue-200/60 bg-blue-50/40 dark:bg-blue-950/20 dark:border-blue-900/50 p-4">
+                                        <h3 className="text-sm font-medium text-foreground flex items-center gap-2">
+                                            <HelpCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                            요구사항 명확화 (선택)
+                                        </h3>
+                                        <p className="text-xs text-muted-foreground leading-relaxed">
+                                            플랜 생성 전에 AI가 애매한 점을 짚어 질문합니다. 답을 저장하면 이후 플랜·실행 프롬프트에 반영됩니다.
+                                        </p>
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="secondary"
+                                                onClick={handleGenerateClarify}
+                                                disabled={isGeneratingClarify || isSubmittingClarify}
+                                            >
+                                                {isGeneratingClarify ? '질문 생성 중…' : '질문 생성'}
+                                            </Button>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={handleSkipClarify}
+                                                disabled={isSubmittingClarify || isGeneratingClarify}
+                                            >
+                                                명확화 건너뛰기
+                                            </Button>
+                                        </div>
+                                        {clarifyingGate?.note && (
+                                            <p className="text-xs text-muted-foreground">{clarifyingGate.note}</p>
+                                        )}
+                                        {clarifyingGate?.status === 'awaiting_answers' &&
+                                            (clarifyingGate.questions?.length || 0) > 0 && (
+                                                <div className="space-y-3">
+                                                    {clarifyingGate.questions!.map((q) => (
+                                                        <div key={q.id} className="space-y-1">
+                                                            <Label className="text-xs font-medium">{q.prompt}</Label>
+                                                            <textarea
+                                                                className="w-full min-h-[72px] rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+                                                                value={clarifyDraftAnswers[q.id] ?? ''}
+                                                                onChange={(e) =>
+                                                                    setClarifyDraftAnswers((prev) => ({
+                                                                        ...prev,
+                                                                        [q.id]: e.target.value,
+                                                                    }))
+                                                                }
+                                                            />
+                                                        </div>
+                                                    ))}
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        onClick={handleSubmitClarify}
+                                                        disabled={isSubmittingClarify}
+                                                    >
+                                                        {isSubmittingClarify ? '저장 중…' : '답변 저장'}
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        {clarifyingGate?.status === 'empty' &&
+                                            clarifyingGate.generatedAt &&
+                                            (clarifyingGate.questions?.length || 0) === 0 && (
+                                                <p className="text-xs text-emerald-700 dark:text-emerald-400">
+                                                    추가 질문이 필요 없다고 판단되었습니다. 바로 «Confirm &amp; Plan»을 진행하세요.
+                                                </p>
+                                            )}
+                                        {(clarifyingGate?.status === 'answered' || clarifyingGate?.status === 'skipped') && (
+                                            <p className="text-xs text-muted-foreground">
+                                                {clarifyingGate.status === 'skipped'
+                                                    ? '명확화를 건너뛰었습니다. 플랜을 생성할 수 있습니다.'
+                                                    : '답변이 저장되었습니다. 플랜 생성 시 반영됩니다.'}
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
 
                                 {/* Code Review Result */}
                                 {reviewResult && (
@@ -1284,6 +1494,89 @@ export function TaskDetailsModal({
                                                     </div>
                                                 ))}
                                             </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {task.status === 'planning' && impactPreview?.summary && (
+                                    <div
+                                        className={`space-y-3 rounded-md border p-4 ${
+                                            needsImpactAck
+                                                ? 'border-amber-300/80 bg-amber-50/50 dark:bg-amber-950/25 dark:border-amber-800/60'
+                                                : 'border-emerald-200/80 bg-emerald-50/40 dark:bg-emerald-950/20 dark:border-emerald-900/50'
+                                        }`}
+                                    >
+                                        <h3 className="text-sm font-medium flex items-center gap-2">
+                                            <ShieldCheck className="h-4 w-4 text-amber-700 dark:text-amber-400" />
+                                            실행 전 영향 범위 미리보기
+                                        </h3>
+                                        <p className="text-sm leading-relaxed">{impactPreview.summary}</p>
+                                        {impactPreview.likelyTouchedPaths &&
+                                            impactPreview.likelyTouchedPaths.length > 0 && (
+                                                <div>
+                                                    <p className="text-xs font-semibold text-muted-foreground mb-1">
+                                                        예상 경로
+                                                    </p>
+                                                    <ul className="text-xs font-mono space-y-0.5 max-h-32 overflow-y-auto">
+                                                        {impactPreview.likelyTouchedPaths.map((p) => (
+                                                            <li key={p}>{p}</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            )}
+                                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                                            <Badge
+                                                variant="outline"
+                                                className={
+                                                    impactPreview.riskLevel === 'high'
+                                                        ? 'border-red-400 text-red-800 dark:text-red-300'
+                                                        : impactPreview.riskLevel === 'low'
+                                                          ? 'border-emerald-500 text-emerald-800 dark:text-emerald-300'
+                                                          : 'border-amber-500 text-amber-900 dark:text-amber-200'
+                                                }
+                                            >
+                                                위험도: {impactPreview.riskLevel || 'medium'}
+                                            </Badge>
+                                            {impactPreview.parseError && (
+                                                <Badge variant="destructive" className="text-[10px]">
+                                                    미리보기 품질 낮음
+                                                </Badge>
+                                            )}
+                                            {impactPreview.generatedAt && (
+                                                <span className="text-muted-foreground">
+                                                    생성: {new Date(impactPreview.generatedAt).toLocaleString()}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {impactPreview.assumptions && impactPreview.assumptions.length > 0 && (
+                                            <div>
+                                                <p className="text-xs font-semibold text-muted-foreground mb-1">가정</p>
+                                                <ul className="text-xs list-disc pl-4 space-y-0.5">
+                                                    {impactPreview.assumptions.map((a, i) => (
+                                                        <li key={i}>{a}</li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                        {impactPreview.outOfScopeNote && (
+                                            <p className="text-xs text-muted-foreground border-t pt-2">
+                                                범위 밖: {impactPreview.outOfScopeNote}
+                                            </p>
+                                        )}
+                                        {needsImpactAck ? (
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                className="bg-amber-600 hover:bg-amber-700 text-white"
+                                                onClick={handleAckImpact}
+                                                disabled={isAckImpact}
+                                            >
+                                                {isAckImpact ? '처리 중…' : '영향 범위 확인 — 실행 허용'}
+                                            </Button>
+                                        ) : (
+                                            <p className="text-xs text-emerald-700 dark:text-emerald-400 font-medium">
+                                                확인 완료. Start Dev / Execute를 진행할 수 있습니다.
+                                            </p>
                                         )}
                                     </div>
                                 )}

@@ -22,6 +22,12 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 ### 성공기준
 - 변경 요청이 적절한 API 계약에 매핑되어 결과가 재현됨
 
+## 0) 실행 전 명확화 질문 · 영향 범위 미리보기
+
+- **명확화(선택)**: `pending` 태스크에서 AI가 한국어 질문을 생성하고, 사용자 답변을 `metadata.clarifyingGate`에 저장합니다. `plan()` 시 답변이 플랜 프롬프트에 합쳐집니다. API: `POST /api/agent/clarify/generate`, `POST /api/agent/clarify/submit`.
+- **영향 미리보기**: 플랜 완료 후 워크플로·분석·코드베이스 맥락으로 예상 수정 경로·위험도·가정을 생성해 `metadata.impactPreview`에 저장합니다. 사용자가 `POST /api/agent/execution/acknowledge-impact`로 확인하기 전에는 `execute`가 거절됩니다(`executionPreflight`).
+- UI: `TaskDetailsModal`에서 명확화 패널·미리보기 패널, 칸반 `Start Dev`는 확인 전 비활성/안내.
+
 ## 1) 완료 산출물 수정
 
 - 테스트/리뷰/완료 상태에서 사용자 요청 기반으로 변경을 반영합니다.
