@@ -23,6 +23,7 @@ import {
     StrategyPreset,
 } from '../orchestration/metrics';
 import { applyPresetDefaults, resolveStepPolicy } from '../orchestration/policy';
+import { maybeScaffoldMinimalUiKit } from '../project-ui-kit';
 import {
     formatClarificationForPlan,
     generateImpactPreviewJson,
@@ -1279,6 +1280,110 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
         }
     }
 
+    /** 같은 배치에서 `components/ui/*` 를 먼저 써야 import 검증이 통과한다. */
+    private writeCodeRelativePathSortPriority(relPath: string): number {
+        const n = relPath.replace(/\\/g, '/').toLowerCase();
+        const inUiKit =
+            /^components\/ui\//.test(n) ||
+            /^src\/components\/ui\//.test(n) ||
+            /\/components\/ui\//.test(n);
+        if (inUiKit) return 0;
+        const inComponents =
+            /^components\//.test(n) ||
+            /^src\/components\//.test(n) ||
+            /\/components\//.test(n);
+        if (inComponents) return 1;
+        return 2;
+    }
+
+    private static readonly MAX_UI_IMPORT_REPAIR_ATTEMPTS = 2;
+
+    /** `@/components/ui/*` 화이트리스트 위반 시 단일 파일만 LLM으로 수정 */
+    private async repairWriteCodeDisallowedUiImports(options: {
+        relativePath: string;
+        content: string;
+        validationMessage: string;
+        allowedUiBasenames: string[];
+        projectPath: string;
+        techStack: string;
+        agentName: string;
+    }): Promise<string | null> {
+        const {
+            relativePath,
+            content,
+            validationMessage,
+            allowedUiBasenames,
+            projectPath,
+            techStack,
+            agentName,
+        } = options;
+        const prof = await this.profiler.getProfileData();
+        const tailNote = prof.hasTailwind
+            ? 'Tailwind is installed; you may use className with utility classes where appropriate.'
+            : 'Tailwind is NOT installed; do NOT use Tailwind classes—use semantic HTML, inline style, or existing CSS patterns from the repo.';
+
+        const allowBlock =
+            allowedUiBasenames.length > 0
+                ? `Allowed basenames for @/components/ui/<name> imports (case-insensitive; file must exist on disk): ${allowedUiBasenames.join(', ')}.\n` +
+                  'Import ONLY these from @/components/ui/…; prefer per-file paths (e.g. @/components/ui/button) unless project barrel rules explicitly allow @/components/ui.'
+                : 'No authorized @/components/ui primitives are available. Remove ALL imports from `@/components/ui` and use semantic HTML only.';
+
+        const userPrompt = `
+Fix ONE file. Static import validation failed:
+
+${validationMessage}
+
+${allowBlock}
+${tailNote}
+
+Original file path: ${relativePath}
+
+Original source:
+\`\`\`tsx
+${content}
+\`\`\`
+
+Requirements:
+- Output the full corrected file using the required multi-file format with this exact path.
+- Remove any @/components/ui/* import whose basename is not in the allowed list (if the list is empty, remove every @/components/ui import).
+- Replace removed UI components with semantic HTML (table, thead, tbody, tr, th, td, button, input, label, section, etc.) keeping behavior and layout as close as possible.
+- Preserve "use client" / "use server" if present at the top.
+- Keep all other valid imports and types.
+
+Return ONLY:
+File: ${relativePath}
+\`\`\`tsx
+...full file...
+\`\`\`
+`.trim();
+
+        const context = `[PROJECT CONTEXT — UI import repair]\n${tailNote}\n- Target project root: ${projectPath}`;
+
+        const resp = await llm.generateCodeStream(
+            userPrompt,
+            context,
+            this.emitter,
+            MODEL_CONFIG.CODING_MODEL,
+            techStack,
+            () => this.refreshLock(),
+            this.llmTelemetry({ action: 'write_code_ui_import_repair', agent: agentName })
+        );
+
+        if (resp?.tokens) {
+            await this.accumulateTokens(resp.tokens.prompt_eval_count, resp.tokens.eval_count);
+        }
+
+        if (resp?.error || !resp.files?.length) return null;
+
+        const want = relativePath.replace(/\\/g, '/');
+        const norm = (p: string) => p.replace(/\\/g, '/');
+        const hit =
+            resp.files.find((f) => norm(f.path) === want) ||
+            resp.files.find((f) => want.endsWith(norm(f.path)) || norm(f.path).endsWith(want));
+        const picked = hit || resp.files[0];
+        return picked?.content?.trim() ? picked.content : null;
+    }
+
     private async accumulateTokens(promptTokens: number, evalTokens: number) {
         try {
             this.executionMetrics.promptTokens += promptTokens;
@@ -1447,6 +1552,30 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                 } catch (switchError: any) {
                     await this.log(mainAgentName, `Warning: Could not switch to feature branch: ${switchError.message}`, { type: 'WARNING' });
                 }
+            }
+
+            // 대상 프로젝트에 components/ui 가 없으면(스캔 기준) React/Next 에서 최소 button/input/label 자동 생성
+            try {
+                const scaffold = await maybeScaffoldMinimalUiKit(projectPath);
+                if (scaffold.created.length > 0) {
+                    await this.log(
+                        mainAgentName,
+                        `UI 키트 미검출 → 최소 UI 파일을 생성했습니다: ${scaffold.created.join(', ')}`,
+                        { type: 'System' }
+                    );
+                    await this.updateMetadata({
+                        uiKitScaffold: {
+                            at: new Date().toISOString(),
+                            files: scaffold.created,
+                        },
+                    });
+                }
+            } catch (scaffoldErr: any) {
+                await this.log(
+                    mainAgentName,
+                    `UI primitives 자동 생성 생략: ${scaffoldErr.message}`,
+                    { type: 'WARNING' }
+                );
             }
 
             // 1. Scan Project Context and Tech Stack
@@ -1682,6 +1811,15 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                                         const existingRepairs = metaForChanges?.metadata?.executionRepairs || [];
                                         const writtenPaths: string[] = [];
 
+                                        const normalizedEntries: Array<{
+                                            file: { path: string; content: string };
+                                            normalizedPath: {
+                                                path: string;
+                                                repairs: string[];
+                                                failed: boolean;
+                                                message?: string;
+                                            };
+                                        }> = [];
                                         for (const file of codeResult.files) {
                                             const normalizedPath = await this.normalizeWriteTargetPath(
                                                 file.path,
@@ -1692,13 +1830,98 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                                             if (normalizedPath.failed) {
                                                 throw new Error(`write_code path normalization failed: ${normalizedPath.message}`);
                                             }
+                                            normalizedEntries.push({ file, normalizedPath });
+                                        }
 
+                                        normalizedEntries.sort((a, b) => {
+                                            const pa = this.writeCodeRelativePathSortPriority(a.normalizedPath.path);
+                                            const pb = this.writeCodeRelativePathSortPriority(b.normalizedPath.path);
+                                            if (pa !== pb) return pa - pb;
+                                            return a.normalizedPath.path.localeCompare(b.normalizedPath.path);
+                                        });
+
+                                        for (const { file, normalizedPath } of normalizedEntries) {
                                             if (normalizedPath.repairs.length > 0) {
                                                 existingRepairs.push(this.buildExecutionRepairRecord(stepIndex, action, normalizedPath.repairs.join(' | ')));
                                                 await this.updateMetadata({ executionRepairs: existingRepairs });
                                             }
 
-                                            const writeResult = await skillFunc(normalizedPath.path, file.content, projectPath);
+                                            let contentToWrite = file.content;
+                                            let writeResult: any = null;
+                                            for (
+                                                let repairRound = 0;
+                                                repairRound <= Orchestrator.MAX_UI_IMPORT_REPAIR_ATTEMPTS;
+                                                repairRound++
+                                            ) {
+                                                writeResult = await skillFunc(normalizedPath.path, contentToWrite, projectPath);
+                                                if (writeResult?.success) {
+                                                    break;
+                                                }
+
+                                                const detail = writeResult?.message || 'write_code execution returned failure';
+                                                const iv = writeResult?.importValidation as
+                                                    | {
+                                                          codes?: string[];
+                                                          allowedUiBasenames?: string[];
+                                                      }
+                                                    | undefined;
+                                                const hasUninstalled = detail.includes('Uninstalled npm package');
+                                                const canRepairUi =
+                                                    !hasUninstalled &&
+                                                    (iv?.codes?.includes('UI_IMPORT_NOT_ON_DISK') ||
+                                                        iv?.codes?.includes('UI_BARREL_INVALID')) &&
+                                                    repairRound < Orchestrator.MAX_UI_IMPORT_REPAIR_ATTEMPTS;
+
+                                                if (!canRepairUi) {
+                                                    existingRepairs.push(this.buildExecutionRepairRecord(stepIndex, action, detail));
+                                                    await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                    throw new Error(detail);
+                                                }
+
+                                                const profData = await this.profiler.getProfileData();
+                                                const allowed =
+                                                    iv?.allowedUiBasenames && iv.allowedUiBasenames.length > 0
+                                                        ? iv.allowedUiBasenames
+                                                        : profData.availableUIComponents.map((n: string) => n.toLowerCase()).sort();
+
+                                                const repaired = await this.repairWriteCodeDisallowedUiImports({
+                                                    relativePath: normalizedPath.path,
+                                                    content: contentToWrite,
+                                                    validationMessage: detail,
+                                                    allowedUiBasenames: allowed,
+                                                    projectPath,
+                                                    techStack,
+                                                    agentName: stepAgentDef.name,
+                                                });
+
+                                                if (!repaired) {
+                                                    existingRepairs.push(
+                                                        this.buildExecutionRepairRecord(
+                                                            stepIndex,
+                                                            action,
+                                                            `${detail} | UI import auto-repair LLM produced no file`
+                                                        )
+                                                    );
+                                                    await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                    throw new Error(detail);
+                                                }
+
+                                                contentToWrite = repaired;
+                                                existingRepairs.push(
+                                                    this.buildExecutionRepairRecord(
+                                                        stepIndex,
+                                                        action,
+                                                        `ui_import_repair round ${repairRound + 1} for ${normalizedPath.path}`
+                                                    )
+                                                );
+                                                await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                await this.log(
+                                                    stepAgentDef.name,
+                                                    `UI import repair round ${repairRound + 1} for ${normalizedPath.path}`,
+                                                    { type: 'WARNING' }
+                                                );
+                                            }
+
                                             if (!writeResult?.success) {
                                                 const detail = writeResult?.message || 'write_code execution returned failure';
                                                 existingRepairs.push(this.buildExecutionRepairRecord(stepIndex, action, detail));
@@ -1718,7 +1941,8 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
                                                 writtenPaths.push(normalizedPath.path);
                                             }
                                             const reportPath = normalizedPath.path;
-                                            this.contextManager.addFile(reportPath, file.content);
+                                            const finalBody = writeResult.after ?? contentToWrite;
+                                            this.contextManager.addFile(reportPath, finalBody);
                                             this.contextManager.addLog(stepAgentDef.name, `Wrote ${reportPath}`);
                                             await this.log(stepAgentDef.name, `Wrote file: ${reportPath}`, { type: 'RESULT' });
                                         }
