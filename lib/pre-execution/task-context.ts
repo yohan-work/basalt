@@ -1,7 +1,8 @@
 import { supabase } from '@/lib/supabase';
 import { ProjectProfiler } from '@/lib/profiler';
 
-const MAX_SNIPPET = 12_000;
+/** STACK_RULES 포함 컨텍스트가 길어질 수 있어 여유를 둔다. */
+const MAX_SNIPPET = 18_000;
 
 /**
  * 플랜·명확화 LLM에 넣을 프로젝트 맥락 문자열. 실패 시 빈 문자열.
