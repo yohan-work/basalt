@@ -22,6 +22,8 @@
 
 ### 실행 기능
 
+- `implementation-history.md`  
+  - 누적 구현·개선 작업 요약(게이트, QA, 스택 규칙, UI 정책·import 복구 등) 및 상세 문서 링크
 - `features.md`  
   - 완료 수정, 요소 수정, 리뷰 제안, approve, discuss, enhance-prompt, react-grab 연동, TTS, 실행 시각화, 동적 기술 스택 분석, 미설치 패키지 방어
 - `api.md`  
@@ -52,6 +54,8 @@
   - 환경 변수, 실행 방법, 스크립트, 운영 가이드
 - `stack.md`  
   - 기술 스택, 도입 배경, 외부 의존성 요약
+- `target-workspace-environment.md`  
+  - **대상 앱** 워크스페이스 스택·버전·구조 파악 체크리스트, 자동 프로파일링과 문서화의 역할 분담
 
 ## 유지 규칙
 
@@ -61,3 +65,4 @@
   2. 동작 주체 문서(`architecture/*`, `agents-skills.md`)
   3. UI 변경 문서(`ui-components.md`)
   4. `README.md`의 링크/요약 갱신
+  5. (선택) 교차 참조용 한 페이지 요약은 `implementation-history.md`에 bullet + 링크만 추가

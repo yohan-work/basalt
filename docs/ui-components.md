@@ -9,7 +9,7 @@ Basalt 핵심 화면 요소는 `components/` 기준으로 관리됩니다.
 - `KanbanBoard`: Request/Plan/Dev/Test/Review/Failed 보드, 실시간 구독
 - `LogViewer`: 실행 로그 뷰어(THOUGHT/ACTION/RESULT/ERROR)
 - `AgentDiscussion`/`OfficeLayout`/`AgentAvatar`: 가상 오피스형 브레인스토밍/상태 시각화
-- `TaskDetailsModal`: 코드 수정/요소 수정/리뷰 결과 탭 통합
+- `TaskDetailsModal`: 코드 수정/요소 수정/리뷰 결과 탭 통합, **검수 완료** 탭(`metadata.qaSignoff`, QA 스크린샷 슬롯)
 - `ProjectPreviewPanel`: 미리보기 iframe/포트 관리
 - `ProjectSelector`: 프로젝트 선택·생성
 - `CreateTaskModal`: 컴포넌트 선택 옵션 포함 태스크 생성 폼

@@ -52,6 +52,7 @@
 |---|---|---|
 | GET | `/api/project/components` | 컴포넌트 목록 조회 |
 | GET | `/api/project/dev-server-info` | dev 서버 포트/URL 추정 |
+| GET | `/api/project/qa-artifact` | QA 검수 PNG (`taskId`, `slot=main\|mobile\|tablet\|desktop`) |
 
 ## Team API
 

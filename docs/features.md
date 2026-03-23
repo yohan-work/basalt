@@ -56,6 +56,25 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - `POST /api/agent/review` 실행 시 `deep_code_review` 기반 분석
 - 결과는 `metadata.reviewResult`, `metadata.reviewAt`에 저장되어 세부 탭에 표시
 
+## 5b) testing 단계: 대상 앱 페이지 QA 스모크
+
+- `verify()`(testing)에서 대상 프로젝트의 dev URL에 대해 `runQaPageSmokeCheck`를 실행합니다: HTTP 연결·상태 코드 확인, `agent-browser`가 있으면 페이지 스냅샷·본문 텍스트에서 알려진 오류 문구(Next 오버레이 등) 탐지.
+- **페이지 URL**은 `resolveQaPageUrl`로 결정합니다. (1) `metadata.qaDevServerUrl`에 경로가 포함된 전체 URL이면 그대로 사용합니다. (2) 아니면 위와 동일한 우선순위로 **origin**(호스트·포트)을 정한 뒤, `metadata.qaDevServerPath`(예: `/test`)를 붙이거나, `metadata.fileChanges`에서 Next `app/.../page.tsx`·`pages/...` 경로를 휴리스틱으로 추론합니다(최근 변경 파일부터). 예: `app/test/page.tsx` → `http://localhost:3001/test`.
+- 결과는 `metadata.qaPageCheck`에 저장됩니다. `QA_FAIL_ON_PAGE_ERRORS=true`이면 스모크 실패 시 `verify_final_output` 결과와 무관하게 검증 단계를 실패 처리합니다.
+- 이후 스크린샷·반응형 점검도 동일 URL을 사용합니다.
+
+### Dev 종료 시 자동 QA (Test 칸반 진입 전)
+
+- `execute()`가 워크플로 스텝을 모두 마치면 **상태를 `testing`으로 바꾸기 전에** `runDevExitQaPipeline`이 실행됩니다: 대상 dev URL에 대해 `runQaPageSmokeCheck`를 반복하고, 실패 시 코딩 모델로 `write_code` 자동 수정을 시도합니다(기본 최대 5회, 환경 변수 `DEV_QA_MAX_REPAIR_ROUNDS`로 1–12 조정). 스모크가 통과할 때까지(또는 상한 초과 시 실행 실패)입니다.
+- 이어서 `verify_final_output`, `screenshot_page`·`check_responsive`, `metadata.qaSignoff`까지 같은 흐름에서 기록합니다. 따라서 Test 칸반에 도착했을 때 검수 완료 탭에 데이터가 채워져 있는 것이 정상입니다.
+- 수동 **「Verify & Request PR」**(`verify()`)은 PR/Git 자동화용으로 그대로 두며, Dev 종료 파이프라인과 겹치면 메타·캡처를 다시 갱신할 수 있습니다.
+
+## 5c) 검수 완료 탭 · QA 아티팩트
+
+- Dev 종료 파이프라인 또는 `verify()`에서 `screenshot_page`·`check_responsive` 캡처 PNG를 대상 프로젝트 경로 아래 `.basalt/basalt-qa/<taskId>/{main,mobile,tablet,desktop}.png`로 복사합니다.
+- `metadata.qaSignoff`에 스모크 결과·검증 요약·`executionRepairs` 기반 이슈 목록·한국어 서술(`narrativeKo`, `finalVerdictKo`)을 저장합니다.
+- UI: 태스크 상세 모달 **「검수 완료」** 탭에서 위 문구와 스크린샷을 확인합니다. 이미지는 `GET /api/project/qa-artifact?taskId=&slot=main|mobile|tablet|desktop`으로 제공됩니다.
+
 ## 6) 승인 워크플로우(HITL)
 
 - `approve` API로 `review` 상태 태스크를 완료 상태로 반영
@@ -68,6 +87,10 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 
 ## 11) 동적 기술 스택 분석 기반 프롬프트 보강
 
+- 대상 저장소별로 더 넓게 파악할 항목(버전·CSR/SSR·라우팅 등)은 `docs/target-workspace-environment.md` 체크리스트를 참고(문서화 + 자동 프로파일 보완).
+- `ProjectProfiler.getContextString()`에 `[STACK_RULES]` 블록을 포함: 먼저 `lib/stack-rules/universal.md`(공통), 이어 스택별 `.md`를 주입한다. 각 팩은 스킬 문서와 같이 YAML 메타 + **Inputs / Outputs / Instructions / MUST NOT / Use Cases**로 정리된다. `getStackSummary()`에 적용 파일명 요약이 포함되며, 명확화용 스니펫 상한은 `lib/pre-execution/task-context.ts`의 `MAX_SNIPPET`으로 조정한다.
+- 동일 블록에 **`## UI_COMPONENT_POLICY`** 를 주입한다. `components/ui`(또는 `src/components/ui`)에 실제 `.ts/.tsx`가 스캔되면 **USE_EXISTING**, 없으면 **ABSENT**로 시작해 `@/components/ui/*` import를 금지·허용을 명시한다. Next/React 대상 저장소는 `execute()` 직후(피처 브랜치 체크아웃 뒤) `lib/project-ui-kit.ts`가 최소 `button`/`input`/`label`과 배럴용 `index.ts` 재export를 자동 생성할 수 있으며(환경변수 `BASALT_AUTO_SCAFFOLD_UI=0`으로 끔), 생성 내역은 `metadata.uiKitScaffold`에 남긴다. **USE_EXISTING**일 때는 Known basenames 밖의 `@/components/ui/<name>` import를 금지한다는 **FORBIDDEN** 문구와, 최소 스캐폴드(버튼·입력·라벨만)일 때 **minimal kit** 경고를 추가한다.
+- `write_code` 한 스텝에서 여러 파일이 나올 때 `Orchestrator`가 **`components/ui/*` 경로를 먼저** 디스크에 쓴 뒤 페이지 등을 쓰도록 정렬해, 같은 배치 안에서 새 UI 파일을 import해도 검증이 통과되게 한다. `@/components/ui/*` 화이트리스트 위반(`UI_IMPORT_NOT_ON_DISK`, `UI_BARREL_INVALID`)이면 미설치 npm 오류가 아닌 한 **짧은 LLM repair**(`write_code_ui_import_repair`)로 해당 파일만 시맨틱 HTML 위주로 고친 뒤 `write_code`를 최대 2회 재시도한다(구현: `lib/agents/Orchestrator.ts`, 검증 메타: `lib/skills/index.ts`의 `validateImportsExistence`).
 - `enhance-prompt` API가 대상 프로젝트의 `package.json`을 실제로 분석하여 제약 조건을 동적으로 생성
 - `CreateTaskModal`에서 `selectedProjectId`를 `enhance-prompt`에 전달
 - 서버 측에서 `ProjectProfiler.getStackSummary()`를 호출하여 프레임워크, 언어, 스타일링, UI 라이브러리, 라우터 구조, 전체 설치 패키지 목록을 한국어로 요약
