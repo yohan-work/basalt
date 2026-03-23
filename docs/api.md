@@ -45,6 +45,9 @@
 | POST | `/api/agent/clarify/generate` | pending 태스크용 명확화 질문 생성 → `metadata.clarifyingGate` |
 | POST | `/api/agent/clarify/submit` | 질문 답변 저장 또는 명확화 건너뛰기 |
 | POST | `/api/agent/execution/acknowledge-impact` | 플랜 후 영향 범위 확인 → `execute` 허용 |
+| POST | `/api/agent/recovery-suggestions` | 실패·QA 메타 기반 복구 가이드 Markdown 생성 (`taskId`, 선택 `note`) |
+| POST | `/api/agent/handoff-summary` | 실행 토론·변경 파일 기반 인수인계 요약 Markdown (`taskId`) |
+| POST | `/api/agent/spec-expand` | 태스크 스펙 확장(AC·스모크 등) → `metadata.specExpansion` 저장 (`taskId`, `pending`/`planning`만) |
 
 ## Project API
 
@@ -52,7 +55,14 @@
 |---|---|---|
 | GET | `/api/project/components` | 컴포넌트 목록 조회 |
 | GET | `/api/project/dev-server-info` | dev 서버 포트/URL 추정 |
+| GET | `/api/project/task-preview-url` | 태스크 메타·`resolveQaPageUrlWithDiagnostics` 기준 대상 앱 미리보기 URL (`taskId`) |
 | GET | `/api/project/qa-artifact` | QA 검수 PNG (`taskId`, `slot=main\|mobile\|tablet\|desktop`) |
+
+## Tasks API
+
+| Method | Path | 용도 |
+|---|---|---|
+| GET | `/api/tasks/similar` | 동일 프로젝트 `done` 태스크 중 제목·설명 토큰 유사도 상위 후보 (`projectId`, `title`, `description`, 선택 `excludeId`) |
 
 ## Team API
 

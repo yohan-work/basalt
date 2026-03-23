@@ -6,13 +6,13 @@ Basalt 핵심 화면 요소는 `components/` 기준으로 관리됩니다.
 
 ## 핵심 컴포넌트
 
-- `KanbanBoard`: Request/Plan/Dev/Test/Review/Failed 보드, 실시간 구독
+- `KanbanBoard`: Request/Plan/Dev/Test/Review/Failed 보드, 실시간 구독, 헤더 **태스크 검색**(제목·설명·metadata JSON 부분 문자열 필터)
 - `LogViewer`: 실행 로그 뷰어(THOUGHT/ACTION/RESULT/ERROR)
 - `AgentDiscussion`/`OfficeLayout`/`AgentAvatar`: 가상 오피스형 브레인스토밍/상태 시각화
-- `TaskDetailsModal`: 코드 수정/요소 수정/리뷰 결과 탭 통합, **검수 완료** 탭(`metadata.qaSignoff`, QA 스크린샷 슬롯)
-- `ProjectPreviewPanel`: 미리보기 iframe/포트 관리
+- `TaskDetailsModal`: 코드 수정/요소 수정/리뷰 결과 탭 통합, **검수 완료** 탭(`metadata.qaSignoff`, QA 스크린샷 슬롯), **`working`/`testing` 시 Preview 탭**([`TaskLivePreview`](../components/TaskLivePreview.tsx) — `GET /api/project/task-preview-url`), Details 내 **스펙 확장**·**인수인계 요약**·**복구 가이드** 패널(LLM API 연동)
+- `ProjectPreviewPanel`: 프로젝트 단위 미리보기 iframe/포트 관리(`GET /api/project/dev-server-info`)
 - `ProjectSelector`: 프로젝트 선택·생성
-- `CreateTaskModal`: 컴포넌트 선택 옵션 포함 태스크 생성 폼
+- `CreateTaskModal`: 컴포넌트 선택 옵션 포함 태스크 생성 폼, **유사 완료 태스크**(`GET /api/tasks/similar`) 추천·설명에 참고 문구 삽입
 - `CodeDiffViewer`: 변경사항 시각화
 - `DoneTasksArchive`: 완료 아카이브
 - `IncomingReactGrabProvider`: 요소 컨텍스트 수신 브릿지

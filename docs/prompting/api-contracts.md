@@ -87,3 +87,78 @@ review 상태 태스크를 사용자 승인 흐름으로 완료 상태로 전환
 
 ### 성공기준
 - JSON 형태로 재사용 가능한 경로가 중복 없이 반환됨
+
+## Contract: GET /api/project/task-preview-url
+
+### 목표
+태스크에 연결된 대상 워크스페이스 dev 앱의 **미리보기 URL**을 서버에서 계산한다.
+
+### 입력
+- `taskId` (필수, query)
+
+### 제약
+- 태스크에 `project_id`가 있어야 함
+- 프로젝트 `path`가 유효해야 함
+
+### 출력
+- `url`, `inferenceWarning`(선택), `projectId`
+
+### 성공기준
+- QA 파이프라인과 동일한 `resolveQaPageUrlWithDiagnostics` 규칙으로 일관된 URL이 반환됨
+
+## Contract: POST /api/agent/recovery-suggestions
+
+### 목표
+실패·QA 메타를 바탕으로 **다음 시도용 한국어 가이드**(Markdown)를 생성한다.
+
+### 입력
+- `taskId` (필수)
+- `note` (선택)
+
+### 제약
+- Ollama 등 LLM 가용
+- 태스크 존재
+
+### 출력
+- `{ markdown: string }`
+
+## Contract: POST /api/agent/handoff-summary
+
+### 목표
+실행 기록을 **인수인계용 요약 Markdown**으로 생성한다.
+
+### 입력
+- `taskId` (필수)
+
+### 출력
+- `{ markdown: string }`
+
+## Contract: POST /api/agent/spec-expand
+
+### 목표
+태스크 설명을 AC·스모크 등이 포함된 스펙으로 확장하고 **`metadata.specExpansion`**에 저장한다.
+
+### 입력
+- `taskId` (필수)
+
+### 제약
+- 태스크 상태가 `pending` 또는 `planning` (그 외 409)
+
+### 출력
+- `{ markdown, generatedAt }`
+
+### 성공기준
+- 이후 `Orchestrator.plan`이 `specExpansion`을 플랜 입력에 합침
+
+## Contract: GET /api/tasks/similar
+
+### 목표
+같은 프로젝트의 **완료(`done`)** 태스크 중 제목·설명 토큰 유사 상위 목록을 반환한다.
+
+### 입력
+- `projectId` (필수)
+- `title`, `description` (선택, query)
+- `excludeId` (선택)
+
+### 출력
+- `{ similar: Array<{ id, title, description, score }> }`

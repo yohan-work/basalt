@@ -55,6 +55,9 @@ MOCK_LLM=false
 # 대상 프로젝트에 components/ui 가 없을 때(스캔 기준) Next/React 에서 최소 button·input·label 자동 생성 (기본: 켜짐). 끄려면:
 # BASALT_AUTO_SCAFFOLD_UI=0
 
+# write_code 시 @/components/ui/<name> 누락에 대한 확장 스캐폴드(textarea 등). 끄려면:
+# BASALT_AUTO_SCAFFOLD_UI_EXTENDED=0
+
 # 태스크당 LLM 토큰 상한의 절대 상한(동적 예산은 그 아래로 계산). 기본 약 400만. 0 또는 unlimited 는 사실상 무제한에 가깝게 취급.
 # BASALT_MAX_TOKENS_PER_TASK_CEILING=4000000
 

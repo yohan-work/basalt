@@ -92,7 +92,7 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - 대상 저장소별로 더 넓게 파악할 항목(버전·CSR/SSR·라우팅 등)은 `docs/target-workspace-environment.md` 체크리스트를 참고(문서화 + 자동 프로파일 보완).
 - `ProjectProfiler.getContextString()`에 `[STACK_RULES]` 블록을 포함: 먼저 `lib/stack-rules/universal.md`(공통), 이어 스택별 `.md`를 주입한다. 각 팩은 스킬 문서와 같이 YAML 메타 + **Inputs / Outputs / Instructions / MUST NOT / Use Cases**로 정리된다. `getStackSummary()`에 적용 파일명 요약이 포함되며, 명확화용 스니펫 상한은 `lib/pre-execution/task-context.ts`의 `MAX_SNIPPET`으로 조정한다.
 - 동일 블록에 **`## UI_COMPONENT_POLICY`** 를 주입한다. `components/ui`(또는 `src/components/ui`)에 실제 `.ts/.tsx`가 스캔되면 **USE_EXISTING**, 없으면 **ABSENT**로 시작해 `@/components/ui/*` import를 금지·허용을 명시한다. Next/React 대상 저장소는 `execute()` 직후(피처 브랜치 체크아웃 뒤) `lib/project-ui-kit.ts`가 최소 `button`/`input`/`label`과 배럴용 `index.ts` 재export를 자동 생성할 수 있으며(환경변수 `BASALT_AUTO_SCAFFOLD_UI=0`으로 끔), 생성 내역은 `metadata.uiKitScaffold`에 남긴다. 스캐폴드 **물리 경로**는 `lib/tsconfig-paths.ts`가 `tsconfig.json`·`jsconfig.json` 등에서 병합한 **`paths["@/*"]`** 로 `@/components/ui`가 실제로 가리키는 위치(예: 루트 `components/ui` vs `src/components/ui`)와 맞춘다. **`src/app`만 있고 루트에 `app/`이 없는데 `@/*`가 `./*`만 가리키는** 잘못된 템플릿은 선택적으로 `BASALT_ALIGN_NEXT_PATH_ALIAS=1`일 때 `tsconfig.json`의 `@/*`를 `./src/*`로 보정할 수 있다. **USE_EXISTING**일 때는 Known basenames 밖의 `@/components/ui/<name>` import를 금지한다는 **FORBIDDEN** 문구와, 최소 스캐폴드(버튼·입력·라벨만)일 때 **minimal kit** 경고를 추가한다.
-- `write_code` 한 스텝에서 여러 파일이 나올 때 `Orchestrator`가 **`components/ui/*` 경로를 먼저** 디스크에 쓴 뒤 페이지 등을 쓰도록 정렬해, 같은 배치 안에서 새 UI 파일을 import해도 검증이 통과되게 한다. `@/components/ui/*` 화이트리스트 위반(`UI_IMPORT_NOT_ON_DISK`, `UI_BARREL_INVALID`)이면 미설치 npm 오류가 아닌 한 **짧은 LLM repair**(`write_code_ui_import_repair`)로 해당 파일만 시맨틱 HTML 위주로 고친 뒤 `write_code`를 최대 2회 재시도한다(구현: `lib/agents/Orchestrator.ts`, 검증 메타: `lib/skills/index.ts`의 `validateImportsExistence`).
+- `write_code` 한 스텝에서 여러 파일이 나올 때 `Orchestrator`가 **`components/ui/*` 경로를 먼저** 디스크에 쓴 뒤 페이지 등을 쓰도록 정렬해, 같은 배치 안에서 새 UI 파일을 import해도 검증이 통과되게 한다. `@/components/ui/*` 검증 실패 시: **`UI_IMPORT_NOT_ON_DISK`** 이고 미설치 npm 오류가 아니면 **먼저** `importValidation.offendingUiSpecifiers`에 따라 `lib/project-ui-kit.ts`의 **`scaffoldMissingUiFromImportSpecifiers`**가 없는 `components/ui/<basename>.tsx`를 생성하고(일부 이름은 전용 템플릿, 나머지는 `div` 래퍼), 배럴 `index.ts`/`index.tsx`가 있으면 `export { … } from "./<basename>"`를 추가할 수 있다. 이후 `reset_runtime_caches()` 하고 **동일 파일 내용**으로 `write_code`를 재시도한다. 확장 스캐폴드는 **`BASALT_AUTO_SCAFFOLD_UI_EXTENDED=0`**(또는 `false`)로 끈다. 그래도 실패하면 **`UI_IMPORT_NOT_ON_DISK` / `UI_BARREL_INVALID`**에 대해 **LLM repair**(`write_code_ui_import_repair`)로 해당 소스를 고친 뒤 `write_code`를 최대 2회 재시도한다(구현: `lib/agents/Orchestrator.ts`, `lib/project-ui-kit.ts`, 검증: `lib/skills/index.ts`의 `validateImportsExistence`).
 - `enhance-prompt` API가 대상 프로젝트의 `package.json`을 실제로 분석하여 제약 조건을 동적으로 생성
 - `CreateTaskModal`에서 `selectedProjectId`를 `enhance-prompt`에 전달
 - 서버 측에서 `ProjectProfiler.getStackSummary()`를 호출하여 프레임워크, 언어, 스타일링, UI 라이브러리, 라우터 구조, 전체 설치 패키지 목록을 한국어로 요약
@@ -165,3 +165,44 @@ LLM이 프로젝트에 설치되지 않은 npm 패키지(예: `axios`, `lodash`)
 
 - Execution Discussion, Agent Collaboration Matrix, 팀 Board/라운드 메트릭 등은 실시간/폴링 기반으로 노출
 - `metadata.executionDiscussions`, `metadata.agentCollaboration` 등을 통해 뷰 데이터 구성
+
+## 13) 태스크 상세·생성 보조 (미리보기·LLM 요약·검색)
+
+태스크 실행 품질과 운영 편의를 위한 **Basalt 앱 UI + 전용 API** 묶음입니다. **`recovery-suggestions`**, **`handoff-summary`**, **`spec-expand`**는 Ollama(`OLLAMA_BASE_URL`)·`generateText`를 쓰며, 실패 시 해당 API만 오류로 돌아갑니다. **`task-preview-url`**, **`tasks/similar`**, 칸반 검색은 LLM 없음. 미리보기는 대상 프로젝트 **dev 서버**가 떠 있어야 합니다.
+
+### 13a) Dev / Test 라이브 미리보기
+
+- **목적**: 태스크가 **`working`(Dev)** 또는 **`testing`(Test)** 이고 프로젝트가 연결되어 있을 때, **대상 워크스페이스**의 dev 앱을 Basalt 태스크 상세 안에서 iframe으로 본다.
+- **API**: `GET /api/project/task-preview-url?taskId=` — Supabase에서 태스크 `metadata`·`project_id`를 읽고, 프로젝트 `path`에 대해 [`resolveQaPageUrlWithDiagnostics`](../lib/project-dev-server.ts)로 URL·`inferenceWarning`을 반환한다(QA 스모크·`verify`와 동일한 URL 우선순위: `qaDevServerUrl` → origin + `qaDevServerPath` → `fileChanges` 기반 라우트 추론 → `/`).
+- **UI**: [`TaskDetailsModal`](../components/TaskDetailsModal.tsx) 상단 탭 **Preview** — [`TaskLivePreview`](../components/TaskLivePreview.tsx)가 위 API를 호출하고, 주소창·이동·iframe 새로고침·새 탭 열기·`X-Frame-Options` 안내를 제공한다. `metadata.fileChanges` 개수가 바뀌면 컴포넌트 `key`로 재마운트해 URL을 다시 조회한다.
+- **전제**: 대상 프로젝트에서 `npm run dev` 등으로 dev 서버가 떠 있어야 한다. 헤더의 **Project Preview**([`ProjectPreviewPanel`](../components/ProjectPreviewPanel.tsx), `GET /api/project/dev-server-info`)는 **프로젝트 단위** 미리보기로 별도 유지된다.
+
+### 13b) 복구 제안 (`recovery-suggestions`)
+
+- **목적**: 실패·QA 이후 사용자가 태스크에 다시 넣을 **한국어 프롬프트 초안·가설·체크리스트**를 생성한다.
+- **API**: `POST /api/agent/recovery-suggestions` — body `{ taskId, note? }`. 태스크 메타에서 `lastError`, `qaPageCheck`, `devQaNextBuild`, `executionRepairs`, `qaSignoff` 등을 발췌해 `generateText`(스마트 모델)로 Markdown 응답.
+- **UI**: `TaskDetailsModal` **Details** 뷰의 「복구 · 다음 시도 가이드」— 조건: `failed` / `testing` / `review` 또는 `metadata.qaPageCheck` 존재. 선택 메모, 생성, 복사, Markdown 뷰어.
+
+### 13c) 인수인계 요약 (`handoff-summary`)
+
+- **목적**: 실행 토론·변경 파일·워크플로를 **이슈 트래커·팀 공유용 한 페이지 요약**(한국어 Markdown)으로 압축한다.
+- **API**: `POST /api/agent/handoff-summary` — body `{ taskId }`. `executionDiscussions`, `workflow`, `fileChanges`, `agentCollaboration` 등 발췌 후 `generateText`.
+- **UI**: `TaskDetailsModal` **Details** — 「인수인계 요약」. 조건: `executionDiscussions`가 비어 있지 않거나 `fileChanges`가 있으면 표시. 생성·복사·뷰어.
+
+### 13d) 태스크 스펙 확장 (`spec-expand`)
+
+- **목적**: 짧은 요청을 **수용 기준·엣지 케이스·수동 스모크·금지 사항** 등이 포함된 스펙(Markdown)으로 확장하고, **플랜 LLM 입력**에 자동 합류시킨다.
+- **API**: `POST /api/agent/spec-expand` — body `{ taskId }`. 상태가 **`pending` 또는 `planning`** 만 허용(그 외 409). `ProjectProfiler.getStackSummary()`를 넣어 LLM 생성 후 `metadata.specExpansion`에 `{ markdown, generatedAt }` 저장.
+- **플랜 주입**: [`formatSpecExpansionForPlan`](../lib/pre-execution/gates.ts)가 [`Orchestrator.plan`](../lib/agents/Orchestrator.ts)의 `effectiveDescription`에 블록을 붙인다(명확화 답변과 병행).
+- **UI**: `TaskDetailsModal` **Details** — 「태스크 스펙 확장」패널(`pending`/`planning`), 생성 버튼·저장된 Markdown 뷰어.
+
+### 13e) 유사 완료 태스크 (`tasks/similar`)
+
+- **목적**: 새 태스크 작성 시 **같은 프로젝트·`done` 상태** 태스크 중 제목·설명 **토큰 유사도** 상위 후보를 제시한다(임베딩 없음).
+- **API**: `GET /api/tasks/similar?projectId=&title=&description=&excludeId=` — `similar: [{ id, title, description, score }]`.
+- **UI**: [`CreateTaskModal`](../components/CreateTaskModal.tsx) — 제목·설명 입력 후 디바운스 조회, 「설명에 참고 문구 추가」로 설명 필드에 참고 블록 append.
+
+### 13f) 칸반 태스크 검색
+
+- **목적**: 태스크가 많을 때 **제목·설명·`metadata` JSON 문자열**에 대한 부분 문자열 필터로 칸반 카드를 좁힌다(LLM 없음).
+- **UI**: [`KanbanBoard`](../components/KanbanBoard.tsx) 헤더 `type="search"` 입력 — 컬럼별 필터에 `taskMatchesSearch` 적용.
