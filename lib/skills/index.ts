@@ -8,6 +8,7 @@ import { AgentDefinition, AgentLoader } from '../agent-loader';
 import * as llm from '../llm';
 import { MODEL_CONFIG } from '../model-config';
 import { ProjectProfiler } from '../profiler';
+import { mergeCompilerPathsFromConfigs } from '../tsconfig-paths';
 
 const execAsync = promisify(exec);
 const READ_CACHE = new Map<string, string>();
@@ -107,34 +108,8 @@ function normalizeImportPathWithAlias(specifier: string, projectRoot: string): s
     return path.join(projectRoot, specifier.replace(/^@\//, ''));
 }
 
-const CONFIG_FILES_FOR_PATHS = ['tsconfig.json', 'jsconfig.json', 'tsconfig.app.json', 'tsconfig.build.json'] as const;
-
-/** tsconfig / jsconfig / tsconfig.app 등에서 paths 를 읽어 같은 키는 뒤 파일이 덮어쓴다. */
-function mergeCompilerPaths(projectRoot: string): Record<string, string[]> {
-    const merged: Record<string, string[]> = {};
-    for (const name of CONFIG_FILES_FOR_PATHS) {
-        const configPath = path.join(projectRoot, name);
-        if (!fs.existsSync(configPath)) continue;
-        try {
-            const raw = fs.readFileSync(configPath, 'utf-8');
-            const parsed = ts.parseConfigFileTextToJson(configPath, raw);
-            const paths = parsed.config?.compilerOptions?.paths;
-            if (!paths || typeof paths !== 'object' || Array.isArray(paths)) continue;
-            for (const [k, v] of Object.entries(paths)) {
-                if (typeof v === 'object' && v !== null) {
-                    const arr = Array.isArray(v) ? v : [v];
-                    merged[String(k)] = arr.filter((x): x is string => typeof x === 'string');
-                }
-            }
-        } catch {
-            /* ignore */
-        }
-    }
-    return merged;
-}
-
 function parseProjectPathAliases(projectRoot: string): Array<{ pattern: string; target: string; wildcard: boolean }> {
-    const merged = mergeCompilerPaths(projectRoot);
+    const merged = mergeCompilerPathsFromConfigs(projectRoot);
     const entries: Array<{ pattern: string; target: string; wildcard: boolean }> = [];
     for (const [pattern, targetValues] of Object.entries(merged)) {
         if (targetValues.length === 0) continue;

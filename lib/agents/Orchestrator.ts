@@ -22,7 +22,7 @@ import {
     StepExecutionMetric,
     StrategyPreset,
 } from '../orchestration/metrics';
-import { applyPresetDefaults, resolveStepPolicy } from '../orchestration/policy';
+import { applyPresetDefaults, resolveExecutionTokenCap, resolveStepPolicy } from '../orchestration/policy';
 import { maybeScaffoldMinimalUiKit } from '../project-ui-kit';
 import {
     formatClarificationForPlan,
@@ -154,14 +154,12 @@ export class Orchestrator {
         });
     }
 
-    private resolveBudgetPolicy(taskMetadata: any, strategyPreset: StrategyPreset): ExecutionBudgetPolicy {
+    private resolveBudgetPolicy(taskMetadata: any, strategyPreset: StrategyPreset, workflowStepCount: number): ExecutionBudgetPolicy {
         const raw = taskMetadata?.budgetPolicy || {};
         const presetDefaults = applyPresetDefaults(strategyPreset).budgetPolicy;
+        const maxTokensPerTask = resolveExecutionTokenCap(taskMetadata, strategyPreset, workflowStepCount);
         return {
-            maxTokensPerTask: Math.max(
-                1000,
-                Number(raw.maxTokensPerTask) || Number(presetDefaults.maxTokensPerTask) || DEFAULT_BUDGET_POLICY.maxTokensPerTask
-            ),
+            maxTokensPerTask,
             maxDiscussionCalls: Math.max(
                 0,
                 Number(raw.maxDiscussionCalls) || Number(presetDefaults.maxDiscussionCalls) || DEFAULT_BUDGET_POLICY.maxDiscussionCalls
@@ -1503,7 +1501,11 @@ File: ${relativePath}
                 await this.log(mainAgentName, `워크플로우 실행 시작 전 정합성 보정 적용: ${workflowSanity.reason}`, { type: 'WARNING' });
             }
             this.executionOptions = this.resolveExecutionOptions(task.metadata, options);
-            this.budgetPolicy = this.resolveBudgetPolicy(task.metadata, this.executionOptions.strategyPreset);
+            this.budgetPolicy = this.resolveBudgetPolicy(
+                task.metadata,
+                this.executionOptions.strategyPreset,
+                workflow.steps.length
+            );
             const existingMetrics = task.metadata?.executionMetrics;
             this.executionMetrics = {
                 startedAt: existingMetrics?.startedAt || new Date().toISOString(),
@@ -1554,15 +1556,15 @@ File: ${relativePath}
                 }
             }
 
-            // 대상 프로젝트에 components/ui 가 없으면(스캔 기준) React/Next 에서 최소 button/input/label 자동 생성
+            // 대상 프로젝트: UI 키트 없음 또는 배럴·primitives 누락 시 React/Next에서 갭 필
             try {
                 const scaffold = await maybeScaffoldMinimalUiKit(projectPath);
                 if (scaffold.created.length > 0) {
-                    await this.log(
-                        mainAgentName,
-                        `UI 키트 미검출 → 최소 UI 파일을 생성했습니다: ${scaffold.created.join(', ')}`,
-                        { type: 'System' }
-                    );
+                    const detail =
+                        scaffold.skippedReason === 'ui_kit_gap_fill'
+                            ? `기존 UI 키트 보완(배럴·누락 primitives): ${scaffold.created.join(', ')}`
+                            : `UI 키트 미검출 → 최소 UI 파일을 생성했습니다: ${scaffold.created.join(', ')}`;
+                    await this.log(mainAgentName, detail, { type: 'System' });
                     await this.updateMetadata({
                         uiKitScaffold: {
                             at: new Date().toISOString(),
@@ -1757,8 +1759,9 @@ File: ${relativePath}
                                         throw new Error(
                                             `Token budget exceeded before code generation (${used}/${cap}). ` +
                                                 `플랜·토론·이전 스텝 LLM 호출로 예산이 소진되었습니다. ` +
-                                                `태스크 metadata.budgetPolicy.maxTokensPerTask 값을 키우거나(예: 50000), ` +
-                                                `실행 옵션에서 strategyPreset을 quality_first로 두거나, discussionMode를 off로 줄인 뒤 재시도하세요.`
+                                                `상한은 워크플로 스텝 수에 따라 자동 확장되며, ` +
+                                                `metadata.budgetPolicy.maxTokensPerTask로 더 올리거나 환경 변수 BASALT_MAX_TOKENS_PER_TASK_CEILING(기본 400만, unlimited 가능)을 조정하세요. ` +
+                                                `토큰을 줄이려면 discussionMode를 off로 두세요.`
                                         );
                                     }
                                     const codePrompt = `${stepGoalWithDiscussion}\n\nOverall task: ${task.description}`;
@@ -2206,6 +2209,30 @@ File: ${relativePath}
                 );
             }
 
+            try {
+                const scaffold = await maybeScaffoldMinimalUiKit(projectPath);
+                if (scaffold.created.length > 0) {
+                    const latest = (await this.getTask()) as any;
+                    const prevMeta = latest?.metadata || meta || {};
+                    const prevFiles = Array.isArray(prevMeta.uiKitScaffold?.files) ? prevMeta.uiKitScaffold.files : [];
+                    const mergedFiles = [...new Set([...prevFiles, ...scaffold.created])];
+                    await this.updateMetadata({
+                        uiKitScaffold: {
+                            at: new Date().toISOString(),
+                            files: mergedFiles,
+                        },
+                    });
+                    await this.log(
+                        mainAgentName,
+                        `Dev QA 전 UI 갭 보정(${scaffold.skippedReason === 'ui_kit_gap_fill' ? '배럴·primitives' : '신규'}): ${scaffold.created.join(', ')}`,
+                        { type: 'System' }
+                    );
+                    continue;
+                }
+            } catch (scaffoldErr: any) {
+                await this.log('System', `Dev QA UI 갭 보정 생략: ${scaffoldErr.message}`, { type: 'WARNING' });
+            }
+
             await this.log(mainAgentName, `페이지 오류 감지 → 자동 코드 수정 시도 (라운드 ${r + 1})`, {
                 type: 'WARNING',
             });
@@ -2395,7 +2422,11 @@ HTTP 상태: ${qaPageCheck.httpStatus ?? 'n/a'}, 연결: ${qaPageCheck.httpReach
 페이지 오류 신호: ${qaPageCheck.pageErrorSignals.join(', ') || '(없음)'}
 브라우저 점검 오류: ${qaPageCheck.browserError || '(없음)'}
 
-위 문제를 해결하도록 최소 변경으로 코드를 수정하세요. Next.js/React 런타임·빌드 오류를 우선 해결합니다.`;
+위 문제를 해결하도록 최소 변경으로 코드를 수정하세요. Next.js/React 런타임·빌드 오류를 우선 해결합니다.
+Next App Router에서 useState 등 클라이언트 훅·브라우저 API를 쓰는 파일에는 파일 최상단에 "use client"가 필요합니다.
+next/link: Next 13+ 에서 <Link> 안에 <a>를 중첩하지 마세요. className·자식은 <Link>에 직접 두세요.
+metadata vs use client: "use client"가 있는 파일에서는 export const metadata / generateMetadata를 쓰지 마세요. page·layout은 서버 컴포넌트로 두고 인터랙션은 별도 *Client.tsx 등으로 분리하세요.`;
+
 
         const codePrompt = `${repairGoal}\n\n전체 태스크: ${task.description || ''}`;
 

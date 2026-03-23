@@ -1,4 +1,57 @@
-import { ExecutionBudgetPolicy, StrategyPreset } from './metrics';
+import { DEFAULT_BUDGET_POLICY, ExecutionBudgetPolicy, StrategyPreset } from './metrics';
+
+/** 프리셋별 워크플로 스텝당 여유 + 플랜·토론·Dev QA 등 고정 버퍼(토큰) */
+const PRESET_TOKEN_SCALING: Record<StrategyPreset, { perStep: number; postBuffer: number }> = {
+    quality_first: { perStep: 15_000, postBuffer: 140_000 },
+    balanced: { perStep: 12_000, postBuffer: 110_000 },
+    speed_first: { perStep: 7_000, postBuffer: 45_000 },
+    cost_saver: { perStep: 3_000, postBuffer: 15_000 },
+};
+
+/**
+ * 절대 상한(기본 400만). `BASALT_MAX_TOKENS_PER_TASK_CEILING=0` 또는 `unlimited`면 ~21억(실질 무제한).
+ */
+export function getTokenBudgetAbsoluteCeiling(): number {
+    const raw = process.env.BASALT_MAX_TOKENS_PER_TASK_CEILING;
+    if (raw === '0' || raw === 'unlimited') {
+        return 2_147_000_000;
+    }
+    const n = parseInt(String(raw || ''), 10);
+    return Number.isFinite(n) && n > 0 ? n : 4_000_000;
+}
+
+/**
+ * 워크플로 스텝 수에 따라 태스크당 토큰 상한을 스케일한다(고정 상한만으로는 장기 실행에서 부족함).
+ */
+export function computeDynamicMaxTokensPerTask(preset: StrategyPreset, workflowStepCount: number): number {
+    const defaults = applyPresetDefaults(preset).budgetPolicy;
+    const base = Math.max(
+        1000,
+        Number(defaults.maxTokensPerTask) || DEFAULT_BUDGET_POLICY.maxTokensPerTask
+    );
+    const scaling = PRESET_TOKEN_SCALING[preset] ?? PRESET_TOKEN_SCALING.balanced;
+    const steps = Math.max(0, workflowStepCount);
+    const raw = base + steps * scaling.perStep + scaling.postBuffer;
+    return Math.min(getTokenBudgetAbsoluteCeiling(), raw);
+}
+
+/**
+ * metadata.budgetPolicy.maxTokensPerTask(명시)와 동적 하한 중 큰 값, 이후 절대 상한으로 캡.
+ */
+export function resolveExecutionTokenCap(
+    taskMetadata: { budgetPolicy?: Partial<ExecutionBudgetPolicy> } | null | undefined,
+    strategyPreset: StrategyPreset,
+    workflowStepCount: number
+): number {
+    const raw = taskMetadata?.budgetPolicy || {};
+    const dynamic = computeDynamicMaxTokensPerTask(strategyPreset, workflowStepCount);
+    const explicit = Number(raw.maxTokensPerTask);
+    const ceiling = getTokenBudgetAbsoluteCeiling();
+    return Math.min(
+        ceiling,
+        Math.max(1000, dynamic, Number.isFinite(explicit) && explicit > 0 ? explicit : 0)
+    );
+}
 
 export type DiscussionMode = 'off' | 'step_handoff' | 'roundtable';
 export type ModelTier = 'fast' | 'smart';
@@ -98,7 +151,7 @@ export function applyPresetDefaults(preset: StrategyPreset): {
                 maxDiscussionThoughts: 5,
                 carryDiscussionToPrompt: true,
                 budgetPolicy: {
-                    maxTokensPerTask: 42000,
+                    maxTokensPerTask: 60000,
                     maxDiscussionCalls: 18,
                     maxSkillRetries: 2,
                 },
@@ -131,7 +184,7 @@ export function applyPresetDefaults(preset: StrategyPreset): {
                 maxDiscussionThoughts: 3,
                 carryDiscussionToPrompt: true,
                 budgetPolicy: {
-                    maxTokensPerTask: 32000,
+                    maxTokensPerTask: 50000,
                     maxDiscussionCalls: 10,
                     maxSkillRetries: 1,
                 },

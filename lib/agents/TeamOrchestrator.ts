@@ -8,8 +8,10 @@ import { TeamState, AgentAction, TeamMetadata, TeamCollaborationMap } from '../t
 import {
     DEFAULT_BUDGET_POLICY,
     ExecutionBudgetPolicy,
+    StrategyPreset,
     TeamExecutionMetrics,
 } from '../orchestration/metrics';
+import { resolveExecutionTokenCap } from '../orchestration/policy';
 // import { v4 as uuidv4 } from 'uuid'; // Removed unused import to avoid dependency issues
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
@@ -69,10 +71,18 @@ export class TeamOrchestrator {
         this.executionMetrics.dbUpdates += 1;
     }
 
-    private resolveBudgetPolicy(raw: unknown): ExecutionBudgetPolicy {
+    private resolveBudgetPolicy(
+        raw: unknown,
+        opts: { strategyPreset: StrategyPreset; syntheticStepCount: number }
+    ): ExecutionBudgetPolicy {
         const policy = (raw && typeof raw === 'object') ? (raw as Record<string, unknown>) : {};
+        const maxTokensPerTask = resolveExecutionTokenCap(
+            { budgetPolicy: policy as Partial<ExecutionBudgetPolicy> },
+            opts.strategyPreset,
+            opts.syntheticStepCount
+        );
         return {
-            maxTokensPerTask: Math.max(1000, Number(policy.maxTokensPerTask) || DEFAULT_BUDGET_POLICY.maxTokensPerTask),
+            maxTokensPerTask,
             maxDiscussionCalls: Math.max(0, Number(policy.maxDiscussionCalls) || DEFAULT_BUDGET_POLICY.maxDiscussionCalls),
             maxSkillRetries: Math.max(0, Math.min(3, Number(policy.maxSkillRetries) || DEFAULT_BUDGET_POLICY.maxSkillRetries)),
             maxDbWritesPerTask: Math.max(20, Number(policy.maxDbWritesPerTask) || DEFAULT_BUDGET_POLICY.maxDbWritesPerTask),
@@ -130,7 +140,14 @@ export class TeamOrchestrator {
         if (!Array.isArray(metadata.roundSummaries)) {
             metadata.roundSummaries = [];
         }
-        this.budgetPolicy = this.resolveBudgetPolicy(metadata.budgetPolicy);
+        const preset = (metadata.strategyPreset as StrategyPreset) || 'balanced';
+        const b = this.teamState.board;
+        const taskCount = b.todo.length + b.in_progress.length + b.review.length + b.done.length;
+        const syntheticStepCount = Math.max(24, taskCount * 4, 20);
+        this.budgetPolicy = this.resolveBudgetPolicy(metadata.budgetPolicy, {
+            strategyPreset: preset,
+            syntheticStepCount,
+        });
         const savedMetrics = (metadata.teamExecutionMetrics && typeof metadata.teamExecutionMetrics === 'object')
             ? (metadata.teamExecutionMetrics as Partial<TeamExecutionMetrics>)
             : {};
