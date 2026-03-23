@@ -24,12 +24,12 @@ export const SIGNAL_DOC_HINTS: Partial<Record<string, string>> = {
     'internal server error': '서버 500 — 서버 컴포넌트·Route Handler·환경 변수 로그 확인.',
     'uncaught exception': '예외 스택의 소스 파일부터 수정.',
     'something went wrong': '일반 오류 UI — 스모크 발췌·오버레이 텍스트 참고.',
-    'digest:': 'https://nextjs.org/docs/app/api-reference/file-conventions/error — Next error digest; 서버 로그와 대조.',
     'hydration failed': 'https://nextjs.org/docs/messages/react-hydration-error — 서버/클라이언트 마크업 불일치; `Date`/`Math.random`/브라우저 전용 값을 렌더에서 제거.',
     'hydration mismatch': 'https://nextjs.org/docs/messages/react-hydration-error — 동일.',
     'there was an error while hydrating': 'https://nextjs.org/docs/messages/react-hydration-error — 하이드레이션 실패.',
     'text content does not match': 'https://nextjs.org/docs/messages/react-hydration-error — 하이드레이션 불일치.',
-    'suppresshydrationwarning': '하이드레이션 경고 — 근본 원인(클라이언트 전용 값) 제거 우선.',
+    'try adding suppresshydrationwarning':
+        'https://nextjs.org/docs/messages/react-hydration-error — 하이드레이션 불일치; 근본 원인(클라이언트 전용 값) 제거 우선.',
     'hostname is not configured': 'https://nextjs.org/docs/messages/next-image-unconfigured-host — `next.config` `images.remotePatterns` 또는 `<img>`로 대체.',
     'has not been configured under images': 'https://nextjs.org/docs/messages/next-image-unconfigured-host — `images` 설정에 호스트 추가.',
     'invalid src prop': 'https://nextjs.org/docs/messages/next-image-unconfigured-host — `next/image` src·도메인 설정.',
@@ -45,10 +45,7 @@ export const SIGNAL_DOC_HINTS: Partial<Record<string, string>> = {
         'https://react.dev/warnings/unknown-prop — `fullWidth`·`variant` 등 커스텀 prop을 `<button>`/`<input>`에 `{...props}`로 넘기지 말고 구조 분해 후 DOM 허용 속성만 전달.',
     'server actions must': 'https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations — Server Action은 async·직렬화 가능한 인자만.',
     'server action': 'https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations — 폼 `action`/직렬화 가능 인자.',
-    'edge runtime': 'https://nextjs.org/docs/app/api-reference/file-conventions/route#runtime — Route/Edge에서 Node API 제한.',
     'failed to fetch rsc payload': 'https://nextjs.org/docs/messages/failed-to-fetch-rsc-payload — 네트워크·프록시·rewrite; dev 서버 재시작.',
-    '__next_error__': 'Next 개발 오버레이 — 본문 발췌의 스택·파일 경로 우선.',
-    'nextjs-original-stack-frame': '개발 스택 프레임 — 발췌에 나온 소스 경로·라인을 우선 수정.',
 };
 
 /**

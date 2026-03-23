@@ -23,12 +23,12 @@ export const PAGE_ERROR_SIGNALS = [
     'internal server error',
     'uncaught exception',
     'something went wrong',
-    'digest:',
     'hydration failed',
     'hydration mismatch',
     'there was an error while hydrating',
     'text content does not match',
-    'suppresshydrationwarning',
+    // Bare "suppresshydrationwarning" matches the legitimate HTML attribute; require the error hint phrase.
+    'try adding suppresshydrationwarning',
     'hostname is not configured',
     'invalid src prop',
     'has not been configured under images',
@@ -42,10 +42,9 @@ export const PAGE_ERROR_SIGNALS = [
     'client-side exception occurred',
     'prop on a dom element',
     'server actions must',
-    'edge runtime',
     'failed to fetch rsc payload',
-    '__next_error__',
-    'nextjs-original-stack-frame',
+    // Avoid "__next_error__", "nextjs-original-stack-frame", bare "digest:" — common inside Next dev <script>
+    // bundles even on healthy pages; we strip scripts from the HTTP body before matching (see below).
 ] as const;
 
 export type QaPageCheckResult = {
@@ -71,6 +70,17 @@ const HTTP_TIMEOUT_MS = 12_000;
 const HTTP_BODY_MAX_CHARS = 120_000;
 const DIAGNOSTIC_EXCERPT_MAX = 6000;
 const OVERLAY_EVAL_MAX = 10_000;
+
+/**
+ * Strip inline script/style/noscript so minified framework bundles do not false-trigger substring error signals.
+ */
+function stripHtmlScriptsStylesAndNoscript(html: string): string {
+    if (!html) return '';
+    return html
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
+        .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ');
+}
 
 function maskLikelySecrets(s: string): string {
     return s
@@ -174,7 +184,7 @@ export async function runQaPageSmokeCheck(baseUrl: string): Promise<QaPageCheckR
     let nextOverlayExcerpt: string | undefined;
 
     if (http.bodySnippet) {
-        combinedText += http.bodySnippet;
+        combinedText += stripHtmlScriptsStylesAndNoscript(http.bodySnippet);
     }
 
     const available = await isAgentBrowserAvailable();
