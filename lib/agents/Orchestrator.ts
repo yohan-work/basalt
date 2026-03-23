@@ -2,6 +2,7 @@
 import { supabase } from '@/lib/supabase';
 import * as skills from '@/lib/skills';
 import * as llm from '@/lib/llm';
+import fs from 'fs';
 import path from 'path';
 import { AgentLoader, AgentDefinition } from '../agent-loader';
 import { ContextManager } from '../context-manager';
@@ -9,10 +10,16 @@ import { StreamEmitter } from '../stream-emitter';
 import { ProjectProfiler } from '../profiler';
 import { MODEL_CONFIG } from '../model-config';
 import { isAgentBrowserAvailable } from '../browser/agent-browser';
-import { resolveQaPageUrl } from '../project-dev-server';
+import { resolveQaPageUrl, resolveQaPageUrlWithDiagnostics } from '../project-dev-server';
 import { persistQaArtifactsFromCapture } from '../qa/artifact-paths';
 import type { QaArtifactSlot } from '../qa/artifact-slots';
 import { runQaPageSmokeCheck, type QaPageCheckResult } from '../qa/page-smoke-check';
+import {
+    runDevQaNextBuildCapture,
+    isDevQaNextBuildEnabled,
+    isDevQaFailOnNextBuildEnabled,
+} from '../qa/dev-qa-next-build';
+import { formatRepairDocHints } from '../qa/qa-repair-hints';
 import { buildQaSignoffReport } from '../qa/signoff-report';
 import {
     BudgetEvent,
@@ -411,8 +418,52 @@ export class Orchestrator {
         }
 
         const normalizedRouteBase = routeBase.endsWith('/') ? routeBase.slice(0, -1) : routeBase;
-        const posix = path.posix.normalize(normalized);
+        let posix = path.posix.normalize(normalized);
         const isAppRouter = normalizedRouteBase.includes('app');
+        const projectRoot = this.profiler.getProjectRoot();
+
+        // Align LLM paths with detected Router Base (e.g. app/foo vs src/app/foo).
+        if (normalizedRouteBase === 'src/app' && (posix === 'app' || posix.startsWith('app/'))) {
+            if (!posix.startsWith('src/app')) {
+                const rest = posix === 'app' ? '' : posix.slice('app/'.length);
+                const next = rest ? `src/app/${rest}` : 'src/app';
+                repairs.push(`Route guard: aligned path with Router Base (src/app): ${posix} -> ${next}`);
+                posix = path.posix.normalize(next);
+            }
+        } else if (normalizedRouteBase === 'app' && (posix === 'src/app' || posix.startsWith('src/app/'))) {
+            const rest = posix === 'src/app' ? '' : posix.slice('src/app/'.length);
+            const next = rest ? `app/${rest}` : 'app';
+            repairs.push(`Route guard: aligned path with Router Base (app): ${posix} -> ${next}`);
+            posix = path.posix.normalize(next);
+        } else if (normalizedRouteBase === 'src/pages' && (posix === 'pages' || posix.startsWith('pages/'))) {
+            if (!posix.startsWith('src/pages')) {
+                const rest = posix === 'pages' ? '' : posix.slice('pages/'.length);
+                const next = rest ? `src/pages/${rest}` : 'src/pages';
+                repairs.push(`Route guard: aligned path with Router Base (src/pages): ${posix} -> ${next}`);
+                posix = path.posix.normalize(next);
+            }
+        } else if (normalizedRouteBase === 'pages' && (posix === 'src/pages' || posix.startsWith('src/pages/'))) {
+            const rest = posix === 'src/pages' ? '' : posix.slice('src/pages/'.length);
+            const next = rest ? `pages/${rest}` : 'pages';
+            repairs.push(`Route guard: aligned path with Router Base (pages): ${posix} -> ${next}`);
+            posix = path.posix.normalize(next);
+        }
+
+        // App Router: segment routes use page.tsx — not Pages Router-style index.tsx.
+        if (isAppRouter && /\/index\.(tsx|ts|jsx|js)$/i.test(posix)) {
+            const dirOf = path.posix.dirname(posix);
+            const absDir = path.join(projectRoot, ...dirOf.split('/').filter(Boolean));
+            const hasPage =
+                fs.existsSync(path.join(absDir, 'page.tsx')) || fs.existsSync(path.join(absDir, 'page.ts'));
+            if (!hasPage) {
+                const pagePath = posix.replace(/\/index\.(tsx|ts|jsx|js)$/i, '/page.tsx');
+                repairs.push(
+                    `Route guard: App Router uses page.tsx for routes, not index.* — remapped ${posix} -> ${pagePath}`
+                );
+                posix = path.posix.normalize(pagePath);
+            }
+        }
+
         const appRoot = isAppRouter ? `${normalizedRouteBase}/page.tsx` : `${normalizedRouteBase}/index.tsx`;
         const targetExtension = isAppRouter ? 'tsx' : 'tsx';
         const explicitRootRequest = this.isExplicitRootPageRequest(taskDescription, stepDescription, codePrompt);
@@ -2180,8 +2231,33 @@ File: ${relativePath}
         const freshTask = (await this.getTask()) || task;
         const meta = (freshTask as any)?.metadata || task?.metadata || null;
 
-        const qaBaseUrl = resolveQaPageUrl(projectPath, meta);
+        const qaResolution = resolveQaPageUrlWithDiagnostics(projectPath, meta);
+        const qaBaseUrl = qaResolution.url;
         await this.log('System', `Dev 종료 QA 대상 URL: ${qaBaseUrl}`, { type: 'System' });
+        if (qaResolution.inferenceWarning) {
+            await this.log('System', `QA URL 추론: ${qaResolution.inferenceWarning}`, { type: 'WARNING' });
+            await this.updateMetadata({ qaRouteInferenceWarning: qaResolution.inferenceWarning });
+        }
+
+        let devQaNextBuildExcerpt: string | undefined;
+        if (isDevQaNextBuildEnabled()) {
+            await this.log('System', 'Dev QA: 선택적 `next build` 실행 중(완료까지 수 분 걸릴 수 있음)', { type: 'System' });
+            const nb = await runDevQaNextBuildCapture(projectPath);
+            devQaNextBuildExcerpt = nb.excerpt;
+            await this.updateMetadata({
+                devQaNextBuild: {
+                    at: new Date().toISOString(),
+                    ok: nb.ok,
+                    exitCode: nb.exitCode,
+                    excerptHead: nb.excerpt.slice(0, 25_000),
+                },
+            });
+            if (isDevQaFailOnNextBuildEnabled() && !nb.ok) {
+                throw new Error(
+                    `Dev QA: next build 실패(DEV_QA_FAIL_ON_NEXT_BUILD). ${nb.excerpt.slice(0, 2000)}`
+                );
+            }
+        }
 
         const maxRounds = Math.max(1, Math.min(12, parseInt(String(process.env.DEV_QA_MAX_REPAIR_ROUNDS || '5'), 10) || 5));
         let qaPageCheck: QaPageCheckResult | null = null;
@@ -2244,7 +2320,8 @@ File: ${relativePath}
                 qaBaseUrl,
                 qaPageCheck,
                 r,
-                syntheticStepIndex
+                syntheticStepIndex,
+                devQaNextBuildExcerpt
             );
             if (!repaired) {
                 await this.log(mainAgentName, 'Dev QA 자동 수정이 코드를 적용하지 못했습니다. 다음 스모크로 재확인합니다.', {
@@ -2384,7 +2461,8 @@ File: ${relativePath}
         qaBaseUrl: string,
         qaPageCheck: QaPageCheckResult,
         repairRound: number,
-        syntheticStepIndex: number
+        syntheticStepIndex: number,
+        devQaNextBuildExcerpt?: string
     ): Promise<boolean> {
         // #region agent log
         fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
@@ -2416,13 +2494,28 @@ File: ${relativePath}
             AgentLoader.listAgents().find((a) => this.normalizeAgentKey(a.role) === 'software-engineer') ||
             this.mainAgentDef;
 
+        const excerptBlock = [
+            qaPageCheck.errorExcerpt ? `진단 발췌(마스킹됨):\n${qaPageCheck.errorExcerpt.slice(0, 5500)}` : null,
+            qaPageCheck.nextOverlayExcerpt
+                ? `Next 오버레이/포털 발췌:\n${qaPageCheck.nextOverlayExcerpt.slice(0, 4000)}`
+                : null,
+            devQaNextBuildExcerpt
+                ? `선택적 next build 출력(발췌):\n${devQaNextBuildExcerpt.slice(0, 8000)}`
+                : null,
+        ]
+            .filter(Boolean)
+            .join('\n\n');
+
         const repairGoal = `[Dev QA 자동 수정] 대상 URL: ${qaBaseUrl}
 스모크 요약: ${qaPageCheck.summary}
-HTTP 상태: ${qaPageCheck.httpStatus ?? 'n/a'}, 연결: ${qaPageCheck.httpReachable ? 'OK' : '실패'}
+HTTP 상태: ${qaPageCheck.httpStatus ?? 'n/a'}, 연결: ${qaPageCheck.httpReachable ? 'OK' : '실패'}, HTML 본문 스캔: ${qaPageCheck.httpBodyScanned ? '예' : '아니오'}
 페이지 오류 신호: ${qaPageCheck.pageErrorSignals.join(', ') || '(없음)'}
 브라우저 점검 오류: ${qaPageCheck.browserError || '(없음)'}
 
-위 문제를 해결하도록 최소 변경으로 코드를 수정하세요. Next.js/React 런타임·빌드 오류를 우선 해결합니다.
+공식 문서 힌트(신호 기준):
+${formatRepairDocHints(qaPageCheck.pageErrorSignals)}
+
+${excerptBlock ? `${excerptBlock}\n\n` : ''}위 문제를 해결하도록 최소 변경으로 코드를 수정하세요. 스택·파일 경로가 발췌에 있으면 그 파일을 우선 수정합니다. Next.js/React 런타임·빌드 오류를 우선 해결합니다.
 Next App Router에서 useState 등 클라이언트 훅·브라우저 API를 쓰는 파일에는 파일 최상단에 "use client"가 필요합니다.
 next/link: Next 13+ 에서 <Link> 안에 <a>를 중첩하지 마세요. className·자식은 <Link>에 직접 두세요.
 metadata vs use client: "use client"가 있는 파일에서는 export const metadata / generateMetadata를 쓰지 마세요. page·layout은 서버 컴포넌트로 두고 인터랙션은 별도 *Client.tsx 등으로 분리하세요.`;
@@ -2565,8 +2658,13 @@ metadata vs use client: "use client"가 있는 파일에서는 export const meta
                 }
             }
 
-            const qaBaseUrl = resolveQaPageUrl(projectPath, (task as any)?.metadata || null);
+            const qaResolution = resolveQaPageUrlWithDiagnostics(projectPath, (task as any)?.metadata || null);
+            const qaBaseUrl = qaResolution.url;
             await this.log('System', `QA 대상 URL: ${qaBaseUrl}`, { type: 'System' });
+            if (qaResolution.inferenceWarning) {
+                await this.log('System', `QA URL 추론: ${qaResolution.inferenceWarning}`, { type: 'WARNING' });
+                await this.updateMetadata({ qaRouteInferenceWarning: qaResolution.inferenceWarning });
+            }
 
             this.emitter?.emit({ type: 'skill_execute', skill: 'verify_final_output' });
             let verification = await skills.verify_final_output(
