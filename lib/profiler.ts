@@ -458,7 +458,7 @@ ${stackRules}
             break;
         }
         if (chunks.length === 0) {
-            return '\n## DESIGN HINTS\n_No `globals.css` / `tailwind.config` found at common paths; infer styling only from files you read._\n';
+            return '\n## DESIGN HINTS\n_No `globals.css` / `tailwind.config` found at common paths; infer styling only from files you read._\n_Default until you find evidence otherwise: light pages use dark body text on light backgrounds; do not assume dark mode or light-on-light without files that define it._\n';
         }
         return `\n## DESIGN HINTS (target repo — match this; do not impose an unrelated product theme)\n${chunks.join('\n\n')}\n`;
     }

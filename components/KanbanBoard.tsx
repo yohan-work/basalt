@@ -466,9 +466,9 @@ export function KanbanBoard() {
                             type="search"
                             value={taskSearchQuery}
                             onChange={(e) => setTaskSearchQuery(e.target.value)}
-                            placeholder="태스크 검색…"
+                            placeholder="Search Task"
                             className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-sm"
-                            aria-label="칸반 태스크 검색"
+                            aria-label="Search Kanban Tasks"
                         />
                     </div>
                     <Button onClick={() => setIsCreateModalOpen(true)} disabled={!selectedProjectId} className="rounded-none bg-primary text-primary-foreground hover:bg-primary/90">

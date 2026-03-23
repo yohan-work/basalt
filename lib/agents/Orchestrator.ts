@@ -1398,6 +1398,7 @@ Requirements:
 - Output the full corrected file using the required multi-file format with this exact path.
 - Remove any @/components/ui/* import whose basename is not in the allowed list (if the list is empty, remove every @/components/ui import).
 - Replace removed UI components with semantic HTML (table, thead, tbody, tr, th, td, button, input, label, section, etc.) keeping behavior and layout as close as possible.
+- Ensure body text remains readable: adjust \`className\` or inline \`style\` so foreground and background contrast clearly; fix any white-on-white or near-invisible combinations already in the file.
 - Preserve "use client" / "use server" if present at the top.
 - Keep all other valid imports and types.
 

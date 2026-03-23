@@ -233,6 +233,11 @@ MANDATORY CODING RULES:
 - CRITICAL: If the [PROJECT CONTEXT] says "None found" for UI components OR has a [WARNING] about missing Tailwind, DO NOT use shadcn/ui components. Use standard HTML tags (div, button, h1) with appropriate inline styles for a premium look.
 - Use design tokens ONLY IF the project supports them.
 - **EXECUTION UI (Request Work / any target repo)**: Match the **target** project's visual language from [PROJECT CONTEXT], **DESIGN HINTS**, and files you read. Reuse that repo's CSS variables, Tailwind theme tokens, and component patterns. Do **not** impose Basalt's or any other fixed product palette, fonts, or radius. Prefer neutral, cohesive spacing and accessible contrast; avoid random one-off hex colors when the project already defines tokens.
+- 🚨 CONTRAST / READABILITY (ZERO TOLERANCE) 🚨:
+  - **Tailwind (when installed)**: Light text utilities (\`text-white\`, \`text-zinc-50\`, \`text-slate-100\`, etc.) MUST appear only on **dark** surfaces (\`bg-black\`, \`bg-*-900\`, \`bg-*-950\`, dark \`bg-primary\`, etc.). **FORBIDDEN** on light surfaces: \`bg-white\`, \`bg-background\` (light theme), \`bg-muted\`, \`bg-slate-50\`, \`bg-zinc-100\`, etc. paired with those light text classes. **FORBIDDEN** combos include \`bg-white text-white\`, \`bg-muted text-white\`, and similar invisible-on-light patterns.
+  - **Design tokens**: When the project defines \`bg-background\`, \`text-foreground\`, \`text-muted-foreground\`, etc., prefer them on page/section roots so body copy stays readable without relying on fragile inheritance.
+  - **Inline styles**: If you set a light \`background\`/\`backgroundColor\`, you MUST set an explicit dark enough \`color\` on the same element (or a child wrapper) so text never inherits a near-white color onto a near-white background.
+  - Violations produce **unusable UI** (invisible text); treat this as seriously as import or routing errors.
 - Generate COMPLETE, working TypeScript code with all necessary imports.
 - For React components, use proper TypeScript types and export as default.
 - MANDATORY FILE PATH RULE: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/some-feature/page.tsx", NOT "/app/some-feature/page.tsx"). YOU MUST prepend the Router Base Path (e.g., "src/app/", "app/", "src/pages/", "pages/") explicitly mentioned in the [PROJECT CONTEXT].

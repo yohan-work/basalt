@@ -1037,6 +1037,7 @@ Rules:
 - Preserve behavior: state, effects, data fetching, event handlers, exports, and types must stay equivalent.
 - Obey [PROJECT CONTEXT]: Tailwind only if installed; shadcn/ui only if listed; otherwise CSS or semantic HTML.
 - Use colors/spacing/radius from DESIGN HINTS and existing code — no unrelated product themes.
+- **Readability**: Verify foreground/background contrast (WCAG-minded); remove white-on-white, near-identical luminance pairs, and light text on light containers unless the design system explicitly defines that dark-on-light pattern.
 
 You MUST output exactly one file using the required format. The path line must be:
 File: ${relativePath}

@@ -15,7 +15,7 @@
 | [docs/llm.md](docs/llm.md) | LLM 모델 구성, App Router 가드, backoff, 스트리밍 |
 | [docs/agents-skills.md](docs/agents-skills.md) | 에이전트·스킬 정의, 동적 로더 |
 | [docs/api.md](docs/api.md) | 전체 API 엔드포인트 |
-| [docs/features.md](docs/features.md) | 기능별 상세 (QA, UI 스캐폴드, Next 가이드, TTS 등) |
+| [docs/features.md](docs/features.md) | 기능별 상세 (QA, UI 스캐폴드·확장 스캐폴드, Next 가이드, 태스크 미리보기·복구·스펙 확장·검색, TTS 등) |
 | [docs/ui-components.md](docs/ui-components.md) | UI/컴포넌트 카탈로그 |
 | [docs/setup.md](docs/setup.md) | 설치·실행·스크립트·운영 가이드 |
 | [docs/stack.md](docs/stack.md) | 기술 스택 요약 |

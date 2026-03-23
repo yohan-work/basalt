@@ -71,6 +71,7 @@ Score the page from 0-100 based on:
 - Does it match the task requirements?
 - Are interactive elements properly labeled?
 - Is the layout well-structured?
+- **Contrast / readability**: Are headings and body text clearly distinguishable from their backgrounds? Flag fatal mistakes such as white or near-white text on white/light backgrounds.
 - Any obvious visual issues?
 
 Return JSON: { "passed": boolean (score >= 70), "score": number, "issues": string[], "suggestions": string[] }`;
