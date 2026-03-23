@@ -45,6 +45,14 @@ export function formatClarificationForPlan(gate: unknown): string {
     return parts.join('\n');
 }
 
+/** `spec-expand` API가 저장한 마크다운을 플랜 LLM에 붙입니다. */
+export function formatSpecExpansionForPlan(spec: unknown): string {
+    if (!spec || typeof spec !== 'object') return '';
+    const markdown = (spec as { markdown?: string }).markdown;
+    if (typeof markdown !== 'string' || !markdown.trim()) return '';
+    return `\n\n[태스크 스펙 확장]\n${markdown.trim()}`;
+}
+
 const CLARIFY_SCHEMA = `{
   "needMoreDetail": boolean,
   "questions": [ { "id": "q1", "prompt": "한국어 질문, 구체적으로" } ],

@@ -30,9 +30,10 @@ import {
     StrategyPreset,
 } from '../orchestration/metrics';
 import { applyPresetDefaults, resolveExecutionTokenCap, resolveStepPolicy } from '../orchestration/policy';
-import { maybeScaffoldMinimalUiKit } from '../project-ui-kit';
+import { inferComponentsUiRelativeDir, maybeScaffoldMinimalUiKit, scaffoldMissingUiFromImportSpecifiers } from '../project-ui-kit';
 import {
     formatClarificationForPlan,
+    formatSpecExpansionForPlan,
     generateImpactPreviewJson,
     buildDefaultImpactPreview,
     type ImpactPreviewPayload,
@@ -1002,7 +1003,8 @@ export class Orchestrator {
             }
 
             const clarifyBlock = formatClarificationForPlan((task as any)?.metadata?.clarifyingGate);
-            const effectiveDescription = `${taskDescription}${clarifyBlock}`;
+            const specBlock = formatSpecExpansionForPlan((task as any)?.metadata?.specExpansion);
+            const effectiveDescription = `${taskDescription}${clarifyBlock}${specBlock}`;
 
             // Load all available agents, excluding git-manager which is reserved for Orchestrator automation
             const availableAgents = AgentLoader.listAgents().filter(a => a.name !== 'git-manager');
@@ -1902,6 +1904,7 @@ File: ${relativePath}
 
                                             let contentToWrite = file.content;
                                             let writeResult: any = null;
+                                            let uiMissingScaffoldAttempted = false;
                                             for (
                                                 let repairRound = 0;
                                                 repairRound <= Orchestrator.MAX_UI_IMPORT_REPAIR_ATTEMPTS;
@@ -1917,9 +1920,59 @@ File: ${relativePath}
                                                     | {
                                                           codes?: string[];
                                                           allowedUiBasenames?: string[];
+                                                          offendingUiSpecifiers?: string[];
                                                       }
                                                     | undefined;
                                                 const hasUninstalled = detail.includes('Uninstalled npm package');
+
+                                                const offenders = Array.isArray(iv?.offendingUiSpecifiers)
+                                                    ? iv!.offendingUiSpecifiers!
+                                                    : [];
+                                                if (
+                                                    !uiMissingScaffoldAttempted &&
+                                                    !hasUninstalled &&
+                                                    iv?.codes?.includes('UI_IMPORT_NOT_ON_DISK') &&
+                                                    offenders.length > 0
+                                                ) {
+                                                    uiMissingScaffoldAttempted = true;
+                                                    const profEarly = await this.profiler.getProfileData();
+                                                    const relUi =
+                                                        profEarly.uiKitRelativePath || inferComponentsUiRelativeDir(projectPath);
+                                                    const useClientUi = profEarly.stackProfile.primary === 'next';
+                                                    const scaffolded = scaffoldMissingUiFromImportSpecifiers(
+                                                        projectPath,
+                                                        offenders,
+                                                        {
+                                                            relativeUiDir: relUi,
+                                                            useClientDirective: useClientUi,
+                                                        }
+                                                    );
+                                                    if (scaffolded.createdFiles.length > 0) {
+                                                        skills.reset_runtime_caches();
+                                                        const noteParts = [
+                                                            `auto_scaffold_ui_missing: ${scaffolded.createdFiles.join(', ')}`,
+                                                        ];
+                                                        if (scaffolded.barrelTouched) {
+                                                            noteParts.push(`barrel: ${scaffolded.barrelTouched}`);
+                                                        }
+                                                        existingRepairs.push(
+                                                            this.buildExecutionRepairRecord(
+                                                                stepIndex,
+                                                                action,
+                                                                noteParts.join(' | ')
+                                                            )
+                                                        );
+                                                        await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                        await this.log(
+                                                            stepAgentDef.name,
+                                                            `Auto-scaffolded missing UI: ${scaffolded.createdFiles.join(', ')}`,
+                                                            { type: 'System' }
+                                                        );
+                                                        repairRound--;
+                                                        continue;
+                                                    }
+                                                }
+
                                                 const canRepairUi =
                                                     !hasUninstalled &&
                                                     (iv?.codes?.includes('UI_IMPORT_NOT_ON_DISK') ||
