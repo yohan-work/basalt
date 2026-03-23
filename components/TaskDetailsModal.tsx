@@ -3,7 +3,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp, Pencil, Search, ClipboardPaste, ExternalLink, ChevronDown, HelpCircle, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, Circle, Clock, FileText, Activity, AlertTriangle, RotateCcw, Trash2, GitCompare, Radio, Sparkles, ThumbsUp, Pencil, Search, ClipboardPaste, ExternalLink, ChevronDown, HelpCircle, ShieldCheck, Monitor, ClipboardCopy, Wand2 } from 'lucide-react';
 import { LogViewer } from './LogViewer';
 import { StepProgress, type ProgressInfo } from './StepProgress';
 import { WorkflowFlowchart } from './WorkflowFlowchart';
@@ -32,6 +32,7 @@ import { getTaskPerformanceBenchmark, type TaskPerformanceBenchmark } from '@/li
 import type { ReviewSuggestionSet } from '@/lib/types/review-actions';
 import type { QaSignoffStored } from '@/lib/qa/signoff-report';
 import { QA_ARTIFACT_SLOTS, type QaArtifactSlot } from '@/lib/qa/artifact-slots';
+import { TaskLivePreview } from '@/components/TaskLivePreview';
 
 function qaSlotLabelKo(slot: QaArtifactSlot): string {
     switch (slot) {
@@ -311,7 +312,7 @@ export function TaskDetailsModal({
     onExecutionOptionsChange,
     onExecute,
 }: TaskDetailsModalProps) {
-    const [view, setView] = useState<'details' | 'logs' | 'changes' | 'live' | 'brainstorm' | 'signoff'>('details');
+    const [view, setView] = useState<'details' | 'logs' | 'changes' | 'live' | 'brainstorm' | 'signoff' | 'preview'>('details');
     const [isRetrying, setIsRetrying] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [isApproving, setIsApproving] = useState(false);
@@ -338,8 +339,28 @@ export function TaskDetailsModal({
     const [isGeneratingClarify, setIsGeneratingClarify] = useState(false);
     const [isSubmittingClarify, setIsSubmittingClarify] = useState(false);
     const [isAckImpact, setIsAckImpact] = useState(false);
+    const [recoveryNote, setRecoveryNote] = useState('');
+    const [recoveryMarkdown, setRecoveryMarkdown] = useState<string | null>(null);
+    const [isRecoveryLoading, setIsRecoveryLoading] = useState(false);
+    const [handoffMarkdown, setHandoffMarkdown] = useState<string | null>(null);
+    const [isHandoffLoading, setIsHandoffLoading] = useState(false);
+    const [isSpecExpanding, setIsSpecExpanding] = useState(false);
 
     const { payload: incomingReactGrabPayload, clearPayload: clearIncomingReactGrab } = useIncomingReactGrab();
+
+    useEffect(() => {
+        if (!open) {
+            setRecoveryNote('');
+            setRecoveryMarkdown(null);
+            setHandoffMarkdown(null);
+        }
+    }, [open]);
+
+    useEffect(() => {
+        if (!task || !open) return;
+        const previewOk = Boolean(task.project_id) && ['working', 'testing'].includes(task.status);
+        if (view === 'preview' && !previewOk) setView('details');
+    }, [task?.id, task?.status, task?.project_id, open, view]);
 
     useEffect(() => {
         if (!incomingReactGrabPayload || !task || !open) return;
@@ -504,6 +525,13 @@ export function TaskDetailsModal({
         && Array.isArray(workflow?.steps)
         && workflow.steps.length > 0
         && !needsImpactAck;
+
+    const showPreviewTab = Boolean(task.project_id) && ['working', 'testing'].includes(task.status);
+    const specExpansion = metadata.specExpansion as { markdown?: string; generatedAt?: string } | undefined;
+    const showRecoveryPanel =
+        task.status === 'failed' || task.status === 'testing' || task.status === 'review' || Boolean(metadata.qaPageCheck);
+    const showHandoffPanel =
+        executionDiscussions.length > 0 || (Array.isArray(fileChanges) && fileChanges.length > 0);
 
     const handleEditCompleted = async () => {
         if (!editInstructions.trim()) return;
@@ -749,6 +777,66 @@ export function TaskDetailsModal({
         }
     };
 
+    const handleRecoverySuggestions = async () => {
+        if (!task) return;
+        setIsRecoveryLoading(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/recovery-suggestions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id, note: recoveryNote.trim() || undefined }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '복구 제안 생성 실패');
+            setRecoveryMarkdown(typeof data.markdown === 'string' ? data.markdown : '');
+        } catch (e) {
+            setActionError(e instanceof Error ? e.message : '복구 제안 생성에 실패했습니다.');
+        } finally {
+            setIsRecoveryLoading(false);
+        }
+    };
+
+    const handleHandoffSummary = async () => {
+        if (!task) return;
+        setIsHandoffLoading(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/handoff-summary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '핸드오프 요약 실패');
+            setHandoffMarkdown(typeof data.markdown === 'string' ? data.markdown : '');
+        } catch (e) {
+            setActionError(e instanceof Error ? e.message : '핸드오프 요약에 실패했습니다.');
+        } finally {
+            setIsHandoffLoading(false);
+        }
+    };
+
+    const handleSpecExpand = async () => {
+        if (!task) return;
+        setIsSpecExpanding(true);
+        setActionError(null);
+        try {
+            const res = await fetch('/api/agent/spec-expand', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ taskId: task.id }),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '스펙 확장 실패');
+            /* Realtime으로 task.metadata 갱신됨 — 표시는 다음 페치에서 */
+        } catch (e) {
+            setActionError(e instanceof Error ? e.message : '스펙 확장에 실패했습니다.');
+        } finally {
+            setIsSpecExpanding(false);
+        }
+    };
+
     const isStreaming = stream?.isActive;
 
     const handleRetry = async () => {
@@ -866,6 +954,16 @@ export function TaskDetailsModal({
                                 >
                                     <FileText className="w-3 h-3 inline mr-1" /> Details
                                 </button>
+                                {showPreviewTab && (
+                                    <button
+                                        type="button"
+                                        onClick={() => setView('preview')}
+                                        className={`px-3 py-1 text-xs rounded-sm font-medium transition-all ${view === 'preview' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                                        aria-pressed={view === 'preview'}
+                                    >
+                                        <Monitor className="w-3 h-3 inline mr-1" /> Preview
+                                    </button>
+                                )}
                                 {(isStreaming || (stream && stream.status !== 'idle')) && (
                                     <button
                                         onClick={() => setView('live')}
@@ -928,6 +1026,10 @@ export function TaskDetailsModal({
                         {view === 'live' && stream ? (
                             <div className="flex-1 min-h-0 overflow-y-auto p-6">
                                 <LiveProgressPanel stream={stream} />
+                            </div>
+                        ) : view === 'preview' && showPreviewTab ? (
+                            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                                <TaskLivePreview key={`${task.id}-${fileChanges?.length ?? 0}`} taskId={task.id} />
                             </div>
                         ) : view === 'brainstorm' ? (
                             <div className="flex-1 flex flex-col p-4 bg-slate-950 rounded-b-lg" style={{ overflow: 'visible' }}>
@@ -1080,6 +1182,33 @@ export function TaskDetailsModal({
                                         </div>
                                     )}
                                 </div>
+
+                                {(task.status === 'pending' || task.status === 'planning') && (
+                                    <div className="space-y-2 rounded-md border border-dashed p-3 bg-muted/15">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                                                태스크 스펙 확장
+                                            </h4>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="secondary"
+                                                onClick={handleSpecExpand}
+                                                disabled={isSpecExpanding}
+                                                className="h-7 text-[11px]"
+                                            >
+                                                <Wand2 className="h-3 w-3 mr-1" />
+                                                {isSpecExpanding ? '생성 중…' : 'AC·스모크 시나리오 생성'}
+                                            </Button>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                            플랜에 합쳐져 실행 품질을 올립니다. «Confirm &amp; Plan» 전에 생성해 두세요.
+                                        </p>
+                                        {specExpansion?.markdown ? (
+                                            <MarkdownLikeViewer content={specExpansion.markdown} height={180} />
+                                        ) : null}
+                                    </div>
+                                )}
 
                                 {task.status === 'pending' && (
                                     <div className="space-y-3 rounded-md border border-blue-200/60 bg-blue-50/40 dark:bg-blue-950/20 dark:border-blue-900/50 p-4">
@@ -1535,6 +1664,84 @@ export function TaskDetailsModal({
                                                 ))}
                                             </div>
                                         )}
+                                    </div>
+                                )}
+
+                                {showHandoffPanel && (
+                                    <div className="space-y-3 rounded-md border p-4 bg-muted/10">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <h3 className="text-sm font-medium text-muted-foreground">인수인계 요약</h3>
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                variant="outline"
+                                                onClick={handleHandoffSummary}
+                                                disabled={isHandoffLoading}
+                                                className="h-8"
+                                            >
+                                                {isHandoffLoading ? '생성 중…' : 'AI 요약 생성'}
+                                            </Button>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            실행 토론·워크플로·변경 파일을 바탕으로 이슈 트래커나 팀 공유용 한 페이지 요약을 만듭니다.
+                                        </p>
+                                        {handoffMarkdown ? (
+                                            <div className="space-y-2">
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="h-7 text-[11px]"
+                                                    onClick={() => {
+                                                        void navigator.clipboard.writeText(handoffMarkdown);
+                                                    }}
+                                                >
+                                                    <ClipboardCopy className="h-3 w-3 mr-1" />
+                                                    복사
+                                                </Button>
+                                                <MarkdownLikeViewer content={handoffMarkdown} height={220} />
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                )}
+
+                                {showRecoveryPanel && (
+                                    <div className="space-y-3 rounded-md border border-amber-200/60 bg-amber-50/30 dark:bg-amber-950/15 dark:border-amber-900/40 p-4">
+                                        <h3 className="text-sm font-medium text-foreground">복구 · 다음 시도 가이드</h3>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            QA·검증 실패나 Dev 오류 후, 태스크에 다시 넣을 프롬프트 초안을 생성합니다.
+                                        </p>
+                                        <textarea
+                                            className="w-full min-h-[56px] rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+                                            placeholder="추가로 전달할 맥락 (선택)"
+                                            value={recoveryNote}
+                                            onChange={(e) => setRecoveryNote(e.target.value)}
+                                            disabled={isRecoveryLoading}
+                                        />
+                                        <div className="flex flex-wrap gap-2">
+                                            <Button
+                                                type="button"
+                                                size="sm"
+                                                onClick={handleRecoverySuggestions}
+                                                disabled={isRecoveryLoading}
+                                            >
+                                                {isRecoveryLoading ? '생성 중…' : '복구 제안 생성'}
+                                            </Button>
+                                            {recoveryMarkdown ? (
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="outline"
+                                                    onClick={() => void navigator.clipboard.writeText(recoveryMarkdown)}
+                                                >
+                                                    <ClipboardCopy className="h-3 w-3 mr-1" />
+                                                    제안 복사
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                        {recoveryMarkdown ? (
+                                            <MarkdownLikeViewer content={recoveryMarkdown} height={240} />
+                                        ) : null}
                                     </div>
                                 )}
 

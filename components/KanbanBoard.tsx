@@ -59,6 +59,7 @@ export function KanbanBoard() {
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+    const [taskSearchQuery, setTaskSearchQuery] = useState('');
     const [isLoading, setIsLoading] = useState(true);
     const [actionError, setActionError] = useState<string | null>(null);
     const [executionOptionsByTask, setExecutionOptionsByTask] = useState<Record<string, ExecuteStreamOptions>>({});
@@ -145,6 +146,13 @@ export function KanbanBoard() {
     const showActionError = (msg: string) => {
         setActionError(msg);
         setTimeout(() => setActionError(null), 5000);
+    };
+
+    const taskMatchesSearch = (task: Task): boolean => {
+        const q = taskSearchQuery.trim().toLowerCase();
+        if (!q) return true;
+        const blob = `${task.title || ''}\n${task.description || ''}\n${JSON.stringify(task.metadata ?? {})}`.toLowerCase();
+        return blob.includes(q);
     };
 
     const handleCreateTask = async (taskData: { title: string; description: string; priority: string; attachedComponentPaths?: string[] }) => {
@@ -452,6 +460,17 @@ export function KanbanBoard() {
                             <BarChart3 className="mr-2 h-4 w-4" /> Analytics
                         </Button>
                     </Link>
+                    <div className="flex items-center gap-1 min-w-[140px] max-w-[220px]">
+                        <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                        <input
+                            type="search"
+                            value={taskSearchQuery}
+                            onChange={(e) => setTaskSearchQuery(e.target.value)}
+                            placeholder="태스크 검색…"
+                            className="h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-sm"
+                            aria-label="칸반 태스크 검색"
+                        />
+                    </div>
                     <Button onClick={() => setIsCreateModalOpen(true)} disabled={!selectedProjectId} className="rounded-none bg-primary text-primary-foreground hover:bg-primary/90">
                         <Plus className="mr-2 h-4 w-4" /> Request Work
                     </Button>
@@ -506,7 +525,8 @@ export function KanbanBoard() {
                         {COLUMNS.map((col) => {
                             const colTasks = tasks.filter(task =>
                                 task.status === col.id &&
-                                (!selectedProjectId || task.project_id === selectedProjectId)
+                                (!selectedProjectId || task.project_id === selectedProjectId) &&
+                                taskMatchesSearch(task)
                             );
 
                             return (

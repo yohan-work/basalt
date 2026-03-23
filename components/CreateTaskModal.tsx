@@ -55,6 +55,7 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
     const [components, setComponents] = useState<ComponentItem[]>([]);
     const [selectedComponentPaths, setSelectedComponentPaths] = useState<string[]>([]);
     const [componentsLoading, setComponentsLoading] = useState(false);
+    const [similarTasks, setSimilarTasks] = useState<Array<{ id: string; title: string; score: number }>>([]);
 
     // Fetch components when project is selected
     useEffect(() => {
@@ -86,6 +87,37 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
             setSelectedComponentPaths([]);
         }
     }, [open]);
+
+    useEffect(() => {
+        if (!open || !selectedProjectId) {
+            setSimilarTasks([]);
+            return;
+        }
+        const blob = `${title}\n${description}`.trim();
+        if (blob.length < 6) {
+            setSimilarTasks([]);
+            return;
+        }
+        const handle = window.setTimeout(() => {
+            const params = new URLSearchParams({
+                projectId: selectedProjectId,
+                title: title.trim(),
+                description: description.trim(),
+            });
+            fetch(`/api/tasks/similar?${params.toString()}`)
+                .then((res) => res.json())
+                .then((data: { similar?: Array<{ id: string; title: string; score: number }> }) => {
+                    setSimilarTasks(Array.isArray(data.similar) ? data.similar : []);
+                })
+                .catch(() => setSimilarTasks([]));
+        }, 500);
+        return () => window.clearTimeout(handle);
+    }, [open, selectedProjectId, title, description]);
+
+    const appendSimilarReference = (t: { id: string; title: string }) => {
+        const block = `\n\n---\n[참고 · 동일 프로젝트 완료 태스크]\n제목: ${t.title}\n(id: ${t.id})\n위 태스크와 맥락이 비슷하면 구현 방식을 맞춰 주세요.\n`;
+        setDescription((prev) => (prev ? `${prev.trim()}${block}` : block.trim()));
+    };
 
     const handleSelectTemplate = (template: TaskTemplate) => {
         setSelectedTemplateId(template.id);
@@ -139,9 +171,9 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
             if (data.enhancedPrompt) {
                 setDescription(data.enhancedPrompt);
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Enhance Prompt Error:', err);
-            alert(err.message || 'Error enhancing prompt.');
+            alert(err instanceof Error ? err.message : 'Error enhancing prompt.');
         } finally {
             setIsEnhancing(false);
         }
@@ -258,6 +290,29 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
                             placeholder="Enter detailed task description"
                         />
                     </div>
+                    {selectedProjectId && similarTasks.length > 0 && (
+                        <div className="rounded-md border border-dashed p-3 space-y-2 bg-muted/20">
+                            <p className="text-xs font-medium text-muted-foreground">유사한 완료 태스크</p>
+                            <ul className="space-y-1.5">
+                                {similarTasks.map((t) => (
+                                    <li key={t.id} className="flex flex-wrap items-center gap-2 text-xs">
+                                        <span className="truncate flex-1 min-w-0" title={t.title}>
+                                            {t.title}
+                                        </span>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-7 text-[10px] shrink-0"
+                                            onClick={() => appendSimilarReference(t)}
+                                        >
+                                            설명에 참고 문구 추가
+                                        </Button>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                     <div className="grid gap-2">
                         <Label htmlFor="task-priority">Priority</Label>
                         <select
