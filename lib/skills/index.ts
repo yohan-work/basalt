@@ -35,6 +35,19 @@ const APP_METADATA_IMPORT_RE = /from\s+(['"])(@\/app\/metadata(?:\.(?:t|j)sx?)?)
 const MAX_IMPORT_VALIDATION_UI_HINT = 12;
 const IMPORT_VALIDATION_FILE_SUFFIXES = ['.ts', '.tsx', '.js', '.jsx', '.d.ts', '.mjs', '.cjs', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
 
+/** `write_code` import 검증 실패 분류 — Orchestrator UI 복구 루프에서 사용 */
+export type ImportValidationCode = 'UI_IMPORT_NOT_ON_DISK' | 'UI_BARREL_INVALID' | 'OTHER';
+
+export type ImportValidationResult =
+    | { valid: true }
+    | {
+          valid: false;
+          message: string;
+          codes: ImportValidationCode[];
+          allowedUiBasenames?: string[];
+          offendingUiSpecifiers?: string[];
+      };
+
 const BUILTIN_NODE_MODULES = new Set([
     'assert', 'buffer', 'child_process', 'cluster', 'console', 'constants',
     'crypto', 'dgram', 'dns', 'domain', 'events', 'fs', 'http', 'http2',
@@ -94,35 +107,48 @@ function normalizeImportPathWithAlias(specifier: string, projectRoot: string): s
     return path.join(projectRoot, specifier.replace(/^@\//, ''));
 }
 
-function parseTsconfigPathAliases(projectRoot: string): Array<{ pattern: string; target: string; wildcard: boolean }> {
-    const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
-    if (!fs.existsSync(tsconfigPath)) return [];
+const CONFIG_FILES_FOR_PATHS = ['tsconfig.json', 'jsconfig.json', 'tsconfig.app.json', 'tsconfig.build.json'] as const;
 
-    try {
-        const tsconfigFile = fs.readFileSync(tsconfigPath, 'utf-8');
-        const parsed = ts.parseConfigFileTextToJson(tsconfigPath, tsconfigFile);
-        const paths = parsed.config?.compilerOptions?.paths;
-        if (!paths || typeof paths !== 'object' || Array.isArray(paths)) return [];
-
-        const entries: Array<{ pattern: string; target: string; wildcard: boolean }> = [];
-        for (const [pattern, targetValues] of Object.entries(paths)) {
-            if (typeof targetValues !== 'object' || targetValues === null) continue;
-            const targets = Array.isArray(targetValues) ? targetValues : [targetValues];
-            if (targets.length === 0 || typeof targets[0] !== 'string') continue;
-            entries.push({
-                pattern: String(pattern),
-                target: String(targets[0]),
-                wildcard: String(pattern).endsWith('/*')
-            });
+/** tsconfig / jsconfig / tsconfig.app 등에서 paths 를 읽어 같은 키는 뒤 파일이 덮어쓴다. */
+function mergeCompilerPaths(projectRoot: string): Record<string, string[]> {
+    const merged: Record<string, string[]> = {};
+    for (const name of CONFIG_FILES_FOR_PATHS) {
+        const configPath = path.join(projectRoot, name);
+        if (!fs.existsSync(configPath)) continue;
+        try {
+            const raw = fs.readFileSync(configPath, 'utf-8');
+            const parsed = ts.parseConfigFileTextToJson(configPath, raw);
+            const paths = parsed.config?.compilerOptions?.paths;
+            if (!paths || typeof paths !== 'object' || Array.isArray(paths)) continue;
+            for (const [k, v] of Object.entries(paths)) {
+                if (typeof v === 'object' && v !== null) {
+                    const arr = Array.isArray(v) ? v : [v];
+                    merged[String(k)] = arr.filter((x): x is string => typeof x === 'string');
+                }
+            }
+        } catch {
+            /* ignore */
         }
-        return entries;
-    } catch {
-        return [];
     }
+    return merged;
+}
+
+function parseProjectPathAliases(projectRoot: string): Array<{ pattern: string; target: string; wildcard: boolean }> {
+    const merged = mergeCompilerPaths(projectRoot);
+    const entries: Array<{ pattern: string; target: string; wildcard: boolean }> = [];
+    for (const [pattern, targetValues] of Object.entries(merged)) {
+        if (targetValues.length === 0) continue;
+        entries.push({
+            pattern: String(pattern),
+            target: String(targetValues[0]),
+            wildcard: String(pattern).endsWith('/*'),
+        });
+    }
+    return entries;
 }
 
 function resolveAliasImportPath(specifier: string, projectRoot: string): string | null {
-    const aliases = parseTsconfigPathAliases(projectRoot);
+    const aliases = parseProjectPathAliases(projectRoot);
     if (aliases.length === 0) {
         return normalizeImportPathWithAlias(specifier, projectRoot);
     }
@@ -170,6 +196,51 @@ function resolveModuleCandidates(absBase: string): string[] {
     return candidates;
 }
 
+function isComponentsUiBarrelSpecifier(spec: string): boolean {
+    return spec.replace(/\/+$/, '') === '@/components/ui';
+}
+
+function isComponentsUiDeepSpecifier(spec: string): boolean {
+    if (spec.startsWith('@/')) {
+        return /^@\/components\/ui\/.+/.test(spec);
+    }
+    return spec.includes('/components/ui/');
+}
+
+function barrelIndexExists(uiDirAbs: string): boolean {
+    if (!fs.existsSync(uiDirAbs)) return false;
+    try {
+        if (!fs.statSync(uiDirAbs).isDirectory()) return false;
+    } catch {
+        return false;
+    }
+    return ['index.ts', 'index.tsx', 'index.js', 'index.jsx'].some((n) => fs.existsSync(path.join(uiDirAbs, n)));
+}
+
+function moduleResolvableFromBase(absBase: string): boolean {
+    return resolveModuleCandidates(absBase).some((candidate) => fs.existsSync(candidate));
+}
+
+/** 별칭 해석 + `@/components/ui` 계열 디스크 폴백(루트 vs src). */
+function collectAliasResolvedBases(specifier: string, projectRoot: string): string[] {
+    const out: string[] = [];
+    const push = (p: string | null) => {
+        if (p && !out.includes(p)) out.push(p);
+    };
+
+    push(resolveAliasImportPath(specifier, projectRoot));
+
+    if (specifier.startsWith('@/')) {
+        const tail = specifier.replace(/^@\//, '');
+        if (tail.startsWith('components/ui')) {
+            push(path.join(projectRoot, tail));
+            push(path.join(projectRoot, 'src', tail));
+        }
+    }
+
+    return out;
+}
+
 async function getAvailableUiComponentNames(projectRoot: string): Promise<Set<string>> {
     const profiler = new ProjectProfiler(projectRoot);
     const profile = await profiler.getProfileData();
@@ -202,19 +273,22 @@ async function validateImportsExistence(
     content: string,
     filePath: string,
     baseDir: string
-): Promise<{ valid: boolean; message?: string }> {
+): Promise<ImportValidationResult> {
     const normalized = path.normalize(filePath).replace(/^\/+/, '');
     if (!/\.(tsx|ts|jsx|js)$/.test(normalized)) return { valid: true };
 
     const fullPath = path.join(baseDir, normalized);
     const containingDir = path.dirname(fullPath);
     const sourceFile = ts.createSourceFile(fullPath, content, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TSX);
-    const aliases = parseTsconfigPathAliases(baseDir);
+    const aliases = parseProjectPathAliases(baseDir);
     const uiComponents = await getAvailableUiComponentNames(baseDir);
+    const hasDiscoveredUiKit = uiComponents.size > 0;
     const installedPkgs = getInstalledPackages(baseDir);
     const uiComponentImports: string[] = [];
     const missingImports: string[] = [];
     const missingPackages: string[] = [];
+    const violationCodes = new Set<ImportValidationCode>();
+    const offendingUiSpecifiers = new Set<string>();
 
     const visitNode = (node: ts.Node) => {
         const candidateSpecifier = getAvailableImportSource(node);
@@ -233,41 +307,86 @@ async function validateImportsExistence(
             return;
         }
 
-        let resolvedBase: string | null = null;
+        let basesToTry: string[] = [];
         if (candidateSpecifier.startsWith('.')) {
-            resolvedBase = path.resolve(containingDir, candidateSpecifier);
+            basesToTry = [path.resolve(containingDir, candidateSpecifier)];
         } else if (candidateSpecifier.startsWith('/')) {
-            resolvedBase = path.join(baseDir, candidateSpecifier.replace(/^\/+/, ''));
+            basesToTry = [path.join(baseDir, candidateSpecifier.replace(/^\/+/, ''))];
         } else if (candidateSpecifier.startsWith('@/')) {
-            resolvedBase = resolveAliasImportPath(candidateSpecifier, baseDir);
-        } else if (aliases.length > 0 && aliases.some((alias) => candidateSpecifier.startsWith(alias.pattern.replace('*', '')))) {
-            resolvedBase = resolveAliasImportPath(candidateSpecifier, baseDir);
+            basesToTry = collectAliasResolvedBases(candidateSpecifier, baseDir);
+        } else if (
+            aliases.length > 0 &&
+            aliases.some((alias) => candidateSpecifier.startsWith(alias.pattern.replace(/\*$/, '')))
+        ) {
+            const rb = resolveAliasImportPath(candidateSpecifier, baseDir);
+            basesToTry = rb ? [rb] : [];
         } else if (candidateSpecifier.startsWith('~/') || candidateSpecifier.startsWith('@@/')) {
-            resolvedBase = null;
+            return;
+        } else {
+            const rb = resolveAliasImportPath(candidateSpecifier, baseDir);
+            basesToTry = rb ? [rb] : [];
         }
 
-        if (!resolvedBase) {
+        if (basesToTry.length === 0) {
             return;
         }
 
-        const exists = resolveModuleCandidates(resolvedBase).some((candidate) => fs.existsSync(candidate));
-        if (exists) {
-            return;
-        }
+        const existsModule = basesToTry.some((b) => moduleResolvableFromBase(b));
 
-        if (candidateSpecifier.includes('/components/ui/')) {
-            const componentName = path.basename(candidateSpecifier).toLowerCase();
-            uiComponentImports.push(componentName);
-            if (!uiComponents.has(componentName)) {
-                const availableUi = Array.from(uiComponents).slice(0, MAX_IMPORT_VALIDATION_UI_HINT).join(', ') || 'None';
-                missingImports.push(
-                    `${candidateSpecifier} (UI component not found; available: ${availableUi})`
-                );
+        if (!existsModule) {
+            if (isComponentsUiDeepSpecifier(candidateSpecifier)) {
+                const componentName = path.basename(candidateSpecifier).toLowerCase();
+                uiComponentImports.push(componentName);
+                if (hasDiscoveredUiKit) {
+                    if (!uiComponents.has(componentName)) {
+                        const availableUi = Array.from(uiComponents).slice(0, MAX_IMPORT_VALIDATION_UI_HINT).join(', ');
+                        missingImports.push(
+                            `${candidateSpecifier} (UI component not found; available: ${availableUi})`
+                        );
+                        violationCodes.add('UI_IMPORT_NOT_ON_DISK');
+                        offendingUiSpecifiers.add(candidateSpecifier);
+                    } else {
+                        missingImports.push(
+                            `${candidateSpecifier} (path resolves to no file; check alias or filename)`
+                        );
+                        violationCodes.add('OTHER');
+                    }
+                    return;
+                }
+            } else if (isComponentsUiBarrelSpecifier(candidateSpecifier)) {
+                uiComponentImports.push('barrel');
+                violationCodes.add('UI_BARREL_INVALID');
+                offendingUiSpecifiers.add(candidateSpecifier);
+                if (!hasDiscoveredUiKit) {
+                    missingImports.push(
+                        `${candidateSpecifier} (UI barrel: no components/ui kit; use semantic HTML or add primitives / index)`
+                    );
+                } else {
+                    missingImports.push(
+                        `${candidateSpecifier} (UI barrel: path not found; check tsconfig/jsconfig paths and components/ui vs src/components/ui)`
+                    );
+                }
                 return;
             }
+            missingImports.push(candidateSpecifier);
+            violationCodes.add('OTHER');
+            return;
         }
 
-        missingImports.push(candidateSpecifier);
+        if (isComponentsUiBarrelSpecifier(candidateSpecifier)) {
+            const hasIndex = basesToTry.some((b) => barrelIndexExists(b));
+            if (!hasIndex) {
+                missingImports.push(
+                    `${candidateSpecifier} (배럴 import requires components/ui/index.(ts|tsx|js|jsx). Use per-file imports e.g. @/components/ui/button, or add index re-exports)`
+                );
+                uiComponentImports.push('barrel');
+                violationCodes.add('UI_BARREL_INVALID');
+                offendingUiSpecifiers.add(candidateSpecifier);
+            }
+            return;
+        }
+
+        return;
     };
 
     sourceFile.forEachChild((node) => {
@@ -278,6 +397,7 @@ async function validateImportsExistence(
     const allErrors: string[] = [];
 
     if (missingPackages.length > 0) {
+        violationCodes.add('OTHER');
         const installed = installedPkgs.size > 0
             ? Array.from(installedPkgs).sort().join(', ')
             : 'N/A';
@@ -293,14 +413,27 @@ async function validateImportsExistence(
     }
 
     if (missingImports.length > 0) {
-        allErrors.push(
+        let missingMsg =
             `Missing module imports detected in ${filePath}: ${missingImports.join(', ')}` +
-            (uiComponentImports.length > 0 ? ` | UI import candidates: ${uiComponentImports.join(', ')}` : '')
-        );
+            (uiComponentImports.length > 0 ? ` | UI import candidates: ${uiComponentImports.join(', ')}` : '');
+        if (uiComponentImports.length > 0 && !hasDiscoveredUiKit) {
+            missingMsg +=
+                ' | This project has no components/ui/* (shadcn-style kit not found). Use semantic HTML (<button>, <input>, <label>) and styles already used in the repo; do not import @/components/ui/*.';
+        }
+        allErrors.push(missingMsg);
     }
 
     if (allErrors.length > 0) {
-        return { valid: false, message: allErrors.join(' | ') };
+        const codes =
+            violationCodes.size > 0 ? Array.from(violationCodes) : (['OTHER'] as ImportValidationCode[]);
+        return {
+            valid: false,
+            message: allErrors.join(' | '),
+            codes,
+            allowedUiBasenames: hasDiscoveredUiKit ? Array.from(uiComponents).sort() : undefined,
+            offendingUiSpecifiers:
+                offendingUiSpecifiers.size > 0 ? Array.from(offendingUiSpecifiers) : undefined,
+        };
     }
 
     return { valid: true };
@@ -625,6 +758,11 @@ export async function write_code(filePath: string, content: string, baseDir: str
                 success: false,
                 message: importValidation.message || `Invalid imports for ${filePath}`,
                 filePath,
+                importValidation: {
+                    codes: importValidation.codes,
+                    allowedUiBasenames: importValidation.allowedUiBasenames,
+                    offendingUiSpecifiers: importValidation.offendingUiSpecifiers,
+                },
             };
         }
 

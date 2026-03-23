@@ -19,6 +19,7 @@ IMPORTANT:
 - Use the exact agent role slugs (e.g. "software-engineer", "product-manager", "qa").
 - Every `agent` field MUST be one of the roles listed under **Available Agents and their skills** above. Do not invent new role names.
 - MANDATORY: Use the 'codebaseContext' provided above to determine actual file paths and folder structures.
+- MANDATORY: In `codebaseContext`, read **`## UI_COMPONENT_POLICY`** first. If it is **ABSENT**, do NOT plan steps that assume `@/components/ui/*` already exists unless an earlier step explicitly creates those files (or note that execute-time auto-scaffold may add minimal button/input/label for React/Next). If **USE_EXISTING**, you may plan imports only for listed components.
 - For new pages, check if the project uses 'app/' (App Router) or 'pages/' (Page Router) and follow that pattern.
 - Each 'description' MUST be UNIQUE, SPECIFIC and ACTIONABLE for the designated agent.
 - EVERY 'description' MUST BE WRITTEN IN KOREAN.

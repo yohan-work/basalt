@@ -1,6 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 
+import { formatTechStackDisplay, inferStackProfile } from './stack-profile';
+import { formatStackRulesSummary, loadStackRulesBlock } from './stack-rules/load';
+
 interface AvailableUiComponent {
     name: string;
     absolutePath: string;
@@ -25,12 +28,19 @@ export class ProjectProfiler {
      * Gets summary of the project environment.
      */
     public async getProfileData() {
-        const packageInfo = this.getPackageInfo();
+        const stackProfile = inferStackProfile(this.projectRoot);
+        const packageInfo = {
+            stack: formatTechStackDisplay(stackProfile),
+            deps: stackProfile.deps,
+            depsWithVersions: stackProfile.depsWithVersions,
+        };
         const componentsInfo = await this.getAvailableComponentsInfo();
+        const uiKitPresent = componentsInfo.names.length > 0;
+        const uiKitRelativePath = componentsInfo.relativePath;
         const hasTailwind = packageInfo.deps.some(d => d.includes('tailwind')) ||
             fs.existsSync(path.join(this.projectRoot, 'tailwind.config.ts')) ||
             fs.existsSync(path.join(this.projectRoot, 'tailwind.config.js'));
-        const structure = this.detectStructure();
+        const structure = stackProfile.structure;
         const routerBase = this.getRouteBaseFromStructure(structure);
         const pageCandidates = routerBase ? this.getPageCandidates(routerBase) : [];
 
@@ -40,6 +50,10 @@ export class ProjectProfiler {
             depsWithVersions: packageInfo.depsWithVersions,
             availableUIComponents: componentsInfo.names,
             availableUIComponentsByPath: componentsInfo.components,
+            /** `components/ui` 등에 실제 컴포넌트 파일이 1개 이상 있음 */
+            uiKitPresent,
+            /** 스캔된 UI 디렉터리 (없으면 null). 빈 폴더만 있을 수 있음 */
+            uiKitRelativePath,
             hasNamedExports: componentsInfo.hasNamedExports,
             hasDefaultExports: componentsInfo.hasDefaultExports,
             hasIndexFile: componentsInfo.hasIndexFile,
@@ -47,30 +61,9 @@ export class ProjectProfiler {
             routerBase,
             pageCandidates,
             rootPageOverwriteAllowed: structure.includes('pages-router') || structure === 'unknown' ? true : false,
-            hasTailwind
+            hasTailwind,
+            stackProfile,
         };
-    }
-
-    private getPackageInfo() {
-        try {
-            const pkgPath = path.join(this.projectRoot, 'package.json');
-            if (!fs.existsSync(pkgPath)) return { stack: 'unknown', deps: [], depsWithVersions: {} as Record<string, string> };
-
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-            const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-
-            let stack = 'Next.js';
-            if (deps['next']) stack = `Next.js ${deps['next']}`;
-            if (deps['vite']) stack = 'Vite';
-
-            return {
-                stack,
-                deps: Object.keys(deps),
-                depsWithVersions: deps as Record<string, string>,
-            };
-        } catch (e) {
-            return { stack: 'unknown', deps: [], depsWithVersions: {} as Record<string, string> };
-        }
     }
 
     private async getAvailableComponentsInfo(): Promise<{
@@ -78,7 +71,8 @@ export class ProjectProfiler {
         hasNamedExports: boolean,
         hasDefaultExports: boolean,
         hasIndexFile: boolean,
-        components: AvailableUiComponent[]
+        components: AvailableUiComponent[],
+        relativePath: string | null,
     }> {
         let componentsPath = path.join(this.projectRoot, 'components', 'ui');
         if (!fs.existsSync(componentsPath)) {
@@ -90,8 +84,11 @@ export class ProjectProfiler {
             hasNamedExports: false,
             hasDefaultExports: false,
             hasIndexFile: false,
+            relativePath: null as string | null,
         };
         if (!fs.existsSync(componentsPath)) return result;
+
+        result.relativePath = path.relative(this.projectRoot, componentsPath).replace(/\\/g, '/');
 
         try {
             const files = fs.readdirSync(componentsPath);
@@ -226,8 +223,8 @@ export class ProjectProfiler {
             .filter(pkg => versions[pkg])
             .map(pkg => `${pkg} ${versions[pkg]}`);
 
-        const hasShadcnUi = data.availableUIComponents.length > 0
-            || data.dependencies.some(d => d.includes('radix-ui'));
+        const hasShadcnUiOnDisk = data.availableUIComponents.length > 0;
+        const radixInDeps = data.dependencies.some(d => d.includes('@radix-ui') || d.includes('radix-ui'));
 
         const lines: string[] = [];
 
@@ -254,20 +251,36 @@ export class ProjectProfiler {
             lines.push('스타일링: 일반 CSS');
         }
 
-        if (hasShadcnUi) {
+        if (hasShadcnUiOnDisk) {
             const componentList = data.availableUIComponents.slice(0, 15).join(', ');
-            lines.push(`UI 라이브러리: shadcn/ui (사용 가능한 컴포넌트: ${componentList || 'N/A'})`);
+            lines.push(
+                `UI(로컬 components/ui): ${componentList || 'N/A'} (디렉터리: \`${data.uiKitRelativePath || 'components/ui'}\`)`
+            );
+        } else if (data.uiKitRelativePath) {
+            lines.push(
+                `UI: \`${data.uiKitRelativePath}\` 폴더는 있으나 컴포넌트 파일이 비어 있거나 스캔되지 않았습니다. 필요 시 추가하거나 시맨틱 HTML을 사용하세요.`
+            );
+        } else if (radixInDeps) {
+            lines.push(
+                'UI: package.json에 Radix 관련 의존성은 있으나 `components/ui` 또는 `src/components/ui`에 로컬 컴포넌트가 없습니다.'
+            );
         } else if (versions['@mui/material']) {
             lines.push(`UI 라이브러리: MUI ${versions['@mui/material']}`);
         } else if (versions['antd']) {
             lines.push(`UI 라이브러리: Ant Design ${versions['antd']}`);
+        } else {
+            lines.push(
+                'UI: 로컬 shadcn 스타일 `components/ui` 미검출 — `@/components/ui/*` import 금지(생성 전까지). HTML 또는 실행 시 자동 최소 primitives 정책.'
+            );
         }
 
         lines.push(`라우터 구조: ${data.structure}`);
 
-        if (data.structure.includes('app-router')) {
+        if (data.stackProfile.primary === 'next' && data.structure.includes('app-router')) {
             lines.push('Client Component: 인터랙티브 요소(hooks, 이벤트 핸들러 등) 사용 시 반드시 "use client" 디렉티브 필요');
         }
+
+        lines.push(formatStackRulesSummary(data.stackProfile));
 
         const otherNotable = detectedPackages.filter(
             p => !['next', 'react', 'vue', 'typescript', 'tailwindcss', 'sass',
@@ -297,20 +310,50 @@ export class ProjectProfiler {
             ? '\n[WARNING] Project has shadcn/ui components but Tailwind CSS is NOT installed. These components may NOT render correctly without Tailwind. Prefer standard HTML tags or inline styles.'
             : '';
 
-        let importStyleInfo = 'Standard imports.';
-        if (data.hasNamedExports && !data.hasDefaultExports) {
-            importStyleInfo = 'MANDATORY: Use NAMED imports for UI components (e.g., `import { Button } from "@/components/ui/button"`). Components do NOT have default exports.';
-        } else if (data.hasDefaultExports && !data.hasNamedExports) {
-            importStyleInfo = 'Use DEFAULT imports for UI components (e.g., `import Button from "@/components/ui/button"`).';
+        const uiKitPresent = data.uiKitPresent;
+        let importStyleInfo = 'Not applicable — no scannable files under components/ui yet.';
+        let barrelInfo = '';
+        if (uiKitPresent) {
+            importStyleInfo = 'Standard imports.';
+            if (data.hasNamedExports && !data.hasDefaultExports) {
+                importStyleInfo =
+                    'MANDATORY: Use NAMED imports for UI components (e.g., `import { Button } from "@/components/ui/button"`). Components do NOT have default exports.';
+            } else if (data.hasDefaultExports && !data.hasNamedExports) {
+                importStyleInfo =
+                    'Use DEFAULT imports for UI components (e.g., `import Button from "@/components/ui/button"`).';
+            }
+
+            barrelInfo = data.hasIndexFile
+                ? '\n- Barrel Imports: `components/ui/index.ts` exists. You MAY use `import { … } from "@/components/ui"` **only** for symbols that appear in **Known component basenames** below and are actually re-exported from that index.'
+                : '\n- MANDATORY: NO barrel imports found in `@/components/ui`. You MUST import each component from its own file (e.g., `import { Button } from "@/components/ui/button"`). NEVER use `import { ... } from "@/components/ui"`.';
         }
 
-        const barrelInfo = data.hasIndexFile
-            ? '\n- Barrel Imports: `components/ui/index.ts` exists. You CAN use `import { Button, Card } from "@/components/ui"`.'
-            : '\n- MANDATORY: NO barrel imports found in `@/components/ui`. You MUST import each component from its own file (e.g., `import { Button } from "@/components/ui/button"`). NEVER use `import { ... } from "@/components/ui"`.';
-
-        const clientDirectiveInfo = data.structure.includes('app-router')
-            ? '\n- Next.js Client Components: If you use React hooks (useState, useEffect, etc.), you MUST add `"use client"` at the very top of the file. CRITICAL: You CANNOT export `metadata` in a Client Component file.'
+        const minimalScaffoldNames = new Set(['button', 'input', 'label']);
+        const namesLower = data.availableUIComponents.map((n) => n.toLowerCase());
+        const looksLikeMinimalScaffold =
+            uiKitPresent &&
+            namesLower.length > 0 &&
+            namesLower.length <= 3 &&
+            namesLower.every((n) => minimalScaffoldNames.has(n));
+        const minimalKitNote = looksLikeMinimalScaffold
+            ? '\n- **Minimal / auto-scaffold UI kit**: Only the primitives listed above exist. Do **not** import `table`, `card`, `dialog`, `select`, etc. from `@/components/ui` unless you add those files in the **same** codegen batch (they must be written **before** pages that import them) or use semantic HTML instead.'
             : '';
+
+        const uiPolicySection = uiKitPresent
+            ? `## UI_COMPONENT_POLICY: USE_EXISTING
+- Local UI kit detected under \`${data.uiKitRelativePath || 'components/ui'}\`.
+- Import ONLY from files that exist. Known component basenames: ${data.availableUIComponents.join(', ') || '(none — re-scan after adding files)'}
+- **FORBIDDEN**: \`@/components/ui/<name>\` where \`<name>\` is **not** in the Known component basenames list (e.g. do not assume \`table\`, \`card\`, or \`dialog\` exist).${minimalKitNote}
+- Follow **UI Component Import Style** and barrel rules in this block.`
+            : `## UI_COMPONENT_POLICY: ABSENT
+- Scan result: **no** \`.ts/.tsx\` component files under \`components/ui\` or \`src/components/ui\` (folder may be missing or empty).
+- **Do not** \`import … from "@/components/ui/…"\` until those files exist.
+- **Preferred order:** (1) Use semantic HTML + existing project styles. (2) Or add primitives with \`write_code\` **before** pages that need them. (3) For React/Next targets, Basalt may auto-create minimal \`button\`/\`input\`/\`label\` at execute start — see task metadata \`uiKitScaffold.files\` when present; after that, \`USE_EXISTING\` applies on the next context refresh.`;
+
+        const clientDirectiveInfo =
+            data.stackProfile.primary === 'next' && data.structure.includes('app-router')
+                ? '\n- Next.js Client Components: If you use React hooks (useState, useEffect, etc.), you MUST add `"use client"` at the very top of the file. CRITICAL: You CANNOT export `metadata` in a Client Component file.'
+                : '';
 
         const routePolicyHint = this.getRoutePolicyHint(data);
         const availableComponentNames = data.availableUIComponents.join(', ') || 'None found';
@@ -320,11 +363,14 @@ export class ProjectProfiler {
 
         const allDeps = data.dependencies.sort().join(', ') || 'None';
 
+        const stackRules = loadStackRulesBlock(this.projectRoot, data.stackProfile);
+
         return `
 [PROJECT CONTEXT]
 - Tech Stack: ${data.techStack}
 - Router Type: ${data.structure}${clientDirectiveInfo}
 - Styling: ${data.hasTailwind ? 'Tailwind CSS IS installed. Use Tailwind classes.' : 'Tailwind CSS IS NOT installed. Do NOT use tailwind classes. Use standard CSS or inline styles.'}${shadcnWarning}
+${uiPolicySection}
 - UI Component Import Style: ${importStyleInfo}${barrelInfo}
 - Router Base: ${data.routerBase || 'unknown'}
 - Root Page Rewrite: ${data.rootPageOverwriteAllowed ? 'Explicitly allowed' : 'NOT allowed by default. Create under non-root route.'}
@@ -333,6 +379,9 @@ export class ProjectProfiler {
 - Available UI Component Files: ${availableComponentFiles}
 - INSTALLED PACKAGES (package.json): ${allDeps}
 - CRITICAL: You MUST ONLY import npm packages that appear in the INSTALLED PACKAGES list above. Do NOT use any package that is not listed. If a package is missing, use built-in alternatives (e.g., use native fetch instead of axios, use URLSearchParams instead of qs).
+
+[STACK_RULES]
+${stackRules}
 `.trim();
     }
 
@@ -342,13 +391,19 @@ export class ProjectProfiler {
             return 'Unknown router base. Use explicit file path under app/ or pages/ tree.';
         }
 
+        const isApp = typeof data.structure === 'string' && data.structure.includes('app-router');
+
         if (!Array.isArray(data.pageCandidates) || data.pageCandidates.length === 0) {
-            return `No confirmed non-root route candidates found. For new feature, prefer "${base}/<feature>/page.tsx".`;
+            return isApp
+                ? `No confirmed non-root route candidates found. For new feature, prefer "${base}/<feature>/page.tsx".`
+                : `No confirmed non-root route candidates found. For new feature, prefer "${base}/<feature>.tsx" or "${base}/<feature>/index.tsx".`;
         }
 
         const examples = data.pageCandidates
             .slice(0, 8)
-            .map((name: string) => `${base}/${name}/page.tsx`)
+            .map((name: string) =>
+                isApp ? `${base}/${name}/page.tsx` : `${base}/${name}.tsx`
+            )
             .join(', ');
         return `Prefer non-root routes first. Example candidates: ${examples}`;
     }

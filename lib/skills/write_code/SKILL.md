@@ -18,37 +18,41 @@ Writes string content to a specified file path.
 1.  Ensure the directory structure exists. If not, create it.
 2.  Write the `content` to `filePath`.
 3.  Overwrite if file exists.
-4.  **IMPORTANT**: Always use the correct file extension based on the explicit `Tech Stack` provided in the context (e.g., use `.tsx` for React/Next.js components, `.ts` for logic, `.css`/`.scss` for styles).
-5.  Do NOT create `.txt` or `.md` files unless explicitly asked for documentation.
-6.  For UI components in Next.js/React, ensure you import React and necessary libraries.
-7.  **CRITICAL (Next.js App Router)**: If the project uses App Router (files in `app/`) and you use React Hooks (e.g., `useState`, `useEffect`, `useContext`) or event handlers (e.g., `onClick`), you **MUST** include `"use client";` at the very first line of the file (Line 1). DO NOT FORGET IT, OR IT WILL CAUSE A FATAL BUILD ERROR.
-8.  **NO BROWSER APIS IN SSR**: Never access `window`, `document`, or `localStorage` directly in a component body. Always wrap them in `useEffect`.
-9.  **NO `<a>` TAGS**: Use `import Link from 'next/link'` for all internal navigation to prevent SPA reloads.
-10. **IMPORT EXISTENCE VALIDATION**: `@/components/ui/*`, 별칭 경로, 상대 경로 import는 실제 존재하는 파일만 사용한다. 존재하지 않는 import는 코드 저장 시 실패 처리하고, 회복 가능한 경우 HTML/CSS 대체안을 제안한다.
-11. **NPM DEPENDENCIES (CRITICAL)**: External packages (`date-fns`, `lodash`, `axios`, etc.) MUST already appear in the target project's `package.json` `dependencies` or `devDependencies`. If a package is not installed, `write_code` will reject the file. Before importing, infer from `[PROJECT CONTEXT]` / `package.json` which libraries exist. Prefer **no new dependencies**: e.g. format dates with `Intl.DateTimeFormat` or native `Date` instead of `date-fns` unless the project already uses it.
+4.  **STACK_RULES + UI_COMPONENT_POLICY (CRITICAL)**: `[PROJECT CONTEXT]`에 `[STACK_RULES]`(스택 전용)와 **`## UI_COMPONENT_POLICY`** 가 함께 있다. `STACK_RULES`가 최우선 기술 제약. 추가로 **`ABSENT`** 이면 `@/components/ui/*` import 금지(파일 생성 전까지); 시맨틱 HTML 또는 선행 primitives 작성. **`USE_EXISTING`** 이면 나열·확인된 파일만 import. 실행 초기 자동 스캐폴드 후에는 다음 컨텍스트부터 `USE_EXISTING`에 준한다.
+5.  **IMPORTANT**: Always use the correct file extension based on the explicit `Tech Stack` provided in the context (e.g., use `.tsx` for React/Next.js components, `.ts` for logic, `.css`/`.scss` for styles).
+6.  Do NOT create `.txt` or `.md` files unless explicitly asked for documentation.
+7.  For UI components in Next.js/React, ensure you import React and necessary libraries.
+8.  **CRITICAL (Next.js App Router)**: If the project uses App Router (files in `app/`) and you use React Hooks (e.g., `useState`, `useEffect`, `useContext`) or event handlers (e.g., `onClick`), you **MUST** include `"use client";` at the very first line of the file (Line 1). DO NOT FORGET IT, OR IT WILL CAUSE A FATAL BUILD ERROR.
+9.  **NO BROWSER APIS IN SSR**: Never access `window`, `document`, or `localStorage` directly in a component body. Always wrap them in `useEffect`.
+10. **NO `<a>` TAGS (Next.js internal nav)**: When the stack is Next.js, use `import Link from 'next/link'` for internal navigation. For other frameworks, follow `[STACK_RULES]` and existing project patterns.
+11. **IMPORT EXISTENCE VALIDATION**: `@/components/ui/*`, 별칭 경로, 상대 경로 import는 실제 존재하는 파일만 사용한다. 존재하지 않는 import는 코드 저장 시 실패 처리하고, 회복 가능한 경우 HTML/CSS 대체안을 제안한다.
+12. **NPM DEPENDENCIES (CRITICAL)**: External packages (`date-fns`, `lodash`, `axios`, etc.) MUST already appear in the target project's `package.json` `dependencies` or `devDependencies`. If a package is not installed, `write_code` will reject the file. Before importing, infer from `[PROJECT CONTEXT]` / `package.json` which libraries exist. Prefer **no new dependencies**: e.g. format dates with `Intl.DateTimeFormat` or native `Date` instead of `date-fns` unless the project already uses it.
 
 ## UI Component Guidelines (MANDATORY)
 
 When creating UI components (pages, forms, modals, cards, etc.), you MUST follow these guidelines while remaining flexible to the specific requirements:
 
+- **Gate**: Read **`## UI_COMPONENT_POLICY`**. **`USE_EXISTING`** → use listed `components/ui` files only. **`ABSENT`** → no `@/components/ui/*` imports until files exist (semantic HTML + project CSS; or rely on execute-time auto-scaffold + refreshed context).
+
 ### 1. Component Usage Reference (shadcn/ui)
-Use these components from `@/components/ui/` as building blocks. **Do NOT just copy-paste the structure; adapt it to the task's specific layout requirements.**
+When the project **has** those files **and** the basename appears under **Known component basenames** in `[PROJECT CONTEXT]`, use `@/components/ui/` as building blocks. **Never** import a path whose file is not listed (e.g. `table`, `card`, `dialog` are invalid on a minimal `button`/`input`/`label` kit—use semantic HTML instead). **Do NOT** copy-paste shadcn patterns that assume a full kit.
 
 | Element | shadcn/ui Component | Import Path |
 |---------|---------------------|-------------|
 | Button | `Button` | `@/components/ui/button` |
 | Input | `Input` | `@/components/ui/input` |
 | Label | `Label` | `@/components/ui/label` |
-| Card | `Card`, `CardHeader`, `CardTitle`, `CardContent`, `CardFooter` | `@/components/ui/card` |
-| Dialog | `Dialog`, `DialogTrigger`, `DialogContent` | `@/components/ui/dialog` |
-| Select | `Select`, `SelectTrigger`, `SelectContent`, `SelectItem` | `@/components/ui/select` |
+| Card | `Card`, … | `@/components/ui/card` — **only if `card` is in Known basenames** |
+| Dialog | `Dialog`, … | `@/components/ui/dialog` — **only if listed** |
+| Select | `Select`, … | `@/components/ui/select` — **only if listed** |
+| Table | (various) | `@/components/ui/table` — **only if listed**; otherwise use `<table>` / `<thead>` / `<tbody>` / `<tr>` / `<th>` / `<td>` |
 
 ### 2. Layout & Styling Rules
 - **Follow the exact layout requested.** If the user asks for a grid, vertical stack, or specific section ordering, implement exactly that.
 - **Styling**: Check the `[PROJECT CONTEXT]` for `Tailwind CSS`. Use Tailwind `grid`, `flex`, `gap-X` only if it is installed.
 - **Import Style**: Check `[PROJECT CONTEXT]` for `UI Component Import Style`.
     - **MANDATORY**: If named imports are required, use `import { Component } from "@/components/ui/component"`.
-    - **MANDATORY**: If a barrel file (`components/ui/index.ts`) exists, use MUST use it: `import { Button, Card } from "@/components/ui"`.
+    - If a barrel file exists, you MAY use `import { … } from "@/components/ui"` **only** for symbols that are both in **Known component basenames** and re-exported from that index (never import `Card` from the barrel if `card` is not on disk).
 - **CRITICAL**: If Tailwind is NOT installed, **NEVER** use its classes. If `shadcn/ui` components are present but Tailwind is missing, they are likely broken; use standard HTML tags with premium inline styles instead.
 - **NEVER** stick to a fixed template if the task description implies a different structure.
 
@@ -56,8 +60,8 @@ Use these components from `@/components/ui/` as building blocks. **Do NOT just c
 *This is a reference for how to use shadcn/ui components, NOT a template to be used every time.*
 
 ```tsx
-// 1. Preferred if barrel import is available (check [PROJECT CONTEXT])
-import { Button, Card, CardHeader, CardTitle, CardContent } from "@/components/ui";
+// 1. Barrel import only if index exists AND every symbol is in Known component basenames
+// import { Button, Card, ... } from "@/components/ui";
 
 // 2. Fallback if no barrel file exists (check for NAMED vs DEFAULT style)
 // Named export style: import { Button } from "@/components/ui/button";
@@ -82,6 +86,6 @@ export default function FlexibleComponent() {
 ```
 
 **CRITICAL**: You are an expert engineer. Judge the best structure for the specific request.
-1. **NO HALLUCINATIONS**: ONLY use components that are explicitly listed in the reference table above or that you know exist in the actual codebase (e.g. check `components/ui` directory if unsure). NEVER invent components like `Heading`, `Text`, or `Typography` if they are not provided.
-2. **Standard HTML + Tailwind**: If a specialized component (like a Typography or List component) is missing, use standard semantic HTML tags (`h1`, `h2`, `p`, `ul`, `li`, etc.) combined with Tailwind CSS classes for styling.
-3. NEVER use plain HTML elements (`<input>`, `<button>`, `<div>` without styling) for UI components.
+1. **NO HALLUCINATIONS**: ONLY use `@/components/ui/*` when the context lists them or `read_codebase` confirms the files exist. NEVER invent components like `Heading`, `Text`, or `Typography` if they are not provided.
+2. **No UI kit**: If there is no `components/ui` in the project, use semantic HTML with styling consistent with the repo (Tailwind classes only if Tailwind is installed; otherwise CSS modules, inline styles, or existing patterns).
+3. **Partial kit**: If a specialized component (Typography, List, etc.) is missing, use semantic HTML (`h1`, `p`, `ul`, …) plus the project’s styling approach—do not import paths that do not exist.
