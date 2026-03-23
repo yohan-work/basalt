@@ -33,6 +33,7 @@
 - `analyze_task`는 디스크의 전체 에이전트 목록을 보고 `required_agents`를 고릅니다. 동일 요청 텍스트에 대해 `lib/agent-roster-heuristics.ts`가 키워드로 `required_agents`를 보강할 수 있습니다.
 - `create_workflow`는 분석에 나온 역할 위주로 `Available Agents` 블록을 구성합니다.
 - `consult_agents`는 `required_agents`·요약/목표 텍스트 키워드·(복잡도 high 시) QA·코어 4역할을 우선순위로 합친 뒤, `CONSULT_MAX_PARTICIPANTS`(기본 8, 최대 16)로 잘라 참가자 목록을 만듭니다. 구현: `lib/agent-roster-heuristics.ts`, 호출부 `lib/skills/consult_agents/execute.ts`.
+- 플랜 단계에서 태스크에 연결된 프로젝트 경로가 있으면 `ProjectProfiler.getContextString()` 결과가 `codebaseContext`로 `analyze_task`·`consult_agents`·`create_workflow`에 주입됩니다(`package.json` 의존성·Router Base·`[STACK_RULES]`·UI 정책 등).
 
 ### 신규 에이전트 추가 체크리스트
 
@@ -48,7 +49,9 @@
 - 스킬은 `lib/skills/SKILL.md` + 각 스킬 폴더의 `SKILL.md`로 정의됩니다.
 - 런타임은 `Universal Skill Executor` 형태로, 하드코딩된 TS 호출 대신 프롬프트 기반 동적 실행을 기본으로 합니다.
 - 코드 작성 시 `ProjectProfiler`를 통해 라우터/스타일/컴포넌트 컨텍스트를 반영하고, 신규 페이지 생성은 기본적으로 루트 페이지가 아닌 비루트 라우트 경로를 선택합니다.
-- `write_code`는 사전 검증으로 존재하지 않는 import 경로(`@/components/ui/*`, 배럴 `@/components/ui`는 `index.(ts|tsx|…)` 필수, 상대/별칭 경로) 및 **미설치 npm 패키지**를 감지해 실패를 발생시켜 재시도/보정 루프를 유도합니다. `tsconfig.json`·`jsconfig.json`·`tsconfig.app.json` 등의 `paths` **병합**은 `lib/tsconfig-paths.ts`의 `mergeCompilerPathsFromConfigs`와 동일 규칙을 `lib/skills/index.ts`가 사용한다. `components/ui` vs `src/components/ui` 폴백을 시도합니다. UI 전용 실패는 `importValidation.codes`(`UI_IMPORT_NOT_ON_DISK`, `UI_BARREL_INVALID`)로 분류되며, 오케스트레이터는 한 번에 생성된 파일 목록을 **`components/ui/` 우선**으로 정렬한 뒤, 필요 시 화이트리스트 기반 **UI import repair** LLM 호출 후 같은 파일에 대해 `write_code`를 재시도합니다(미설치 npm 오류와는 별도 처리).
+- `write_code`는 사전 검증으로 존재하지 않는 import 경로(`@/components/ui/*`, 배럴 `@/components/ui`는 `index.(ts|tsx|…)` 필수, 상대/별칭 경로) 및 **미설치 npm 패키지**를 감지해 실패를 발생시켜 재시도/보정 루프를 유도합니다. **추가**: Next.js App Router의 `app/.../page.tsx`·`layout.tsx`에서 **`metadata`/`generateMetadata`/`viewport`/`generateViewport`** 와 **`"use client"`** 또는 **서버 export + 훅만**인 잘못된 조합은 저장 전에 거부합니다(`rscBoundaryViolation`). 훅이 있을 때 서버 전용 export가 있으면 **`use client` 자동 삽입**도 하지 않습니다. `tsconfig.json`·`jsconfig.json`·`tsconfig.app.json` 등의 `paths` **병합**은 `lib/tsconfig-paths.ts`의 `mergeCompilerPathsFromConfigs`와 동일 규칙을 `lib/skills/index.ts`가 사용한다. `components/ui` vs `src/components/ui` 폴백을 시도합니다. UI 전용 실패는 `importValidation.codes`(`UI_IMPORT_NOT_ON_DISK`, `UI_BARREL_INVALID`)로 분류되며, 오케스트레이터는 한 번에 생성된 파일 목록을 **`components/ui/` 우선**으로 정렬한 뒤, 필요 시 화이트리스트 기반 **UI import repair** LLM 호출 후 같은 파일에 대해 `write_code`를 재시도합니다(미설치 npm 오류와는 별도 처리).
+- **플랜 스킬**(`analyze_task`, `create_workflow`, `consult_agents`): 각 `SKILL.md`에 **저장소 전제 체크리스트**(Router Base, 라우터 종류, `INSTALLED PACKAGES`, 이중 루트 경고, `[STACK_RULES]`)가 있어 UI 정책과 함께 플랜·워크플로·토론에 반영되도록 안내합니다.
+- **`scan_project`**: `lib/skills/index.ts`에서 **`ProjectProfiler`** 기반으로 프로젝트 스캔 결과를 JSON 반환합니다(스텁 아님). 세부 필드는 `lib/skills/scan_project/SKILL.md` 참고.
 - 안정화 정책은 아래 5개 축으로 운영됩니다.
   1. `라우팅 정책`: 요청이 신규 기능 페이지일 때 `app/page.tsx`, `pages/index.tsx` 같은 루트 덮어쓰기를 기본 금지하고, 적합한 비루트 경로로 재매핑.
   2. `RSC 경계 준수`: React Hook(`useState`, `useEffect`) 사용 시 클라이언트 컴포넌트 경계(`"use client"`)를 강제하고, 경로 기반 라우터 규칙과 연계해 서버 컴포넌트 오염을 방지. App Router에서 `metadata`/`generateMetadata`/`viewport`·`generateViewport`는 서버 전용이며, 동일 세그먼트에서 `metadata` 객체와 `generateMetadata`를 동시 export하지 않는다 — 상세는 `lib/llm.ts`, `lib/profiler.ts`, `lib/stack-rules/next-app-router.md`.
@@ -57,10 +60,11 @@
   5. `실패 기록/복구`: 실행 중 `write_code` 실패는 즉시 메타데이터 `executionRepairs`에 기록하고, 경로 정규화/검증 실패를 다음 스텝에서 보정 대상화.
 
 ### 적용 파일(반영 위치)
-- `lib/profiler.ts`: 라우터/스타일/컴포넌트 컨텍스트 강화
+- `lib/stack-profile.ts` / `lib/profiler.ts`: 이중 `app`/`src/app` 등 라우트 루트 해석·`[PROJECT CONTEXT]` 경고
 - `lib/llm.ts`: 경로 규칙·UI 컴포넌트 규칙·프롬프트 하드닝
-- `lib/agents/Orchestrator.ts`: write_code 사전 경로 정규화 및 실패 전파
-- `lib/skills/index.ts`: import 존재성 AST 검증
+- `lib/agents/Orchestrator.ts`: write_code 사전 경로 정규화(Router Base 정렬·`index`→`page` 보정)·실패 전파·QA URL 메타
+- `lib/skills/index.ts`: import 존재성 AST 검증·RSC/metadata 경계·`scan_project`
+- `lib/project-dev-server.ts` / `lib/qa/infer-route-from-files.ts`: QA URL 추론·`qaRouteInferenceWarning`
 - `lib/tsconfig-paths.ts`: 설정 파일 간 `compilerOptions.paths` 병합(스킬 별칭 해석·`project-ui-kit` 스캐폴드 경로와 공유)
 
 ### 핵심 스킬

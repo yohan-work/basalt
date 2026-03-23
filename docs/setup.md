@@ -39,12 +39,18 @@ MOCK_LLM=false
 # 태스크 metadata 예시 (Supabase Tasks.metadata JSON):
 # "qaDevServerUrl": "http://localhost:3001/custom"   — 전체 URL에 path 포함 시 그대로 QA
 # "qaDevServerPath": "/test"                          — origin만 env로 잡고 이 path로 접속
+# "qaRouteInferenceWarning": "..."                    — (자동) App Router URL 추론이 실패했을 때 안내 문자열
 
 # testing 단계 HTTP/브라우저 스모크 실패 시 검증 실패로 처리 (기본: 경고만, 메타에 qaPageCheck 저장)
 # QA_FAIL_ON_PAGE_ERRORS=true
 
 # Dev 종료 QA: 페이지 스모크 실패 시 자동 write_code 재시도 상한 (기본 5, 최대 12)
 # DEV_QA_MAX_REPAIR_ROUNDS=5
+
+# Dev 종료 QA 시작 시 대상 워크스페이스에서 `next build` 실행(느림). stdout/stderr 발췌는 메타 `devQaNextBuild`·자동 수정 프롬프트에 포함.
+# DEV_QA_RUN_NEXT_BUILD=1
+# 위와 함께 켰을 때 `next build`가 비정상 종료면 Dev QA 파이프라인을 즉시 실패 처리.
+# DEV_QA_FAIL_ON_NEXT_BUILD=1
 
 # 대상 프로젝트에 components/ui 가 없을 때(스캔 기준) Next/React 에서 최소 button·input·label 자동 생성 (기본: 켜짐). 끄려면:
 # BASALT_AUTO_SCAFFOLD_UI=0

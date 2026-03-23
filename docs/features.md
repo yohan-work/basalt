@@ -58,14 +58,16 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 
 ## 5b) testing 단계: 대상 앱 페이지 QA 스모크
 
-- `verify()`(testing)에서 대상 프로젝트의 dev URL에 대해 `runQaPageSmokeCheck`를 실행합니다: HTTP 연결·상태 코드 확인, `agent-browser`가 있으면 페이지 스냅샷·본문 텍스트에서 알려진 오류 문구 탐지. 스모크는 본문·스냅샷 텍스트를 소문자로 두고 `PAGE_ERROR_SIGNALS`(`lib/qa/page-smoke-check.ts`)와 매칭하며, **빌드/Next 관련**으로는 예를 들어 module not found, metadata·`use client` 충돌, Link 중첩, `metadataBase`/viewport 관련 문구 등이 포함된다(전체 목록은 소스 기준).
-- **페이지 URL**은 `resolveQaPageUrl`로 결정합니다. (1) `metadata.qaDevServerUrl`에 경로가 포함된 전체 URL이면 그대로 사용합니다. (2) 아니면 위와 동일한 우선순위로 **origin**(호스트·포트)을 정한 뒤, `metadata.qaDevServerPath`(예: `/test`)를 붙이거나, `metadata.fileChanges`에서 Next `app/.../page.tsx`·`pages/...` 경로를 휴리스틱으로 추론합니다(최근 변경 파일부터). 예: `app/test/page.tsx` → `http://localhost:3001/test`.
+- `verify()`(testing)에서 대상 프로젝트의 dev URL에 대해 `runQaPageSmokeCheck`를 실행합니다: HTTP 연결·상태 코드 확인, **응답 HTML 앞부분(최대 약 12만 자)** 을 항상 스캔해 `PAGE_ERROR_SIGNALS`와 매칭하므로 `agent-browser`가 없어도 **문자열이 HTML에 포함된 오류**(예: 일부 빌드/오버레이 문구)는 탐지할 수 있습니다. `agent-browser`가 있으면 추가로 스냅샷·본문·Next 개발 오버레이/포털 DOM에서 텍스트를 모읍니다. 매칭된 신호 주변 텍스트는 `errorExcerpt`로 잘라 `metadata.qaPageCheck`에 넣고, Dev QA 자동 수정 프롬프트에도 실립니다. 공식 문서 링크 힌트는 `lib/qa/qa-repair-hints.ts`가 신호별로 붙입니다.
+- **한계**: 브라우저 콘솔만에 있는 오류·스크립트가 잡지 못한 DOM·프로덕션 최소화 메시지는 놓칠 수 있습니다. `next build`와 불일치(개발 서버만 통과)하는 문제는 선택 환경 변수 `DEV_QA_RUN_NEXT_BUILD=1`로 빌드 로그를 메타·수정 프롬프트에 넣어 보완합니다(느림). `DEV_QA_FAIL_ON_NEXT_BUILD=1`이면 빌드 실패 시 Dev QA를 즉시 실패 처리합니다.
+- 스모크는 본문·스냅샷·HTML 스니펫 텍스트를 소문자로 두고 `PAGE_ERROR_SIGNALS`(`lib/qa/page-smoke-check.ts`)와 매칭하며, **빌드/Next 관련**으로는 예를 들어 module not found, metadata·`use client` 충돌, Link 중첩, hydration, `next/image` 호스트, prerender, RSC payload, `metadataBase`/viewport 관련 문구 등이 포함된다(전체 목록은 소스 기준).
+- **페이지 URL**은 `resolveQaPageUrl`(내부적으로 `resolveQaPageUrlWithDiagnostics`)로 결정합니다. (1) `metadata.qaDevServerUrl`에 경로가 포함된 전체 URL이면 그대로 사용합니다. (2) 아니면 위와 동일한 우선순위로 **origin**(호스트·포트)을 정한 뒤, `metadata.qaDevServerPath`(예: `/test`)를 붙이거나, `metadata.fileChanges`에서 Next `app/.../page.tsx`·`pages/...` 경로를 휴리스틱으로 추론합니다(최근 변경 파일부터). App Router는 **`page.tsx`** 만 URL로 매핑되므로 변경 목록에 **`.../index.tsx`만** 있고 `page.tsx`가 없으면 추론이 실패해 **루트 `/`만** 열릴 수 있습니다. 이 경우 `metadata.qaRouteInferenceWarning`에 안내가 남고 Dev 종료 QA·`verify()` 로그에 WARNING이 찍힙니다(`lib/qa/infer-route-from-files.ts`, `lib/project-dev-server.ts`).
 - 결과는 `metadata.qaPageCheck`에 저장됩니다. `QA_FAIL_ON_PAGE_ERRORS=true`이면 스모크 실패 시 `verify_final_output` 결과와 무관하게 검증 단계를 실패 처리합니다.
 - 이후 스크린샷·반응형 점검도 동일 URL을 사용합니다.
 
 ### Dev 종료 시 자동 QA (Test 칸반 진입 전)
 
-- `execute()`가 워크플로 스텝을 모두 마치면 **상태를 `testing`으로 바꾸기 전에** `runDevExitQaPipeline`이 실행됩니다: 대상 dev URL에 대해 `runQaPageSmokeCheck`를 반복합니다. 스모크 실패 시 **`maybeScaffoldMinimalUiKit`**으로 `components/ui` 갭 필(비 LLM)을 **먼저** 시도하고, 새 파일이 생기면 그 라운드에서는 LLM 자동 수정을 건너뛴 뒤 재스모크합니다. 그다음 필요 시 코딩 모델로 `write_code` 자동 수정을 시도합니다(기본 최대 5회, 환경 변수 `DEV_QA_MAX_REPAIR_ROUNDS`로 1–12 조정). 스모크가 통과할 때까지(또는 상한 초과 시 실행 실패)입니다.
+- `execute()`가 워크플로 스텝을 모두 마치면 **상태를 `testing`으로 바꾸기 전에** `runDevExitQaPipeline`이 실행됩니다: 선택적으로 `DEV_QA_RUN_NEXT_BUILD`가 켜져 있으면 먼저 대상 저장소에서 `next build`를 돌려 로그 일부를 `metadata.devQaNextBuild`에 남기고, 자동 수정 프롬프트에 포함합니다. 이후 대상 dev URL에 대해 `runQaPageSmokeCheck`를 반복합니다. 스모크 실패 시 **`maybeScaffoldMinimalUiKit`**으로 `components/ui` 갭 필(비 LLM)을 **먼저** 시도하고, 새 파일이 생기면 그 라운드에서는 LLM 자동 수정을 건너뛴 뒤 재스모크합니다. 그다음 필요 시 코딩 모델로 `write_code` 자동 수정을 시도합니다(기본 최대 5회, 환경 변수 `DEV_QA_MAX_REPAIR_ROUNDS`로 1–12 조정). 수정 요청에는 스모크 `errorExcerpt`·오버레이 발췌·(있으면) 빌드 로그 발췌·신호별 문서 힌트가 붙습니다. 스모크가 통과할 때까지(또는 상한 초과 시 실행 실패)입니다.
 - 이어서 `verify_final_output`, `screenshot_page`·`check_responsive`, `metadata.qaSignoff`까지 같은 흐름에서 기록합니다. 따라서 Test 칸반에 도착했을 때 검수 완료 탭에 데이터가 채워져 있는 것이 정상입니다.
 - 수동 **「Verify & Request PR」**(`verify()`)은 PR/Git 자동화용으로 그대로 두며, Dev 종료 파이프라인과 겹치면 메타·캡처를 다시 갱신할 수 있습니다.
 
@@ -104,11 +106,28 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - **스택 규칙 팩**: [`lib/stack-rules/next-app-router.md`](../lib/stack-rules/next-app-router.md) — layout/template/loading/error, MUST NOT 등.
 - **Cursor 저장소 스킬**(에이전트 참고용): [`.cursor/skills/nextjs-app-router-imports/SKILL.md`](../.cursor/skills/nextjs-app-router-imports/SKILL.md) — import 경로, Link, Metadata/RSC, Proxy(구 middleware), 캐시·env 링크 등. 상세는 해당 파일·본 문서 §5b·[`llm.md`](./llm.md)와 교차 참조.
 
+### 11c) Next.js 라우트 루트·경로 일관성 (`lib/stack-profile.ts`, `Orchestrator`, `lib/skills/index.ts`)
+
+- **`app/`와 `src/app/` 동시 존재**: `detectNextStyleRouterStructureWithMeta`가 각 트리의 `page`/`layout` 파일 개수로 Router Base를 정하고, 동점이면 `src/app`을 우선합니다. `[PROJECT CONTEXT]`에 **`[WARNING] Router root`** 와 한국어 설명이 붙을 수 있습니다(`StackProfile.routerDualRoot`, `routerResolutionNote`).
+- **`write_code` 경로 정규화**(`Orchestrator.normalizeWriteTargetPath`): 감지된 Router Base와 다른 트리(예: LLM이 `app/...`만 쓰고 실제는 `src/app`)로 온 경로를 **같은 Base로 리라이트**하고, App Router에서 **`.../index.tsx`만** 있고 같은 폴더에 `page.tsx`가 없을 때 **`page.tsx`로 유도**하는 보수적 리맵을 시도합니다(구현: `lib/agents/Orchestrator.ts`).
+
+### 11d) `write_code` — App Router `metadata`·`viewport`와 `"use client"` 충돌 차단
+
+- `app/.../page.tsx`·`app/.../layout.tsx`(및 `src/app/...` 동일)에 대해, **`export const metadata` / `generateMetadata` / `viewport` / `generateViewport`** 와 **`"use client"`** 또는 **훅만 있고 클라이언트 분리 없음**인 조합은 **디스크에 쓰기 전에 거부**합니다. 메시지에 [generate-metadata — server component only](https://nextjs.org/docs/app/api-reference/functions/generate-metadata#why-generatemetadata-is-server-component-only) 링크를 포함하고, 반환 객체에 `rscBoundaryViolation: true`를 붙일 수 있습니다.
+- 훅이 있는데 서버 전용 export도 있으면, 예전처럼 **`ensureClientDirectiveForReactHooks`가 맨 위에 `use client`를 자동 삽입하지 않도록** 가드되어 동일 충돌을 만들지 않습니다(`lib/skills/index.ts`).
+
+### 11e) 플랜 단계 스킬·`scan_project`
+
+- **`analyze_task`**, **`create_workflow`**, **`consult_agents`**의 `SKILL.md`에 **저장소 전제 체크리스트**가 있습니다: `[PROJECT CONTEXT]`의 Tech Stack, Router Type/Base, INSTALLED PACKAGES, 이중 루트 경고, `[STACK_RULES]` 등을 UI 정책과 동일한 우선순위로 읽도록 요구합니다.
+- **`scan_project`**(`lib/skills/index.ts`)는 스텁이 아니라 **`ProjectProfiler.getProfileData()`** 등과 동일 신호로 구조·의존성·`routerBase`·설정 파일·디렉터리 샘플 등을 JSON에 담아 반환합니다. 상세는 `lib/skills/scan_project/SKILL.md`.
+- 플랜 단계의 스택 출처 요약은 [`agents-skills.md`](./agents-skills.md)를 참고합니다.
+
 ## 12) 미설치 패키지 import 방어 (4중 방어 체계)
 
 LLM이 프로젝트에 설치되지 않은 npm 패키지(예: `axios`, `lodash`)를 import하는 코드를 생성하여 `Module not found` 빌드 에러가 발생하는 문제를 근본적으로 차단합니다.
 
 ### 방어 계층 1: 하드 밸리데이션 (`lib/skills/index.ts`)
+- App Router `page`/`layout`에 대한 **`metadata`·`viewport` vs `"use client"`·훅** RSC 경계 검증(§11d)
 - `validateImportsExistence()`가 외부 npm 패키지 import도 `package.json` 기반으로 검증
 - 미설치 패키지를 import하면 파일 쓰기 자체가 거부되어 재시도/보정 루프 유도
 - Node.js 빌트인 모듈(`fs`, `path`, `crypto` 등)은 허용 리스트로 제외
