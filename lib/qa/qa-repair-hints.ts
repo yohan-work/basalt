@@ -41,6 +41,8 @@ export const SIGNAL_DOC_HINTS: Partial<Record<string, string>> = {
     'error occurred prerendering': 'https://nextjs.org/docs/messages/prerender-error — 동일.',
     'static generation failed': 'https://nextjs.org/docs/messages/prerender-error — `export const dynamic` / 데이터 소스 확인.',
     'client-side exception occurred': 'https://nextjs.org/docs/messages/client-side-exception-occurred — 클라이언트 경계·error boundary.',
+    'prop on a dom element':
+        'https://react.dev/warnings/unknown-prop — `fullWidth`·`variant` 등 커스텀 prop을 `<button>`/`<input>`에 `{...props}`로 넘기지 말고 구조 분해 후 DOM 허용 속성만 전달.',
     'server actions must': 'https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations — Server Action은 async·직렬화 가능한 인자만.',
     'server action': 'https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations — 폼 `action`/직렬화 가능 인자.',
     'edge runtime': 'https://nextjs.org/docs/app/api-reference/file-conventions/route#runtime — Route/Edge에서 Node API 제한.',

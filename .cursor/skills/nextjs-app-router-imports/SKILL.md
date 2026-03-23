@@ -12,6 +12,13 @@ description: >-
 - App Router에서는 **`app/.../page.tsx`**(또는 `page.js`)가 세그먼트 라우트다. **`app/.../index.tsx`는 라우트 엔트리가 아니다** — Pages Router 습관과 혼동하면 **404**가 나고, Basalt QA는 `page.tsx` 경로만 URL로 추론한다.
 - 새 페이지는 반드시 **`{Router Base}/<segment>/page.tsx`** 형태로 두고, **[PROJECT CONTEXT]의 Router Base**(`app` vs `src/app`)와 동일한 트리만 쓴다.
 
+## 네이티브 DOM으로의 prop 전달 (unknown prop)
+
+공식: [Unknown Prop on DOM Element](https://react.dev/warnings/unknown-prop) (React)
+
+- `React.forwardRef` 등으로 `<button>`, `<input>`, `<div>` 같은 **네이티브 요소**를 감쌀 때, MUI/shadcn 스타일의 **커스텀 prop**(`fullWidth`, `variant`, `size`, `color` 등)을 `{...props}`로 그대로 넘기면 React가 경고한다(“does not recognize the `fullWidth` prop on a DOM element”).
+- **해결**: 커스텀 prop은 구조 분해로 **꺼낸 뒤** DOM에는 `React.ButtonHTMLAttributes<HTMLButtonElement>` 등에 해당하는 속성만 전달한다. 너비·레이아웃은 `className`/`style`로만 반영한다.
+
 ## `@/components/ui` / module not found
 
 공식: [Module not found](https://nextjs.org/docs/messages/module-not-found)
@@ -105,6 +112,7 @@ description: >-
 
 ## 체크리스트 (에이전트)
 
+- [ ] `components/ui`의 `Button`/`Input` 등이 네이티브 요소에 **`fullWidth` 등 비DOM prop을 스프레드하지 않았는가?** (구조 분해 후 `className` 등만 전달)
 - [ ] 새 라우트가 **`page.tsx`**(App Router)로 추가되었는가? **`app/.../index.tsx`로 URL을 만들려 하지 않았는가?
 - [ ] 파일 경로가 **[PROJECT CONTEXT] Router Base**(`app/` vs `src/app/`)와 동일한 트리인가?
 - [ ] `tsconfig.json` / `jsconfig.json`의 `paths` + `baseUrl`이 실제 폴더 구조와 맞는가?

@@ -40,6 +40,7 @@ export const PAGE_ERROR_SIGNALS = [
     'error occurred prerendering',
     'static generation failed',
     'client-side exception occurred',
+    'prop on a dom element',
     'server actions must',
     'edge runtime',
     'failed to fetch rsc payload',

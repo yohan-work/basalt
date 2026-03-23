@@ -25,10 +25,12 @@ description: 모든 스택 공통 — 패키지, 경로, 기존 코드 정합성
 2. **npm 패키지**는 `INSTALLED PACKAGES`에 있는 것만 import한다. 없으면 `fetch`, `Intl`, 네이티브 API로 대체한다.
 3. **경로**는 프로젝트 루트 기준 상대 경로이며 선행 `/`를 붙이지 않는다(Orchestrator 규칙과 동일).
 4. 타입스크립트 프로젝트면 확장자·`strict` 관례에 맞춘다(CONTEXT·기존 파일 기준).
+5. **React**: 네이티브 요소(`<button>`, `<input>`, `<div>`)에 라이브러리/커스텀 prop(`fullWidth`, `variant` 등)을 `{...props}`로 그대로 넘기지 않는다. `forwardRef` 래퍼에서는 비DOM prop을 구조 분해로 제거한 뒤 DOM에 허용되는 속성만 전달한다.
 
 ## MUST NOT
 
 - 설치되지 않은 패키지 가정(`axios`, `lodash`, `date-fns` 등).
+- React에서 네이티브 DOM으로 인식되지 않는 prop을 스프레드로 전달하는 패턴(런타임 경고·콘솔: unknown prop on DOM element).
 - CONTEXT와 반대되는 스타일 강제(예: Tailwind 없는데 `className` 유틸 남발).
 - 존재하지 않는 `@/`·별칭 경로로 import.
 
