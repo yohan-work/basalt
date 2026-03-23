@@ -58,14 +58,14 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 
 ## 5b) testing 단계: 대상 앱 페이지 QA 스모크
 
-- `verify()`(testing)에서 대상 프로젝트의 dev URL에 대해 `runQaPageSmokeCheck`를 실행합니다: HTTP 연결·상태 코드 확인, `agent-browser`가 있으면 페이지 스냅샷·본문 텍스트에서 알려진 오류 문구(Next 오버레이 등) 탐지.
+- `verify()`(testing)에서 대상 프로젝트의 dev URL에 대해 `runQaPageSmokeCheck`를 실행합니다: HTTP 연결·상태 코드 확인, `agent-browser`가 있으면 페이지 스냅샷·본문 텍스트에서 알려진 오류 문구 탐지. 스모크는 본문·스냅샷 텍스트를 소문자로 두고 `PAGE_ERROR_SIGNALS`(`lib/qa/page-smoke-check.ts`)와 매칭하며, **빌드/Next 관련**으로는 예를 들어 module not found, metadata·`use client` 충돌, Link 중첩, `metadataBase`/viewport 관련 문구 등이 포함된다(전체 목록은 소스 기준).
 - **페이지 URL**은 `resolveQaPageUrl`로 결정합니다. (1) `metadata.qaDevServerUrl`에 경로가 포함된 전체 URL이면 그대로 사용합니다. (2) 아니면 위와 동일한 우선순위로 **origin**(호스트·포트)을 정한 뒤, `metadata.qaDevServerPath`(예: `/test`)를 붙이거나, `metadata.fileChanges`에서 Next `app/.../page.tsx`·`pages/...` 경로를 휴리스틱으로 추론합니다(최근 변경 파일부터). 예: `app/test/page.tsx` → `http://localhost:3001/test`.
 - 결과는 `metadata.qaPageCheck`에 저장됩니다. `QA_FAIL_ON_PAGE_ERRORS=true`이면 스모크 실패 시 `verify_final_output` 결과와 무관하게 검증 단계를 실패 처리합니다.
 - 이후 스크린샷·반응형 점검도 동일 URL을 사용합니다.
 
 ### Dev 종료 시 자동 QA (Test 칸반 진입 전)
 
-- `execute()`가 워크플로 스텝을 모두 마치면 **상태를 `testing`으로 바꾸기 전에** `runDevExitQaPipeline`이 실행됩니다: 대상 dev URL에 대해 `runQaPageSmokeCheck`를 반복하고, 실패 시 코딩 모델로 `write_code` 자동 수정을 시도합니다(기본 최대 5회, 환경 변수 `DEV_QA_MAX_REPAIR_ROUNDS`로 1–12 조정). 스모크가 통과할 때까지(또는 상한 초과 시 실행 실패)입니다.
+- `execute()`가 워크플로 스텝을 모두 마치면 **상태를 `testing`으로 바꾸기 전에** `runDevExitQaPipeline`이 실행됩니다: 대상 dev URL에 대해 `runQaPageSmokeCheck`를 반복합니다. 스모크 실패 시 **`maybeScaffoldMinimalUiKit`**으로 `components/ui` 갭 필(비 LLM)을 **먼저** 시도하고, 새 파일이 생기면 그 라운드에서는 LLM 자동 수정을 건너뛴 뒤 재스모크합니다. 그다음 필요 시 코딩 모델로 `write_code` 자동 수정을 시도합니다(기본 최대 5회, 환경 변수 `DEV_QA_MAX_REPAIR_ROUNDS`로 1–12 조정). 스모크가 통과할 때까지(또는 상한 초과 시 실행 실패)입니다.
 - 이어서 `verify_final_output`, `screenshot_page`·`check_responsive`, `metadata.qaSignoff`까지 같은 흐름에서 기록합니다. 따라서 Test 칸반에 도착했을 때 검수 완료 탭에 데이터가 채워져 있는 것이 정상입니다.
 - 수동 **「Verify & Request PR」**(`verify()`)은 PR/Git 자동화용으로 그대로 두며, Dev 종료 파이프라인과 겹치면 메타·캡처를 다시 갱신할 수 있습니다.
 
@@ -89,13 +89,20 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 
 - 대상 저장소별로 더 넓게 파악할 항목(버전·CSR/SSR·라우팅 등)은 `docs/target-workspace-environment.md` 체크리스트를 참고(문서화 + 자동 프로파일 보완).
 - `ProjectProfiler.getContextString()`에 `[STACK_RULES]` 블록을 포함: 먼저 `lib/stack-rules/universal.md`(공통), 이어 스택별 `.md`를 주입한다. 각 팩은 스킬 문서와 같이 YAML 메타 + **Inputs / Outputs / Instructions / MUST NOT / Use Cases**로 정리된다. `getStackSummary()`에 적용 파일명 요약이 포함되며, 명확화용 스니펫 상한은 `lib/pre-execution/task-context.ts`의 `MAX_SNIPPET`으로 조정한다.
-- 동일 블록에 **`## UI_COMPONENT_POLICY`** 를 주입한다. `components/ui`(또는 `src/components/ui`)에 실제 `.ts/.tsx`가 스캔되면 **USE_EXISTING**, 없으면 **ABSENT**로 시작해 `@/components/ui/*` import를 금지·허용을 명시한다. Next/React 대상 저장소는 `execute()` 직후(피처 브랜치 체크아웃 뒤) `lib/project-ui-kit.ts`가 최소 `button`/`input`/`label`과 배럴용 `index.ts` 재export를 자동 생성할 수 있으며(환경변수 `BASALT_AUTO_SCAFFOLD_UI=0`으로 끔), 생성 내역은 `metadata.uiKitScaffold`에 남긴다. **USE_EXISTING**일 때는 Known basenames 밖의 `@/components/ui/<name>` import를 금지한다는 **FORBIDDEN** 문구와, 최소 스캐폴드(버튼·입력·라벨만)일 때 **minimal kit** 경고를 추가한다.
+- 동일 블록에 **`## UI_COMPONENT_POLICY`** 를 주입한다. `components/ui`(또는 `src/components/ui`)에 실제 `.ts/.tsx`가 스캔되면 **USE_EXISTING**, 없으면 **ABSENT**로 시작해 `@/components/ui/*` import를 금지·허용을 명시한다. Next/React 대상 저장소는 `execute()` 직후(피처 브랜치 체크아웃 뒤) `lib/project-ui-kit.ts`가 최소 `button`/`input`/`label`과 배럴용 `index.ts` 재export를 자동 생성할 수 있으며(환경변수 `BASALT_AUTO_SCAFFOLD_UI=0`으로 끔), 생성 내역은 `metadata.uiKitScaffold`에 남긴다. 스캐폴드 **물리 경로**는 `lib/tsconfig-paths.ts`가 `tsconfig.json`·`jsconfig.json` 등에서 병합한 **`paths["@/*"]`** 로 `@/components/ui`가 실제로 가리키는 위치(예: 루트 `components/ui` vs `src/components/ui`)와 맞춘다. **`src/app`만 있고 루트에 `app/`이 없는데 `@/*`가 `./*`만 가리키는** 잘못된 템플릿은 선택적으로 `BASALT_ALIGN_NEXT_PATH_ALIAS=1`일 때 `tsconfig.json`의 `@/*`를 `./src/*`로 보정할 수 있다. **USE_EXISTING**일 때는 Known basenames 밖의 `@/components/ui/<name>` import를 금지한다는 **FORBIDDEN** 문구와, 최소 스캐폴드(버튼·입력·라벨만)일 때 **minimal kit** 경고를 추가한다.
 - `write_code` 한 스텝에서 여러 파일이 나올 때 `Orchestrator`가 **`components/ui/*` 경로를 먼저** 디스크에 쓴 뒤 페이지 등을 쓰도록 정렬해, 같은 배치 안에서 새 UI 파일을 import해도 검증이 통과되게 한다. `@/components/ui/*` 화이트리스트 위반(`UI_IMPORT_NOT_ON_DISK`, `UI_BARREL_INVALID`)이면 미설치 npm 오류가 아닌 한 **짧은 LLM repair**(`write_code_ui_import_repair`)로 해당 파일만 시맨틱 HTML 위주로 고친 뒤 `write_code`를 최대 2회 재시도한다(구현: `lib/agents/Orchestrator.ts`, 검증 메타: `lib/skills/index.ts`의 `validateImportsExistence`).
 - `enhance-prompt` API가 대상 프로젝트의 `package.json`을 실제로 분석하여 제약 조건을 동적으로 생성
 - `CreateTaskModal`에서 `selectedProjectId`를 `enhance-prompt`에 전달
 - 서버 측에서 `ProjectProfiler.getStackSummary()`를 호출하여 프레임워크, 언어, 스타일링, UI 라이브러리, 라우터 구조, 전체 설치 패키지 목록을 한국어로 요약
 - `projectId`가 없는 경우 기존 범용 프롬프트로 폴백하여 하위 호환성 유지
 - 적용 파일: `components/CreateTaskModal.tsx`, `app/api/agent/enhance-prompt/route.ts`, `lib/profiler.ts`
+
+### 11b) 대상 앱이 Next.js App Router일 때 (코드 생성 가이드 요약)
+
+- **시스템 프롬프트**: [`lib/llm.ts`](../lib/llm.ts)의 `CODE_GENERATION_SYSTEM_RULES` — `metadata`/`generateMetadata`/`viewport` 서버 전용, `"use client"` 분리, `metadataBase`, Next 15+ `params`/`searchParams` 등. 요약 문서는 [`llm.md`](./llm.md).
+- **프로젝트 컨텍스트**: [`lib/profiler.ts`](../lib/profiler.ts) `getContextString()` — Next app-router 시 metadata·Link·(15+) params 힌트.
+- **스택 규칙 팩**: [`lib/stack-rules/next-app-router.md`](../lib/stack-rules/next-app-router.md) — layout/template/loading/error, MUST NOT 등.
+- **Cursor 저장소 스킬**(에이전트 참고용): [`.cursor/skills/nextjs-app-router-imports/SKILL.md`](../.cursor/skills/nextjs-app-router-imports/SKILL.md) — import 경로, Link, Metadata/RSC, Proxy(구 middleware), 캐시·env 링크 등. 상세는 해당 파일·본 문서 §5b·[`llm.md`](./llm.md)와 교차 참조.
 
 ## 12) 미설치 패키지 import 방어 (4중 방어 체계)
 

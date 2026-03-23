@@ -48,6 +48,12 @@ MOCK_LLM=false
 
 # 대상 프로젝트에 components/ui 가 없을 때(스캔 기준) Next/React 에서 최소 button·input·label 자동 생성 (기본: 켜짐). 끄려면:
 # BASALT_AUTO_SCAFFOLD_UI=0
+
+# 태스크당 LLM 토큰 상한의 절대 상한(동적 예산은 그 아래로 계산). 기본 약 400만. 0 또는 unlimited 는 사실상 무제한에 가깝게 취급.
+# BASALT_MAX_TOKENS_PER_TASK_CEILING=4000000
+
+# Next: src/app 만 있고 루트 app/ 이 없는데 tsconfig 의 @/* 가 ./* 만 가리키는 경우에만, tsconfig.json 의 paths 를 ./src/* 로 맞춤 (선택).
+# BASALT_ALIGN_NEXT_PATH_ALIAS=1
 ```
 
 대상 프로젝트 루트에 Basalt가 QA PNG를 쓸 때 `.basalt/basalt-qa/<taskId>/`가 생깁니다. 해당 레포를 Git에 올리지 않으려면 그 프로젝트의 `.gitignore`에 `.basalt/`를 추가하세요.

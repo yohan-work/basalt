@@ -20,6 +20,9 @@
 # production
 /build
 
+# Basalt QA captures under target repos (optional)
+.basalt/
+
 # misc
 .DS_Store
 *.pem
@@ -40,3 +43,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .cursor/plans
+docs/criteria.md
+docs/templates/new-agent-AGENT.md

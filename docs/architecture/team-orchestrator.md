@@ -36,6 +36,11 @@
 3. 에이전트 상태와 에러/성공을 실시간으로 board에 반영합니다.
 4. 회차 종료 시 `metadata.roundSummaries` 및 `metadata.teamExecutionMetrics`를 갱신합니다.
 
+## 토큰 예산
+
+- 단일 태스크 `Orchestrator`와 동일하게 `lib/orchestration/policy.ts`의 **`resolveExecutionTokenCap`**을 사용한다. 팀 보드의 태스크 수 등으로부터 **`syntheticStepCount`**를 두어 워크플로 스텝 수와 유사하게 동적 상한을 계산하고, `metadata.budgetPolicy`·`BASALT_MAX_TOKENS_PER_TASK_CEILING` 규칙은 동일하다.
+- 구현: `lib/agents/TeamOrchestrator.ts`, `lib/orchestration/policy.ts`.
+
 ## 협업 지표
 
 - `metadata.collaboration`: 에이전트 간 기여/전달 그래프

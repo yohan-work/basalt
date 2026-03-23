@@ -36,7 +36,10 @@ Basalt의 LLM 호출은 `lib/llm.ts`에서 공통 처리됩니다.
 ## App Router 가드
 
 - Next.js 훅/컴포넌트 규칙을 위반하지 않도록 `use client` 프롬프트 규칙이 강화되어 있습니다.
-- SEO 필수 메타(`title`, `meta`) 및 라우팅 규칙 준수 체크를 함께 수행합니다.
+- SEO: `export const metadata` / `generateMetadata`는 **서버 전용**; `"use client"` 파일과 동일 파일에 두지 않는다. 동일 세그먼트에서 static `metadata`와 `generateMetadata` 동시 export 금지. 상대 OG·canonical 등에는 루트 `metadataBase` 또는 절대 URL.
+- `viewport` / `themeColor` / `colorScheme`는 `metadata`에 넣지 않고 `export const viewport` / `generateViewport` 사용.
+- Next.js 15+ 에서는 `params`·`searchParams`가 **Promise**인 경우가 많음 — `await` 후 사용(프로젝트의 `next` 메이저는 `[PROJECT CONTEXT]`에서 확인).
+- 내부 링크는 `next/link`·Link 안에 `<a>` 중첩 금지 등 — 전체 목록은 [`features.md`](./features.md) §11b·[`.cursor/skills/nextjs-app-router-imports/SKILL.md`](../.cursor/skills/nextjs-app-router-imports/SKILL.md) 참고.
 
 ## 동적 라우팅
 

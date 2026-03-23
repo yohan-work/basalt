@@ -10,12 +10,12 @@
 | 문서 | 내용 |
 |------|------|
 | [docs/README.md](docs/README.md) | 전체 문서 인덱스 |
-| [docs/architecture/orchestrator.md](docs/architecture/orchestrator.md) | Orchestrator 동작, 상태 흐름, 잠금, 메타데이터 |
-| [docs/architecture/team-orchestrator.md](docs/architecture/team-orchestrator.md) | 팀 오케스트레이션, 라운드, handoff |
-| [docs/llm.md](docs/llm.md) | LLM 모델 구성, backoff, 스트리밍, 파서 안정화 |
+| [docs/architecture/orchestrator.md](docs/architecture/orchestrator.md) | Orchestrator 동작, 동적 토큰 예산, Dev 종료 QA, 잠금, 메타데이터 |
+| [docs/architecture/team-orchestrator.md](docs/architecture/team-orchestrator.md) | 팀 오케스트레이션, 라운드, handoff, 토큰 예산 |
+| [docs/llm.md](docs/llm.md) | LLM 모델 구성, App Router 가드, backoff, 스트리밍 |
 | [docs/agents-skills.md](docs/agents-skills.md) | 에이전트·스킬 정의, 동적 로더 |
 | [docs/api.md](docs/api.md) | 전체 API 엔드포인트 |
-| [docs/features.md](docs/features.md) | 기능별 상세 (TTS, 리뷰, react-grab 등) |
+| [docs/features.md](docs/features.md) | 기능별 상세 (QA, UI 스캐폴드, Next 가이드, TTS 등) |
 | [docs/ui-components.md](docs/ui-components.md) | UI/컴포넌트 카탈로그 |
 | [docs/setup.md](docs/setup.md) | 설치·실행·스크립트·운영 가이드 |
 | [docs/stack.md](docs/stack.md) | 기술 스택 요약 |

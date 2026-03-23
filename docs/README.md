@@ -14,18 +14,18 @@
 - `architecture/overview.md`  
   - 시스템 구성도·디렉터리 맵(루브릭 P6용 1페이지 요약)
 - `architecture/orchestrator.md`  
-  - Orchestrator/상태 흐름/재시도/잠금/메타데이터 저장 규칙
+  - Orchestrator/상태 흐름/동적 토큰 예산/Dev 종료 QA/재시도/잠금/메타데이터 저장 규칙
 - `architecture/team-orchestrator.md`  
-  - 팀 오케스트레이션 라운드, 메시지, handoff, 협업 지표
+  - 팀 오케스트레이션 라운드, 메시지, handoff, 협업 지표, 토큰 예산
 - `llm.md`  
-  - 모델 구성, backoff, timeout, 스트리밍, 파서 안정화
+  - 모델 구성, App Router 가드, backoff, timeout, 스트리밍, 파서 안정화
 
 ### 실행 기능
 
 - `implementation-history.md`  
   - 누적 구현·개선 작업 요약(게이트, QA, 스택 규칙, UI 정책·import 복구 등) 및 상세 문서 링크
 - `features.md`  
-  - 완료 수정, 요소 수정, 리뷰 제안, approve, discuss, enhance-prompt, react-grab 연동, TTS, 실행 시각화, 동적 기술 스택 분석, 미설치 패키지 방어
+  - 완료 수정, QA·Dev 종료 파이프라인, UI 스캐폴드·별칭, Next 코드 생성 가이드, 리뷰, discuss, enhance-prompt, TTS, 동적 스택 분석, 미설치 패키지 방어 등
 - `api.md`  
   - `/app/api/**/route.ts` 기준 전체 엔드포인트 목록 및 사용 사례
 - `agents-skills.md`  
@@ -57,6 +57,10 @@
 - `target-workspace-environment.md`  
   - **대상 앱** 워크스페이스 스택·버전·구조 파악 체크리스트, 자동 프로파일링과 문서화의 역할 분담
 
+### Cursor 프로젝트 스킬 (저장소 루트)
+
+- `.cursor/skills/<이름>/SKILL.md` — Cursor 에이전트용 저장소별 가이드(예: Next App Router import·metadata·Proxy). 상세는 각 파일·[`features.md`](./features.md) §11b와 교차 참조.
+
 ## 유지 규칙
 
 - 기능별 내용은 해당 문서에서만 편집하고, `README.md`에는 변경이 잦지 않은 핵심 요약만 유지합니다.
@@ -64,5 +68,6 @@
   1. `features.md` 또는 `api.md`
   2. 동작 주체 문서(`architecture/*`, `agents-skills.md`)
   3. UI 변경 문서(`ui-components.md`)
-  4. `README.md`의 링크/요약 갱신
+  4. 루트 `README.md`의 문서 표 링크/요약 갱신
   5. (선택) 교차 참조용 한 페이지 요약은 `implementation-history.md`에 bullet + 링크만 추가
+  6. Cursor 전용 안내가 있으면 `.cursor/skills/` 해당 `SKILL.md`와 `features.md`에 한 줄씩 연결
