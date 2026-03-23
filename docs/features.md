@@ -122,6 +122,12 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - **`scan_project`**(`lib/skills/index.ts`)는 스텁이 아니라 **`ProjectProfiler.getProfileData()`** 등과 동일 신호로 구조·의존성·`routerBase`·설정 파일·디렉터리 샘플 등을 JSON에 담아 반환합니다. 상세는 `lib/skills/scan_project/SKILL.md`.
 - 플랜 단계의 스택 출처 요약은 [`agents-skills.md`](./agents-skills.md)를 참고합니다.
 
+### 11f) Request Work 스타일·QA 스모크·더미 이미지 (요약)
+
+- **실행용 디자인**: `style-architect`와 `apply_design_system` / `generate_scss`는 **태스크 워크스페이스** 기준으로 동작한다. `ProjectProfiler`가 **DESIGN HINTS**(globals·tailwind 발췌)를 컨텍스트에 넣고, `apply_design_system`은 LLM + `write_code`로 단일 파일을 정렬한다. 상세·파일 목록은 [`implementation-history.md`](./implementation-history.md).
+- **Dev 종료 QA 스모크**: `lib/qa/page-smoke-check.ts`에서 HTML `<script>` 등을 제거한 뒤 오류 신호를 스캔하고, 번들 문자열 오탐을 줄이기 위해 신호 목록을 조정했다. Orchestrator `runDevExitQaPipeline`과 연동.
+- **더미 이미지 URL**: 코드 생성·`write_code`·`next-app-router` 스택 규칙에 **dummyimage.com** 패턴(치수만 변경)을 ZERO TOLERANCE에 가깝게 명시. 랜딩·`/features` 등에서 스톡 CDN 대신 사용.
+
 ## 12) 미설치 패키지 import 방어 (4중 방어 체계)
 
 LLM이 프로젝트에 설치되지 않은 npm 패키지(예: `axios`, `lodash`)를 import하는 코드를 생성하여 `Module not found` 빌드 에러가 발생하는 문제를 근본적으로 차단합니다.

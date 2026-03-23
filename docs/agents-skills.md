@@ -74,6 +74,7 @@
 - 품질/검증: `lint_code`, `typecheck`, `verify_final_output`
 - 협업/의사결정: `consult_agents`, `analyze_error_logs`
 - 운영/도구: `run_shell_command`, `manage_git`, `scan_project`, `find_similar_components`, `check_responsive`
+- 스타일(대상 워크스페이스): `apply_design_system`, `generate_scss` — `lib/skills/index.ts`에 구현되어 있으며, 오케스트레이터가 `read_codebase`와 같이 **마지막 인자로 `projectPath`**를 붙인다. Basalt 앱 테마가 아니라 **태스크에 연결된 저장소**의 토큰·스택에 맞춘다. `ProjectProfiler`의 **DESIGN HINTS**·역할 문서는 `lib/agents/style-architect/AGENT.md` 및 각 `SKILL.md`. 누적 요약은 [`implementation-history.md`](./implementation-history.md).
 
 ## 점진적 로딩
 
