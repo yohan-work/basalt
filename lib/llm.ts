@@ -222,6 +222,11 @@ MANDATORY CODING RULES:
     - NO classnames/clsx → use template literals (unless clsx IS installed)
     - NO qs → use \`URLSearchParams\`
   - Violating this rule causes a FATAL "Module not found" build error that crashes the entire application.
+- 🚨 PLACEHOLDER / DEMO IMAGE URLS (ZERO TOLERANCE) 🚨:
+  - If you output **any hard-coded http(s) URL** that loads a **raster image** for UI (hero, feature grid, cards, gallery, avatar mock, OG preview mock, etc.) and the **task text does not paste an exact URL** the user provided, you MUST use **only** \`https://dummyimage.com/<W>x<H>/000/fff\`. Change **only** \`<W>\` and \`<H>\` (e.g. \`https://dummyimage.com/1200x630/000/fff\` for hero, \`400x300\` for thumbnails). Keep \`/000/fff\` unless the user explicitly requests different hex colors.
+  - This applies to **landing pages, marketing pages, /features, and any “nice” stock-looking image** — not only when the word “placeholder” appears.
+  - **FORBIDDEN** for those cases: \`unsplash.com\`, \`images.unsplash.com\`, \`picsum.photos\`, \`via.placeholder.com\`, \`placehold.co\`, \`loremflickr\`, \`pexels.com\`, \`pixabay.com\`, or other stock/CDN URLs you invent.
+  - Prefer plain \`<img src="https://dummyimage.com/...">\` so \`next/image\` does not require \`remotePatterns\` for dummy hosts.
 - Use shadcn/ui components from @/components/ui/ ONLY IF they are explicitly listed as available in the [PROJECT CONTEXT] (Button, Input, etc.).
 - Use Tailwind CSS for layout and spacing ONLY IF "Tailwind CSS IS installed" is explicitly mentioned in the [PROJECT CONTEXT].
 - If Tailwind is NOT present, DO NOT use tailwind classes (e.g., no "flex", "grid", "gap-4", "p-4"). Use standard CSS or inline styles.
@@ -279,8 +284,8 @@ MANDATORY CODING RULES:
   - **Data Fetching**: NEVER use \`getServerSideProps\` or \`getStaticProps\` (Page Router legacy). In App Router, use standard \`async/await\` in Server Components, or \`fetch\` inside \`useEffect\` in Client Components.
   - **Fetch API (JSON Parsing Error Prevention)**: When using \`fetch()\` to get JSON data, **ALWAYS** check \`response.ok\` and ensure the Content-Type is \`application/json\` BEFORE calling \`await response.json()\`. Otherwise, fetching a 404 endpoint will return Next.js HTML error pages, causing a fatal \`Unexpected token '<', "<!DOCTYPE "... is not valid JSON\` runtime crash.
 - **NEXT.JS IMAGE COMPONENTS**:
-  - If you need to use placeholder images from external URLs (e.g., \`via.placeholder.com\`, \`unsplash.com\`), **DO NOT** use the Next.js \`<Image>\` component (\`next/image\`) without configuring the hostname. Prefer \`next.config\` \`images.remotePatterns\` (see next-image-unconfigured-host) or use a plain \`<img>\` for throwaway placeholders.
-  - **Dummy / placeholder images (fixed host)**: When the task calls for a generic placeholder bitmap URL, use **only** \`https://dummyimage.com/<width>x<height>/000/fff\` (example: \`https://dummyimage.com/600x600/000/fff\`). **Change only the numeric \`<width>\` and \`<height>\`**; keep the path shape \`/000/fff\` unless the user explicitly asks for different background/foreground hex colors. Do not hop to other placeholder services for routine dummies.
+  - Follow **PLACEHOLDER / DEMO IMAGE URLS (ZERO TOLERANCE)** above for any non-user-supplied image URL.
+  - If you use \`next/image\` for a remote host, it MUST be listed in \`next.config\` \`images.remotePatterns\`. **dummyimage.com** is usually easier with \`<img>\` to avoid config (see next-image-unconfigured-host).
 - **HYDRATION**: Do not render different HTML on server vs first client paint (random IDs, \`Date.now()\` in markup, browser-only APIs in the render path). See react-hydration-error docs.
 - **SERVER ACTIONS**: Follow App Router server action rules — async functions, correct \`"use server"\` module/file placement, serializable arguments only.
 - **ROUTE HANDLERS**: In \`app/.../route.ts\`, export the HTTP methods you need; respect Edge vs Node runtime limits for APIs you import.
