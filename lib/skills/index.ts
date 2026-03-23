@@ -33,6 +33,20 @@ const HOOK_USAGE_RE = new RegExp(`\\b(?:${REACT_HOOK_NAMES.join('|')})\\s*\\(`);
 const REACT_NAMESPACE_HOOK_USAGE_RE = new RegExp(`\\b(?:React|[A-Za-z_$][\\w$]*)\\.\\s*(?:${REACT_HOOK_NAMES.join('|')})\\s*\\(`);
 const APP_METADATA_IMPORT_RE = /from\s+(['"])(@\/app\/metadata(?:\.(?:t|j)sx?)?)(\1)/g;
 
+/** `app/page.tsx` / `src/app/page.tsx` (root segment) */
+const APP_ROUTER_ROOT_PAGE_LAYOUT_RE =
+    /^(?:src\/)?app\/(page|layout)\.(tsx|jsx|ts|js)$/i;
+/** `app/foo/page.tsx`, `src/app/a/b/layout.tsx` */
+const APP_ROUTER_NESTED_PAGE_LAYOUT_RE =
+    /^(?:src\/)?app\/.+\/(page|layout)\.(tsx|jsx|ts|js)$/i;
+
+/** Server-only exports for App Router (must not combine with `"use client"`). */
+const SERVER_ONLY_APP_ROUTER_EXPORT_RE =
+    /export\s+(?:const\s+metadata\b|async\s+function\s+generateMetadata\b|function\s+generateMetadata\b|const\s+viewport\b|async\s+function\s+generateViewport\b|function\s+generateViewport\b)/;
+
+const GENERATE_METADATA_DOC =
+    'https://nextjs.org/docs/app/api-reference/functions/generate-metadata#why-generatemetadata-is-server-component-only';
+
 const MAX_IMPORT_VALIDATION_UI_HINT = 12;
 const IMPORT_VALIDATION_FILE_SUFFIXES = ['.ts', '.tsx', '.js', '.jsx', '.d.ts', '.mjs', '.cjs', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
 
@@ -469,6 +483,80 @@ function hasHookUsageForBoundary(content: string): boolean {
     return HOOK_USAGE_RE.test(cleaned) || REACT_NAMESPACE_HOOK_USAGE_RE.test(cleaned);
 }
 
+function isAppRouterPageOrLayoutFile(relativePath: string): boolean {
+    const n = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    return APP_ROUTER_ROOT_PAGE_LAYOUT_RE.test(n) || APP_ROUTER_NESTED_PAGE_LAYOUT_RE.test(n);
+}
+
+function hasServerOnlyAppRouterExports(content: string): boolean {
+    const cleaned = stripCommentsAndStringsForHookScan(content);
+    return SERVER_ONLY_APP_ROUTER_EXPORT_RE.test(cleaned);
+}
+
+/** First non-comment line is `"use client"` (Next.js: only comments may precede it). */
+function fileLeadsWithUseClientDirective(content: string): boolean {
+    const lines = content.split('\n');
+    let inBlock = false;
+    for (const line of lines) {
+        let t = line.trim();
+        if (!t) continue;
+
+        if (inBlock) {
+            if (t.includes('*/')) {
+                inBlock = false;
+                const after = t.split('*/').slice(1).join('*/').trim();
+                if (!after) continue;
+                t = after;
+            } else {
+                continue;
+            }
+        }
+
+        if (t.startsWith('/*')) {
+            if (!t.includes('*/')) inBlock = true;
+            continue;
+        }
+        if (t.startsWith('//')) continue;
+
+        return CLIENT_DIRECTIVE_RE.test(t);
+    }
+    return false;
+}
+
+/**
+ * Block `metadata` / `generateMetadata` / `viewport` with `"use client"` or with hooks but no client split.
+ */
+function validateAppRouterServerExportClientBoundary(
+    relativePath: string,
+    content: string
+): { valid: true } | { valid: false; message: string } {
+    if (!isAppRouterPageOrLayoutFile(relativePath)) return { valid: true };
+    if (!hasServerOnlyAppRouterExports(content)) return { valid: true };
+
+    const hasUse = fileLeadsWithUseClientDirective(content);
+    const hooks = hasHookUsageForBoundary(content);
+
+    if (hasUse) {
+        return {
+            valid: false,
+            message:
+                `Next.js App Router: cannot export metadata/generateMetadata/viewport in a file with "use client". ` +
+                `Keep ${path.basename(relativePath)} as a Server Component and move interactive logic to a separate file ` +
+                `(e.g. components/*Client.tsx with "use client" only there). Docs: ${GENERATE_METADATA_DOC}`,
+        };
+    }
+    if (hooks) {
+        return {
+            valid: false,
+            message:
+                `Next.js App Router: this file exports server-only metadata/viewport but uses React hooks. ` +
+                `Keep SEO exports in the server page/layout and move hooks to a separate *Client.tsx with "use client". ` +
+                `Docs: ${GENERATE_METADATA_DOC}`,
+        };
+    }
+    return { valid: true };
+}
+
 function getFirstNonEmptyCodeLine(content: string): string | null {
     const lines = content.split('\n');
     let inBlockComment = false;
@@ -537,6 +625,10 @@ function ensureClientDirectiveForReactHooks(filePath: string, rawContent: string
     }
 
     if (!hasHookUsageForBoundary(rawContent)) {
+        return rawContent;
+    }
+
+    if (isAppRouterPageOrLayoutFile(normalizedPath) && hasServerOnlyAppRouterExports(rawContent)) {
         return rawContent;
     }
 
@@ -724,8 +816,29 @@ export async function write_code(filePath: string, content: string, baseDir: str
         const relativePath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
         const fullPath = path.resolve(baseDir, relativePath);
         const dir = path.dirname(fullPath);
+
+        const boundaryRaw = validateAppRouterServerExportClientBoundary(relativePath, content);
+        if (!boundaryRaw.valid) {
+            return {
+                success: false,
+                message: boundaryRaw.message,
+                filePath,
+                rscBoundaryViolation: true,
+            };
+        }
+
         const withClientDirective = ensureClientDirectiveForReactHooks(filePath, content);
         const sanitizedContent = sanitizeMetadataImportAliases(withClientDirective, relativePath, baseDir);
+
+        const boundaryFinal = validateAppRouterServerExportClientBoundary(relativePath, sanitizedContent);
+        if (!boundaryFinal.valid) {
+            return {
+                success: false,
+                message: boundaryFinal.message,
+                filePath,
+                rscBoundaryViolation: true,
+            };
+        }
 
         const importValidation = await validateImportsExistence(sanitizedContent, relativePath, baseDir);
         if (!importValidation.valid) {
@@ -989,8 +1102,149 @@ export async function typecheck(projectPath: string = process.cwd(), configPath:
     }
 }
 
+function collectExistingConfigFiles(projectRoot: string): string[] {
+    const out: string[] = [];
+    let names: string[] = [];
+    try {
+        names = fs.readdirSync(projectRoot);
+    } catch {
+        return out;
+    }
+    for (const n of names) {
+        let st: fs.Stats;
+        try {
+            st = fs.statSync(path.join(projectRoot, n));
+        } catch {
+            continue;
+        }
+        if (!st.isFile()) continue;
+        if (
+            /^(package\.json|tsconfig|jsconfig|postcss\.config|vite\.config|\.eslintrc)/i.test(n) ||
+            n.startsWith('next.config.') ||
+            n.startsWith('tailwind.config.') ||
+            n.startsWith('eslint.config.')
+        ) {
+            out.push(n);
+        }
+    }
+    return out.sort();
+}
+
+/** Relative directory paths under projectRoot up to `maxDepth` segments (skips dot dirs and node_modules). */
+function listDirectoryTreeSample(projectRoot: string, maxDepth: number, maxEntries: number): string[] {
+    const results: string[] = [];
+    function walk(dir: string, rel: string) {
+        if (results.length >= maxEntries) return;
+        const segments = rel ? rel.split('/').length : 0;
+        if (segments > maxDepth) return;
+        let entries: fs.Dirent[];
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        for (const e of entries) {
+            if (results.length >= maxEntries) return;
+            if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules') continue;
+            const r = rel ? `${rel}/${e.name}` : e.name;
+            results.push(r);
+            walk(path.join(dir, e.name), r);
+        }
+    }
+    walk(projectRoot, '');
+    return results.sort();
+}
+
+function guessStylePaths(projectRoot: string, hasTailwind: boolean): string[] {
+    const paths: string[] = [];
+    const candidates = [
+        'app/globals.css',
+        'src/app/globals.css',
+        'styles/globals.css',
+        'src/styles/globals.css',
+        'app/global.css',
+        'src/app/global.css',
+    ];
+    for (const c of candidates) {
+        if (fs.existsSync(path.join(projectRoot, c))) paths.push(c);
+    }
+    if (hasTailwind) {
+        for (const n of ['tailwind.config.ts', 'tailwind.config.js']) {
+            if (fs.existsSync(path.join(projectRoot, n))) paths.push(n);
+        }
+    }
+    return paths;
+}
+
+function guessRouterEntryFiles(projectRoot: string, routerBase: string | null, structure: string): string[] {
+    const eps: string[] = [];
+    if (!routerBase) return eps;
+    const base = path.join(projectRoot, routerBase);
+    if (!fs.existsSync(base)) return eps;
+
+    if (structure.includes('app-router')) {
+        for (const f of ['page.tsx', 'page.ts', 'page.jsx', 'page.js']) {
+            const p = path.join(base, f);
+            if (fs.existsSync(p)) eps.push(`${routerBase}/${f}`);
+        }
+    } else if (structure.includes('pages-router')) {
+        for (const f of ['index.tsx', 'index.ts', 'index.jsx', 'index.js']) {
+            const p = path.join(base, f);
+            if (fs.existsSync(p)) eps.push(`${routerBase}/${f}`);
+        }
+    }
+    return eps;
+}
+
+/**
+ * Structured project scan — uses {@link ProjectProfiler} (same signals as planning `codebaseContext`).
+ */
 export async function scan_project(projectPath: string = process.cwd(), depth: number = 3) {
-    return { techStack: "unknown", message: "scan_project not fully implemented yet." };
+    const root = path.resolve(projectPath);
+    const profiler = new ProjectProfiler(root);
+    const data = await profiler.getProfileData();
+    let stackSummaryKr = '';
+    try {
+        stackSummaryKr = await profiler.getStackSummary();
+    } catch {
+        stackSummaryKr = '';
+    }
+
+    const maxDepth = Math.max(1, Math.min(6, Number(depth) || 3));
+    const directoryTreeSample = listDirectoryTreeSample(root, maxDepth, 180);
+
+    const componentPaths: string[] = [];
+    if (data.uiKitRelativePath) componentPaths.push(data.uiKitRelativePath);
+    for (const rel of ['components', 'src/components']) {
+        if (componentPaths.includes(rel)) continue;
+        const p = path.join(root, rel);
+        try {
+            if (fs.existsSync(p) && fs.statSync(p).isDirectory()) componentPaths.push(rel);
+        } catch {
+            /* skip */
+        }
+    }
+
+    const entryPoints = guessRouterEntryFiles(root, data.routerBase, data.structure);
+    if (fs.existsSync(path.join(root, 'package.json'))) entryPoints.push('package.json');
+
+    return {
+        techStack: data.techStack,
+        structure: data.structure,
+        routerBase: data.routerBase,
+        routerDualRoot: data.routerDualRoot ?? false,
+        routerResolutionNote: data.routerResolutionNote ?? null,
+        pageCandidates: data.pageCandidates,
+        entryPoints,
+        configFiles: collectExistingConfigFiles(root),
+        dependencies: data.dependencies,
+        depsWithVersions: data.depsWithVersions,
+        componentPaths,
+        stylePaths: guessStylePaths(root, data.hasTailwind),
+        directoryTreeSample,
+        stackSummaryKr: stackSummaryKr.slice(0, 4000),
+        scannedAt: new Date().toISOString(),
+    };
 }
 
 export async function extract_patterns(projectPath: string = process.cwd(), fileTypes: string[] = ['.tsx', '.ts', '.jsx', '.js']) {

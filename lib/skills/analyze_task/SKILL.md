@@ -31,6 +31,20 @@ IMPORTANT: Provide all analysis summaries and reasoning in KOREAN.
 | `USE_EXISTING` | `components/ui`(또는 `src/components/ui`)에 실제 파일이 있다. 요약에 나온 컴포넌트만 가정하고, 없는 이름은 제안하지 않는다. |
 | `ABSENT` | 로컬 UI 키트가 없다. shadcn 경로 import를 전제로 한 요약을 하지 말 것. 폼·버튼이 필요하면 (1) 시맨틱 HTML 위주, 또는 (2) 워크플로 초반에 `write_code`로 primitives 추가, 또는 (3) React/Next면 실행 시 자동 생성(`metadata.uiKitScaffold`) 가능성을 열어 둔다. |
 
+### 저장소 전제 체크리스트 (UI 정책과 동등한 우선순위 — codebaseContext 필수)
+`codebaseContext`의 `[PROJECT CONTEXT]`에서 아래를 **반드시** 확인하고, `summary`에 반영한다(해당 없으면 “저장소 컨텍스트 없음” 등으로 명시).
+
+| 항목 | 확인 내용 |
+|------|-----------|
+| **Tech Stack** | 프레임워크·런타임 표기(예: Next.js 버전 범위). |
+| **Router Type / Router Base** | App Router vs Pages Router, 실제 경로 접두사(`app` vs `src/app`, `pages` vs `src/pages`). 루트 `app/`만 당연하다고 가정하지 말 것. |
+| **Route Policy Hint** | 비루트 라우트 예시·후보 경로. |
+| **INSTALLED PACKAGES** | `package.json`에 없는 npm 패키지를 전제로 한 구현·요약 금지. |
+| **`[WARNING] Router root`** | 루트 `app/`와 `src/app/` 등 이중 존재 시 경고 문구 — 한쪽 트리만 쓴다고 가정하지 말 것. |
+| **`[STACK_RULES]`** | 스택별 필수/금지 규칙 요약. |
+
+요약(`summary`)에서 경로·스택 가정이 틀리면(예: 실제는 `src/app`인데 `app/`만 언급) 구현 단계에서 빌드·QA가 깨질 수 있음을 인지하고 교정한다.
+
 ### 역할 선택 치트시트 (required_agents)
 아래는 **Available Agents** 목록의 **role 슬러그**를 고를 때의 가이드입니다. 요청에 해당 주제가 있으면 반드시 포함하세요. 복수 역할이 필요하면 배열에 모두 넣습니다.
 

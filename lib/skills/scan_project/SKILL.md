@@ -7,19 +7,22 @@ description: Scans a project directory to analyze its structure, tech stack, and
 
 Performs a comprehensive analysis of a project directory to understand its structure, technology stack, and important files.
 
+**Implementation (Basalt):** `lib/skills/index.ts`의 `scan_project`는 내부적으로 `ProjectProfiler` / `inferStackProfile`과 동일한 신호를 사용한다(플랜 단계 `codebaseContext`와 정합). 반환 객체에 `routerBase`, `depsWithVersions`, `directoryTreeSample` 등이 포함될 수 있다.
+
 ## Inputs
 -   `projectPath`: The root path of the project to scan.
 -   `depth`: Maximum directory depth to scan (default: 3).
 
 ## Outputs
--   A JSON object containing:
-    -   `techStack`: Detected technology stack (nextjs, react, node, etc.)
-    -   `structure`: Key directories and their purposes
-    -   `entryPoints`: Main entry files (index, app, main, etc.)
-    -   `configFiles`: Configuration files found (tsconfig, eslint, etc.)
-    -   `dependencies`: Key dependencies from package.json
-    -   `componentPaths`: Paths where UI components are located
-    -   `stylePaths`: Paths for style files (css, scss, tailwind)
+-   A JSON object containing (실행 구현 기준):
+    -   `techStack`, `structure`, `routerBase`, `pageCandidates`, `routerDualRoot`, `routerResolutionNote`
+    -   `entryPoints`: 루트 라우트 후보(`package.json` 포함)
+    -   `configFiles`: 루트에 존재하는 설정 파일명
+    -   `dependencies`, `depsWithVersions`
+    -   `componentPaths`: UI 스캔 디렉터리 등
+    -   `stylePaths`: globals.css·tailwind 설정 등 추정 경로
+    -   `directoryTreeSample`: 깊이 제한된 디렉터리 트리 샘플
+    -   `stackSummaryKr`, `scannedAt`
 
 ## Instructions
 1.  Read the directory structure recursively up to the specified depth.

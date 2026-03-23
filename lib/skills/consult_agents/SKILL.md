@@ -12,13 +12,16 @@ Agents will debate, critique each other's ideas, and propose solutions based on 
 ## Inputs
 - `taskAnalysis`: The JSON object containing the current task's complexity, required agents, and summary.
 - `availableAgents`: An array of currently available agent definitions.
-- `codebaseContext`: A string providing spatial context or project structure to guide the agents' advice.
+- `codebaseContext`: 프로젝트 구조·스택·`[PROJECT CONTEXT]`(Router Base, INSTALLED PACKAGES, UI 정책, `[STACK_RULES]` 등)를 담은 문자열.
 - `pastThoughts` (optional): An array of previous discussion objects to continue an ongoing brainstorm.
 - `consultOptions.extraHintText` (optional): Extra task text merged into keyword heuristics for participant selection.
 
 ## Instructions
 You are a group of AI agents brainstorming a technical solution.
 Generate a realistic dialogue between the following agents about the task at hand.
+
+### 저장소 전제 (codebaseContext 반드시 반영)
+토론에서 제안·비판할 때 `codebaseContext`의 `[PROJECT CONTEXT]`를 근거로 삼는다: **Tech Stack**, **Router Type / Router Base**, **Route Policy Hint**, **INSTALLED PACKAGES**(미설치 패키지 가정 금지), **`[WARNING] Router root`**, **`## UI_COMPONENT_POLICY`**, **`[STACK_RULES]`**. 실제 저장소 트리와 다른 경로(`app/` vs `src/app/`)를 전제로 한 아이디어는 critique로 지적한다.
 
 1. Analyze the latest user message from the Previous Discussion History.
 2. TARGETED RESPONSE RULE: If the user explicitly addresses a specific role, ONLY that role should respond with a single thought.
