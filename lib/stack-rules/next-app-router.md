@@ -33,7 +33,7 @@ description: Next.js App Router — RSC 기본, use client, metadata, 라우팅 
 9. **Server Actions**: `'use server'` 위치·모듈 규칙을 공식 문서대로 따른다. 액션은 **async**이며 클라이언트로 전달 가능한 인자만 사용한다. 폼은 `action={...}` / `formAction` 패턴을 프로젝트와 맞춘다.
 10. **Route Handlers**: `app/.../route.ts`에서 필요한 HTTP 메서드만 `export`한다(`GET`, `POST`, …). Edge 런타임이면 Node 전용 API를 쓰지 않는다.
 11. **Hydration**: 서버가 보낸 HTML과 클라이언트 첫 렌더가 같아야 한다. 렌더 경로에서 `Date.now` / `Math.random` / 브라우저 전용 값으로 마크업이 달라지지 않게 한다.
-12. **next/image**: 외부 호스트는 `next.config`의 `images.remotePatterns`(또는 문서 권장 설정)에 등록하거나, 플레이스홀더는 `<img>`로 처리한다.
+12. **next/image**: 외부 호스트는 `next.config`의 `images.remotePatterns`(또는 문서 권장 설정)에 등록하거나, 플레이스홀더는 `<img>`로 처리한다. **더미 이미지 URL**이 필요하면 `https://dummyimage.com/<가로>x<세로>/000/fff` 만 사용하고, **가로·세로 픽셀 수만** 바꾼다(예: `https://dummyimage.com/600x600/000/fff`). 색상 슬롯(`/000/fff`)은 요청에 없으면 그대로 둔다.
 
 ## MUST NOT
 
