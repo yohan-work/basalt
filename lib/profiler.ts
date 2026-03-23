@@ -61,6 +61,8 @@ export class ProjectProfiler {
             structure,
             routerBase,
             pageCandidates,
+            routerDualRoot: stackProfile.routerDualRoot,
+            routerResolutionNote: stackProfile.routerResolutionNote ?? null,
             rootPageOverwriteAllowed: structure.includes('pages-router') || structure === 'unknown' ? true : false,
             hasTailwind,
             stackProfile,
@@ -376,6 +378,11 @@ export class ProjectProfiler {
                 ? '\n- Next.js `Link`: Do not nest `<a>` inside `<Link>` (invalid-new-link-with-extra-anchor). Put `className` and children on `<Link href="...">` directly unless using `legacyBehavior` per docs.'
                 : '';
 
+        const nextGuardrails =
+            data.stackProfile.primary === 'next' && data.structure.includes('app-router')
+                ? '\n- Next.js guardrails: **Hydration** — avoid non-deterministic values (`Date.now`, `Math.random`) in server-rendered HTML; **Image** — configure `images.remotePatterns` in `next.config` for external hosts or use `<img>`; **Server Actions** — only `async function` actions; place `"use server"` per docs; **Route Handlers** — export named functions for HTTP methods (`GET`, `POST`, …) from `route.ts`; **Env** — only `NEXT_PUBLIC_*` is exposed to the browser bundle.'
+                : '';
+
         const routePolicyHint = this.getRoutePolicyHint(data);
         const availableComponentNames = data.availableUIComponents.join(', ') || 'None found';
         const availableComponentFiles = data.availableUIComponentsByPath && data.availableUIComponentsByPath.length > 0
@@ -386,10 +393,15 @@ export class ProjectProfiler {
 
         const stackRules = loadStackRulesBlock(this.projectRoot, data.stackProfile);
 
+        const routerConflictWarning =
+            data.routerDualRoot && data.routerResolutionNote
+                ? `\n- [WARNING] Router root: ${data.routerResolutionNote}`
+                : '';
+
         return `
 [PROJECT CONTEXT]
 - Tech Stack: ${data.techStack}
-- Router Type: ${data.structure}${clientDirectiveInfo}${nextMetadataRscInfo}${nextLinkInfo}
+- Router Type: ${data.structure}${routerConflictWarning}${clientDirectiveInfo}${nextMetadataRscInfo}${nextLinkInfo}${nextGuardrails}
 - Styling: ${data.hasTailwind ? 'Tailwind CSS IS installed. Use Tailwind classes.' : 'Tailwind CSS IS NOT installed. Do NOT use tailwind classes. Use standard CSS or inline styles.'}${shadcnWarning}
 ${uiPolicySection}
 - UI Component Import Style: ${importStyleInfo}${barrelInfo}

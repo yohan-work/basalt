@@ -56,3 +56,26 @@ export function inferRoutePathFromFilePaths(filePaths: string[]): string | null 
     }
     return null;
 }
+
+/**
+ * When QA URL falls back to `/` because no `page.tsx` was inferable — e.g. only `app/.../index.tsx` in changes.
+ */
+export function buildQaRouteInferenceWarning(filePaths: string[]): string | undefined {
+    const normalized = filePaths.map((p) => normalizeFileKey(p || '')).filter(Boolean);
+    if (inferRoutePathFromFilePaths(normalized)) return undefined;
+
+    const hasAppIndex = normalized.some((p) => /^(?:src\/)?app\/.+\/index\.(tsx|ts|jsx|js)$/i.test(p));
+    const hasAppPage = normalized.some(
+        (p) =>
+            /^(?:src\/)?app\/.+\/page\.(tsx|ts|jsx|js|mdx)$/i.test(p) ||
+            /^(?:src\/)?app\/page\.(tsx|ts|jsx|js|mdx)$/i.test(p)
+    );
+    if (hasAppIndex && !hasAppPage) {
+        return (
+            'App Router에서는 세그먼트 URL이 `page.tsx`(또는 `page.js` 등)로만 정의됩니다. ' +
+            '변경 목록에 `.../index.tsx`만 있으면 라우트 URL을 추론할 수 없어 QA 스모크가 `/`(루트)만 열립니다. ' +
+            '해당 세그먼트에 `page.tsx`를 두거나, 이미 있다면 `fileChanges`에 그 경로가 포함되도록 하세요.'
+        );
+    }
+    return undefined;
+}

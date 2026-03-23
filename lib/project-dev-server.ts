@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { inferRoutePathFromFilePaths } from '@/lib/qa/infer-route-from-files';
+import { inferRoutePathFromFilePaths, buildQaRouteInferenceWarning } from '@/lib/qa/infer-route-from-files';
 
 const DEFAULT_PORTS: Record<string, number> = {
     next: 3001,
@@ -97,18 +97,14 @@ export function normalizeQaPathname(raw: unknown): string {
 type FileChangeLike = { filePath?: string } | string;
 
 /**
- * Full page URL for QA (smoke, screenshots, verify_final_output browser).
- *
- * 1) metadata.qaDevServerUrl with a non-root path → use that URL as-is (normalized).
- * 2) Else origin from resolveQaDevServerOrigin + metadata.qaDevServerPath (if set).
- * 3) Else origin + route inferred from fileChanges (or optional fileChangeList), newest-first.
- * 4) Else origin only.
+ * Same as {@link resolveQaPageUrl} but may return `inferenceWarning` when the URL falls back to `/`
+ * and changed files suggest a misnamed App Router entry (e.g. only `.../index.tsx`).
  */
-export function resolveQaPageUrl(
+export function resolveQaPageUrlWithDiagnostics(
     projectPath: string,
     taskMetadata?: Record<string, unknown> | null,
     fileChangeList?: FileChangeLike[] | null
-): string {
+): { url: string; inferenceWarning?: string } {
     const meta = taskMetadata || {};
     const metaUrl = typeof meta.qaDevServerUrl === 'string' ? meta.qaDevServerUrl.trim() : '';
     if (metaUrl) {
@@ -116,7 +112,7 @@ export function resolveQaPageUrl(
         try {
             const u = new URL(full);
             if (u.pathname && u.pathname !== '/') {
-                return full;
+                return { url: full };
             }
         } catch {
             /* fall through */
@@ -127,7 +123,7 @@ export function resolveQaPageUrl(
 
     const pathFromMeta = normalizeQaPathname(meta.qaDevServerPath);
     if (pathFromMeta) {
-        return `${origin}${pathFromMeta}`;
+        return { url: `${origin}${pathFromMeta}` };
     }
 
     let paths: string[] = [];
@@ -143,7 +139,27 @@ export function resolveQaPageUrl(
     }
 
     const inferred = inferRoutePathFromFilePaths(paths);
-    return inferred ? `${origin}${inferred}` : origin;
+    if (inferred) {
+        return { url: `${origin}${inferred}` };
+    }
+    const inferenceWarning = paths.length > 0 ? buildQaRouteInferenceWarning(paths) : undefined;
+    return { url: origin, inferenceWarning };
+}
+
+/**
+ * Full page URL for QA (smoke, screenshots, verify_final_output browser).
+ *
+ * 1) metadata.qaDevServerUrl with a non-root path → use that URL as-is (normalized).
+ * 2) Else origin from resolveQaDevServerOrigin + metadata.qaDevServerPath (if set).
+ * 3) Else origin + route inferred from fileChanges (or optional fileChangeList), newest-first.
+ * 4) Else origin only.
+ */
+export function resolveQaPageUrl(
+    projectPath: string,
+    taskMetadata?: Record<string, unknown> | null,
+    fileChangeList?: FileChangeLike[] | null
+): string {
+    return resolveQaPageUrlWithDiagnostics(projectPath, taskMetadata, fileChangeList).url;
 }
 
 /**

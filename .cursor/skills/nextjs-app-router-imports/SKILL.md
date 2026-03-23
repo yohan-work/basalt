@@ -7,6 +7,11 @@ description: >-
 
 # Next.js App Router — import 경로와 Link
 
+## App Router — `page.tsx` vs `index.tsx`
+
+- App Router에서는 **`app/.../page.tsx`**(또는 `page.js`)가 세그먼트 라우트다. **`app/.../index.tsx`는 라우트 엔트리가 아니다** — Pages Router 습관과 혼동하면 **404**가 나고, Basalt QA는 `page.tsx` 경로만 URL로 추론한다.
+- 새 페이지는 반드시 **`{Router Base}/<segment>/page.tsx`** 형태로 두고, **[PROJECT CONTEXT]의 Router Base**(`app` vs `src/app`)와 동일한 트리만 쓴다.
+
 ## `@/components/ui` / module not found
 
 공식: [Module not found](https://nextjs.org/docs/messages/module-not-found)
@@ -73,8 +78,35 @@ description: >-
 - [Environment variables](https://nextjs.org/docs/app/building-your-application/configuring/environment-variables)
 - [Draft mode](https://nextjs.org/docs/app/building-your-application/configuring/draft-mode)
 
+## Hydration (react-hydration-error)
+
+공식: [React hydration error](https://nextjs.org/docs/messages/react-hydration-error)
+
+- 서버 HTML과 클라이언트 첫 렌더가 일치해야 한다. 렌더 중 `Date.now()`, `Math.random()`, `window`/`localStorage` 직접 접근으로 마크업이 달라지지 않게 한다.
+- 시간·클라이언트 전용 값은 `useEffect` 이후나 클라이언트 전용 컴포넌트로 분리한다.
+
+## next/image — 외부 호스트
+
+공식: [next-image-unconfigured-host](https://nextjs.org/docs/messages/next-image-unconfigured-host)
+
+- 외부 URL은 `next.config`의 `images.remotePatterns`(또는 설치된 Next 버전 문서의 권장 필드)에 등록하거나, 임시 placeholder는 `<img>`를 사용한다.
+
+## Server Actions
+
+공식: [Server Actions and mutations](https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations)
+
+- 액션은 async. `"use server"` 파일/모듈 규칙을 따른다. 직렬화 불가 인자를 넘기지 않는다.
+
+## Route Handlers (`route.ts`)
+
+공식: [Route Handler](https://nextjs.org/docs/app/api-reference/file-conventions/route)
+
+- 필요한 HTTP 메서드만 export. Edge 런타임이면 Node 전용 API를 import하지 않는다.
+
 ## 체크리스트 (에이전트)
 
+- [ ] 새 라우트가 **`page.tsx`**(App Router)로 추가되었는가? **`app/.../index.tsx`로 URL을 만들려 하지 않았는가?
+- [ ] 파일 경로가 **[PROJECT CONTEXT] Router Base**(`app/` vs `src/app/`)와 동일한 트리인가?
 - [ ] `tsconfig.json` / `jsconfig.json`의 `paths` + `baseUrl`이 실제 폴더 구조와 맞는가?
 - [ ] `@/components/ui`가 가리키는 디렉터리에 해당 컴포넌트 파일(또는 배럴 `index`)이 있는가?
 - [ ] App Router에서 클라이언트 훅을 쓰는 파일에 `"use client"`가 파일 최상단에 있는가?
@@ -85,3 +117,7 @@ description: >-
 - [ ] 상대 OG/ canonical URL을 쓸 때 루트 `metadataBase` 또는 절대 URL을 두었는가?
 - [ ] Next 15+에서 `params`/`searchParams`를 `await`했는가?
 - [ ] viewport는 `metadata`가 아니라 `viewport` / `generateViewport`인가?
+- [ ] Hydration: 서버·클라이언트 첫 렌더가 동일한가? (비결정적 값·브라우저 API를 렌더 경로에서 제거했는가?)
+- [ ] `next/image` 외부 URL은 `remotePatterns` 등록 또는 `<img>` 대체인가?
+- [ ] Server Action / Route Handler가 프로젝트·문서 규칙(async, export, 런타임)을 따르는가?
+- [ ] 클라이언트에 `NEXT_PUBLIC_` 없는 비밀 env를 넘기지 않았는가?

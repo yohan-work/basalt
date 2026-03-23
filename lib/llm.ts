@@ -234,6 +234,8 @@ MANDATORY CODING RULES:
   - For NEW feature pages, choose non-root routes by default (e.g., "app/chat/page.tsx").
   - DO NOT override the root page ("app/page.tsx", "src/app/page.tsx", "pages/index.tsx", "src/pages/index.tsx") unless the task request explicitly names root/Home/Root.
   - If the user asks a specific route (e.g., "/chat"), place the file in the exact mapped route path.
+  - **App Router route files**: Each URL segment **must** use \`page.tsx\` (or \`page.js\` / \`page.jsx\`). Do **not** use \`app/.../index.tsx\` as the route entry — that is Pages Router convention; App Router ignores \`index.tsx\` for routing, which causes **404** and breaks QA URL inference.
+  - Use the **[PROJECT CONTEXT] Router Base** value exactly (e.g. only \`src/app/...\` when Router Base is \`src/app\`, not mixed with root \`app/\`).
 - PATH FORMATTING RULE:
   - If a path is missing a filename or extension, infer a best-fit file path and regenerate.
   - If a path starts with "/", remove it before writing.
@@ -275,8 +277,11 @@ MANDATORY CODING RULES:
   - **Data Fetching**: NEVER use \`getServerSideProps\` or \`getStaticProps\` (Page Router legacy). In App Router, use standard \`async/await\` in Server Components, or \`fetch\` inside \`useEffect\` in Client Components.
   - **Fetch API (JSON Parsing Error Prevention)**: When using \`fetch()\` to get JSON data, **ALWAYS** check \`response.ok\` and ensure the Content-Type is \`application/json\` BEFORE calling \`await response.json()\`. Otherwise, fetching a 404 endpoint will return Next.js HTML error pages, causing a fatal \`Unexpected token '<', "<!DOCTYPE "... is not valid JSON\` runtime crash.
 - **NEXT.JS IMAGE COMPONENTS**:
-  - If you need to use placeholder images from external URLs (e.g., \`via.placeholder.com\`, \`unsplash.com\`), **DO NOT** use the Next.js \`<Image>\` component (\`next/image\`). It will cause a runtime error because the hostname is not configured in \`next.config.js\`.
-  - Instead, use a standard HTML \`<img>\` tag with appropriate styling for external placeholder images.
+  - If you need to use placeholder images from external URLs (e.g., \`via.placeholder.com\`, \`unsplash.com\`), **DO NOT** use the Next.js \`<Image>\` component (\`next/image\`) without configuring the hostname. Prefer \`next.config\` \`images.remotePatterns\` (see next-image-unconfigured-host) or use a plain \`<img>\` for throwaway placeholders.
+- **HYDRATION**: Do not render different HTML on server vs first client paint (random IDs, \`Date.now()\` in markup, browser-only APIs in the render path). See react-hydration-error docs.
+- **SERVER ACTIONS**: Follow App Router server action rules — async functions, correct \`"use server"\` module/file placement, serializable arguments only.
+- **ROUTE HANDLERS**: In \`app/.../route.ts\`, export the HTTP methods you need; respect Edge vs Node runtime limits for APIs you import.
+- **ENVIRONMENT VARIABLES**: Never read server-only secrets in Client Components; only \`NEXT_PUBLIC_*\` is embedded for the browser.
 
 🚨 CRITICAL OUTPUT FORMATTING RULES 🚨
 - DO NOT output any conversational text, greetings, explanations, or conclusions.

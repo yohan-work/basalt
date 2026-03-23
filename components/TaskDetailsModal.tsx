@@ -900,7 +900,7 @@ export function TaskDetailsModal({
                                         className={`px-3 py-1 text-xs rounded-sm font-medium transition-all ${view === 'signoff' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                                         aria-pressed={view === 'signoff'}
                                     >
-                                        <ShieldCheck className="w-3 h-3 inline mr-1 text-emerald-600" /> 검수 완료
+                                        <ShieldCheck className="w-3 h-3 inline mr-1 text-emerald-600" /> QA
                                     </button>
                                 )}
                                 <button
@@ -909,7 +909,7 @@ export function TaskDetailsModal({
                                     className={`px-3 py-1 text-xs rounded-sm font-medium transition-all ${view === 'logs' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                                     aria-pressed={view === 'logs'}
                                 >
-                                    <Activity className="w-3 h-3 inline mr-1" /> Live Logs
+                                    <Activity className="w-3 h-3 inline mr-1" /> Logs
                                 </button>
                             </div>
                         </div>

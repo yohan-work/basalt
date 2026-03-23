@@ -68,6 +68,14 @@ function buildIncidents(params: {
         });
     }
 
+    if (params.qaPageCheck.errorExcerpt && params.qaPageCheck.errorExcerpt.trim()) {
+        out.push({
+            title: '스모크 진단 발췌',
+            detailKo: `${params.qaPageCheck.errorExcerpt.slice(0, 1200)}${params.qaPageCheck.errorExcerpt.length > 1200 ? '…' : ''}`,
+            source: 'smoke',
+        });
+    }
+
     if (typeof params.verification.notes === 'string' && params.verification.notes.trim()) {
         out.push({
             title: 'LLM 검증 노트',
