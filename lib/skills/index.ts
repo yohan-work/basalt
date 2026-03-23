@@ -948,19 +948,88 @@ export async function search_npm_package(query: string) {
 }
 
 // --- Style Architect Skills ---
-export async function apply_design_system(componentPath: string) {
-    // Logic to inject class names or imports
-    return `Applied design system to ${componentPath}`;
+function normalizeProjectRelativePath(filePath: string): string {
+    return filePath.startsWith('/') ? filePath.substring(1) : filePath;
 }
 
-export async function generate_scss(moduleName: string) {
-    return `
-.${moduleName} {
-  background-color: var(--background);
-  color: var(--foreground);
-  border: 1px solid var(--border);
-}
+/**
+ * Aligns one component/page file with the **target** project's styling (tokens, Tailwind, existing patterns).
+ * Requires `projectPath` as final arg when invoked from the orchestrator (same pattern as `read_codebase`).
+ */
+export async function apply_design_system(componentPath: string, projectPath: string = process.cwd()) {
+    const relativePath = normalizeProjectRelativePath(componentPath);
+    const fullPath = path.resolve(projectPath, relativePath);
+    if (!fs.existsSync(fullPath)) {
+        return `apply_design_system: file not found — ${relativePath} (project: ${projectPath})`;
+    }
+
+    const existing = await read_codebase(relativePath, projectPath);
+    if (typeof existing === 'string' && existing.startsWith('File "') && existing.includes('does not exist')) {
+        return existing;
+    }
+
+    const profiler = new ProjectProfiler(projectPath);
+    const profile = await profiler.getProfileData();
+    const context = await profiler.getContextString();
+    const techStack = profile.techStack || 'unknown';
+
+    const prompt = `Align this single file with the target project's design system.
+
+Rules:
+- Change only styling/markup structure needed for visual consistency (className, inline style, semantic wrappers).
+- Preserve behavior: state, effects, data fetching, event handlers, exports, and types must stay equivalent.
+- Obey [PROJECT CONTEXT]: Tailwind only if installed; shadcn/ui only if listed; otherwise CSS or semantic HTML.
+- Use colors/spacing/radius from DESIGN HINTS and existing code — no unrelated product themes.
+
+You MUST output exactly one file using the required format. The path line must be:
+File: ${relativePath}
+
+Current file:
+\`\`\`
+${existing}
+\`\`\`
 `;
+
+    const result = await llm.generateCode(prompt, context, MODEL_CONFIG.CODING_MODEL, techStack);
+    if (result.error) {
+        return `apply_design_system failed: ${result.content}`;
+    }
+
+    const norm = (p: string) => p.replace(/^\/+/, '').replace(/\\/g, '/');
+    const targetNorm = norm(relativePath);
+    const picked =
+        result.files.find((f) => norm(f.path) === targetNorm) ??
+        (result.files.length === 1 ? result.files[0] : null);
+
+    if (!picked || !picked.content?.trim()) {
+        return `apply_design_system: model returned no usable file (expected path like "${relativePath}")`;
+    }
+
+    const writeResult = await write_code(relativePath, picked.content, projectPath);
+    if (typeof writeResult === 'object' && writeResult && 'success' in writeResult && writeResult.success === false) {
+        return `apply_design_system: write failed — ${writeResult.message || 'unknown error'}`;
+    }
+
+    return `Applied design system to ${relativePath}`;
+}
+
+export async function generate_scss(moduleName: string, projectPath: string = process.cwd()) {
+    const safeName = moduleName.replace(/[^a-zA-Z0-9_-]/g, '') || 'Block';
+    const profiler = new ProjectProfiler(projectPath);
+    const context = await profiler.getContextString();
+
+    const systemPrompt = `You write SCSS only. Output a single root block (e.g. .${safeName} { ... }) suitable for a component module.
+Use variables that exist in the target project (see DESIGN HINTS / context) such as var(--background). Do not invent npm imports.
+No markdown fences, no commentary — SCSS only.`;
+
+    const userPrompt = `Module name / BEM block: ${safeName}\n\n${context}`;
+
+    try {
+        const scss = await llm.generateText(systemPrompt, userPrompt, MODEL_CONFIG.CODING_MODEL, null);
+        return scss.trim();
+    } catch (e: any) {
+        return `generate_scss failed: ${e.message}`;
+    }
 }
 
 export { check_responsive } from './check_responsive/execute';
