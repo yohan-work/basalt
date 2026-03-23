@@ -943,8 +943,65 @@ Return the refactored code ONLY, with NO explanations.
     }
 }
 
-export async function search_npm_package(query: string) {
-    return `Found package: ${query} (latest)`;
+const NPM_QUERY_MAX_LEN = 220;
+/** Unscoped or scoped package name for `npm view` (no arbitrary shell). */
+function isSafeNpmPackageQuery(raw: string): boolean {
+    const q = raw.trim();
+    if (!q || q.length > NPM_QUERY_MAX_LEN) return false;
+    return /^(@[a-z0-9-~][a-z0-9-._~]*\/[a-z0-9-._~]+|[a-z0-9@._~-]+)$/i.test(q);
+}
+
+/**
+ * Resolves registry metadata via `npm view` (requires network / npm cache).
+ */
+export async function search_npm_package(query: string, projectPath: string = process.cwd()) {
+    const q = String(query || '').trim();
+    if (!q) {
+        return { success: false, error: 'Empty package name or query.' };
+    }
+    if (!isSafeNpmPackageQuery(q)) {
+        return {
+            success: false,
+            error: `Invalid package name format: "${q}". Use an npm package name (e.g. react, lodash, @types/node).`,
+        };
+    }
+    try {
+        const { stdout, stderr } = await execAsync(`npm view ${JSON.stringify(q)} version description homepage repository peerDependencies --json`, {
+            cwd: projectPath,
+            timeout: 25_000,
+            maxBuffer: 2 * 1024 * 1024,
+            encoding: 'utf8',
+        });
+        const combined = `${stdout || ''}${stderr || ''}`.trim();
+        let data: Record<string, unknown>;
+        try {
+            data = JSON.parse(stdout || '{}') as Record<string, unknown>;
+        } catch {
+            return { success: false, error: `npm view returned non-JSON. Output: ${combined.slice(0, 500)}` };
+        }
+        if (data && typeof data === 'object' && 'error' in data) {
+            return { success: false, error: String((data as { error?: string }).error || 'Package not found'), query: q };
+        }
+        const installed = getInstalledPackages(projectPath);
+        const inProject = installed.has(q.startsWith('@') ? q.split('/').slice(0, 2).join('/') : q.split('/')[0]);
+        return {
+            success: true,
+            query: q,
+            version: data.version ?? null,
+            description: data.description ?? null,
+            homepage: data.homepage ?? null,
+            repository: data.repository ?? null,
+            peerDependencies: data.peerDependencies ?? null,
+            listedInProjectPackageJson: inProject,
+        };
+    } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return {
+            success: false,
+            error: `npm view failed for "${q}": ${msg}`,
+            query: q,
+        };
+    }
 }
 
 // --- Style Architect Skills ---
@@ -1316,10 +1373,238 @@ export async function scan_project(projectPath: string = process.cwd(), depth: n
     };
 }
 
-export async function extract_patterns(projectPath: string = process.cwd(), fileTypes: string[] = ['.tsx', '.ts', '.jsx', '.js']) {
-    return { message: "extract_patterns not fully implemented yet." };
+function countSubstringInFiles(
+    rootDir: string,
+    extensions: Set<string>,
+    sub: string,
+    maxFiles: number
+): { scannedFiles: number; matchCount: number; samplePaths: string[] } {
+    let scannedFiles = 0;
+    let matchCount = 0;
+    const samplePaths: string[] = [];
+    const needle = sub.toLowerCase();
+
+    function walk(dir: string) {
+        if (scannedFiles >= maxFiles || samplePaths.length >= 12) return;
+        let entries: fs.Dirent[];
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        for (const e of entries) {
+            if (scannedFiles >= maxFiles) return;
+            if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+            const full = path.join(dir, e.name);
+            if (e.isDirectory()) {
+                walk(full);
+                continue;
+            }
+            const ext = path.extname(e.name).toLowerCase();
+            if (!extensions.has(ext)) continue;
+            scannedFiles += 1;
+            try {
+                const content = fs.readFileSync(full, 'utf8').slice(0, 8000);
+                if (content.toLowerCase().includes(needle)) {
+                    matchCount += 1;
+                    if (samplePaths.length < 12) {
+                        samplePaths.push(path.relative(rootDir, full).replace(/\\/g, '/'));
+                    }
+                }
+            } catch {
+                /* skip */
+            }
+        }
+    }
+
+    if (fs.existsSync(rootDir)) walk(rootDir);
+    return { scannedFiles, matchCount, samplePaths };
 }
 
-export async function find_similar_components(projectPath: string = process.cwd(), query: string, componentType: string) {
-    return [];
+function detectDefaultVsNamedExportSample(projectRoot: string, relPaths: string[]): {
+    defaultExport: number;
+    namedExport: number;
+} {
+    let defaultExport = 0;
+    let namedExport = 0;
+    for (const rel of relPaths.slice(0, 8)) {
+        const full = path.join(projectRoot, rel);
+        if (!fs.existsSync(full)) continue;
+        try {
+            const c = fs.readFileSync(full, 'utf8').slice(0, 6000);
+            if (/export\s+default\b/.test(c)) defaultExport += 1;
+            if (/export\s+(?:async\s+)?function\s+/.test(c) || /export\s+const\s+\w+\s*=/.test(c)) namedExport += 1;
+        } catch {
+            /* skip */
+        }
+    }
+    return { defaultExport, namedExport };
+}
+
+/**
+ * Heuristic project conventions for planners (router, UI kit, import style samples).
+ */
+export async function extract_patterns(projectPath: string = process.cwd(), fileTypes: string[] = ['.tsx', '.ts', '.jsx', '.js']) {
+    const root = path.resolve(projectPath);
+    const extSet = new Set((fileTypes.length ? fileTypes : ['.tsx', '.ts', '.jsx', '.js']).map((e) => e.toLowerCase()));
+
+    const profiler = new ProjectProfiler(root);
+    const data = await profiler.getProfileData();
+    const routerBase = data.routerBase;
+    const scanRoots: string[] = [];
+    if (routerBase) scanRoots.push(path.join(root, routerBase));
+    for (const rel of ['components', 'src/components', 'lib', 'src/lib']) {
+        const p = path.join(root, rel);
+        if (fs.existsSync(p) && fs.statSync(p).isDirectory()) scanRoots.push(p);
+    }
+
+    let useClientHits = 0;
+    let filesScannedUseClient = 0;
+    for (const dir of scanRoots.slice(0, 4)) {
+        const r = countSubstringInFiles(dir, extSet, "'use client'", 35);
+        filesScannedUseClient += r.scannedFiles;
+        useClientHits += r.matchCount;
+    }
+
+    const pageSample = (data.pageCandidates || []).filter((p: string) => /\.(tsx|ts|jsx|js)$/i.test(p));
+    const exportSample = detectDefaultVsNamedExportSample(root, pageSample);
+
+    const aliasHints: string[] = [];
+    try {
+        const merged = mergeCompilerPathsFromConfigs(root);
+        for (const k of Object.keys(merged)) {
+            if (k.includes('@/') || k.startsWith('@')) aliasHints.push(k);
+        }
+    } catch {
+        /* skip */
+    }
+
+    return {
+        techStack: data.techStack,
+        structure: data.structure,
+        routerBase: data.routerBase,
+        routerResolutionNote: data.routerResolutionNote ?? null,
+        hasTailwind: data.hasTailwind,
+        uiKitPresent: data.uiKitPresent,
+        uiKitRelativePath: data.uiKitRelativePath,
+        pageCandidatesSample: pageSample.slice(0, 15),
+        conventions: {
+            useClientOccurrencesInSampledFiles: useClientHits,
+            filesSampledForUseClient: filesScannedUseClient,
+            defaultVsNamedExportInPageSample: exportSample,
+            tsconfigPathPatterns: aliasHints.slice(0, 12),
+        },
+        notes: [
+            'Patterns are heuristic; confirm in repo before relying on them.',
+            data.routerDualRoot
+                ? 'Dual app/pages router roots detected — verify route ownership.'
+                : null,
+        ].filter(Boolean) as string[],
+    };
+}
+
+function collectComponentLikeFiles(projectRoot: string, maxTotal: number): string[] {
+    const out: string[] = [];
+    const exts = new Set(['.tsx', '.ts', '.jsx', '.js']);
+    const roots = ['components', 'src/components', 'app', 'src/app'].map((r) => path.join(projectRoot, r));
+
+    function walk(dir: string) {
+        if (out.length >= maxTotal) return;
+        let entries: fs.Dirent[];
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        for (const e of entries) {
+            if (out.length >= maxTotal) return;
+            if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+            const full = path.join(dir, e.name);
+            if (e.isDirectory()) {
+                const normDir = dir.replace(/\\/g, '/');
+                if (e.name === 'api' && /(^|\/)app(\/|$)/.test(normDir)) {
+                    /* skip route handlers for “component” similarity */
+                    continue;
+                }
+                walk(full);
+                continue;
+            }
+            const ext = path.extname(e.name).toLowerCase();
+            if (!exts.has(ext)) continue;
+            out.push(path.relative(projectRoot, full).replace(/\\/g, '/'));
+        }
+    }
+
+    for (const r of roots) {
+        if (fs.existsSync(r) && fs.statSync(r).isDirectory()) walk(r);
+    }
+    return out;
+}
+
+/**
+ * Returns relative paths whose basename or content matches `query` (case-insensitive).
+ * `componentType` narrows to filenames containing that substring when non-empty.
+ */
+export async function find_similar_components(
+    projectPath: string = process.cwd(),
+    query: string = '',
+    componentType: string = ''
+) {
+    const root = path.resolve(projectPath);
+    const q = String(query || '').trim().toLowerCase();
+    const typeFilter = String(componentType || '').trim().toLowerCase();
+    if (!q && !typeFilter) {
+        return { matches: [] as string[], note: 'Provide query and/or componentType for meaningful results.' };
+    }
+
+    const profiler = new ProjectProfiler(root);
+    const data = await profiler.getProfileData();
+
+    const scored: { path: string; score: number; reason: string }[] = [];
+    const push = (rel: string, score: number, reason: string) => {
+        if (!rel || scored.some((s) => s.path === rel)) return;
+        scored.push({ path: rel, score, reason });
+    };
+
+    for (const c of data.availableUIComponents || []) {
+        const name = String(c).toLowerCase();
+        if (q && name.includes(q)) {
+            const base = data.uiKitRelativePath
+                ? `${data.uiKitRelativePath}/${c}.tsx`
+                : `components/ui/${c}.tsx`;
+            push(base, 10, 'UI kit basename match');
+        }
+    }
+
+    const files = collectComponentLikeFiles(root, 400);
+    for (const rel of files) {
+        const base = path.basename(rel).toLowerCase();
+        if (typeFilter && !base.includes(typeFilter) && !rel.toLowerCase().includes(typeFilter)) {
+            continue;
+        }
+        if (q) {
+            if (base.includes(q) || rel.toLowerCase().includes(q)) {
+                push(rel, base.includes(q) ? 8 : 5, 'path/basename match');
+                continue;
+            }
+            try {
+                const content = fs.readFileSync(path.join(root, rel), 'utf8').slice(0, 6000).toLowerCase();
+                if (content.includes(q)) {
+                    push(rel, 3, 'content match');
+                }
+            } catch {
+                /* skip */
+            }
+        } else if (typeFilter && (base.includes(typeFilter) || rel.toLowerCase().includes(typeFilter))) {
+            push(rel, 6, 'componentType path match');
+        }
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    return {
+        matches: scored.slice(0, 24).map((s) => s.path),
+        details: scored.slice(0, 12),
+        query: query || null,
+        componentType: componentType || null,
+    };
 }

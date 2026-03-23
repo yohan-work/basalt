@@ -1,33 +1,30 @@
 ---
 name: find_similar_components
-description: Searches the codebase for components similar to what needs to be created, providing references for consistent code generation.
+description: Finds component-like files by basename/path/content match plus UI kit basenames from the profiler.
 ---
 
 # Find Similar Components
 
-Searches existing components in the project that are similar to what the agent needs to create, providing code references.
+**Runtime (Basalt):** `lib/skills/index.ts`의 `find_similar_components`는 `components/`, `src/components`, `app`, `src/app` 아래를 제한적으로 순회하고, UI 키트 목록·파일명·파일 내용(앞부분)으로 매칭한다. `app/**/api` 라우트 디렉터리는 건너뛴다.
 
 ## Inputs
--   `projectPath`: The root path of the project.
--   `query`: Description of the component to find (e.g., "login form", "user card", "data table").
--   `componentType`: Type of component to search for (page, component, hook, util).
 
-## Outputs
--   An array of similar components:
-    -   `filePath`: Path to the component file
-    -   `componentName`: Name of the component
-    -   `relevanceScore`: How relevant this component is (0-1)
-    -   `content`: Full content of the file
-    -   `summary`: Brief description of what the component does
+- `projectPath`: 프로젝트 루트.
+- `query`: 검색 문자열 (파일명·경로·내용, 대소문자 무시). 빈 값이면 `componentType`이 있어야 의미 있음.
+- `componentType`: 경로/파일명에 포함 여부로 좁히는 선택 필터.
+
+## Outputs (실제 구현)
+
+- `matches`: 상대 경로 문자열 배열 (점수 상위, 최대 24).
+- `details`: `{ path, score, reason }` 최대 12개.
+- `query`, `componentType`
 
 ## Instructions
-1.  Search component directories for files matching the query keywords.
-2.  Read each candidate file and analyze its purpose.
-3.  Score relevance based on name matching and content analysis.
-4.  Return top 3-5 most relevant components with their full content.
-5.  If using LLM, ask it to summarize each component's purpose.
+
+1. Prefer **short, distinctive** queries (e.g. `DataTable`, `sign-in`, `useCart`).
+2. Follow up with `read_codebase` on the top matches — this skill does not return full file bodies.
 
 ## Use Cases
--   Before creating a new form, find existing forms to reference their structure.
--   When adding a new page, find similar pages for layout reference.
--   Ensure new components follow the same patterns as existing ones.
+
+- 새 페이지/컴포넌트 작성 전 유사 파일 탐색.
+- 리팩터 시 영향 받을 수 있는 컴포넌트 나열.

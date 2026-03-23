@@ -1,35 +1,34 @@
 ---
 name: extract_patterns
-description: Analyzes existing code files to extract coding patterns, conventions, and styles used in the project.
+description: Heuristic project conventions — stack, router, UI kit, sampled use client usage, path aliases, default vs named exports on page samples.
 ---
 
 # Extract Patterns
 
-Analyzes existing source files to understand the coding conventions and patterns used in the project.
+**Runtime (Basalt):** `lib/skills/index.ts`의 `extract_patterns`는 `ProjectProfiler`와 제한된 파일 샘플(라우터·컴포넌트 트리)을 사용한다. LLM 추측이 아니라 **파일 기반 휴리스틱**이다.
 
 ## Inputs
--   `projectPath`: The root path of the project.
--   `fileTypes`: Array of file extensions to analyze (default: ['.tsx', '.ts', '.jsx', '.js']).
 
-## Outputs
--   A JSON object containing:
-    -   `importStyle`: How imports are organized (grouped, alphabetical, etc.)
-    -   `exportStyle`: Default exports vs named exports preference
-    -   `namingConventions`: Component naming (PascalCase, camelCase, etc.)
-    -   `componentStructure`: Functional vs class components, hooks usage
-    -   `stateManagement`: useState, useReducer, zustand, redux, etc.
-    -   `stylingApproach`: Tailwind classes, CSS modules, styled-components
-    -   `commonPatterns`: Frequently used patterns (error boundaries, loading states)
-    -   `fileStructure`: How files are typically organized
+- `projectPath`: 프로젝트 루트.
+- `fileTypes`: 분석할 확장자 배열 (기본 `['.tsx', '.ts', '.jsx', '.js']`).
+
+## Outputs (실제 구현)
+
+- `techStack`, `structure`, `routerBase`, `routerResolutionNote`
+- `hasTailwind`, `uiKitPresent`, `uiKitRelativePath`
+- `pageCandidatesSample`
+- `conventions`:
+  - `useClientOccurrencesInSampledFiles`, `filesSampledForUseClient`
+  - `defaultVsNamedExportInPageSample` — 페이지 샘플에서 `export default` vs named export 힌트
+  - `tsconfigPathPatterns` — 컴파일러 paths 키 샘플
+- `notes` — 해석 시 주의사항
 
 ## Instructions
-1.  Scan the project for relevant source files.
-2.  Read a sample of files (up to 10) from component directories.
-3.  Analyze the code structure and extract patterns.
-4.  Use LLM to summarize the conventions found.
-5.  Return structured data that can guide code generation.
+
+1. Callers should treat output as **hints**; confirm with `read_codebase` for critical paths.
+2. Pair with `scan_project` for directory context and with **`code-mapper`** for execution flow.
 
 ## Use Cases
--   Ensure generated code matches existing project style.
--   Automatically adopt the project's import organization.
--   Follow the same component structure patterns.
+
+- Planners seeding `[PROJECT CONTEXT]` with convention hints.
+- Before bulk codegen, check alias and client-boundary prevalence.

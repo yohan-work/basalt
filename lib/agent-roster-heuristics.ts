@@ -96,6 +96,62 @@ export const ROLE_KEYWORD_HINTS: { role: string; needles: string[] }[] = [
             '위키',
         ],
     },
+    {
+        role: 'code-mapper',
+        needles: [
+            'code map',
+            'codemap',
+            'call chain',
+            'call graph',
+            'entry point',
+            'trace',
+            'ownership',
+            'where does',
+            'which file',
+            'refactor plan',
+            'before we change',
+            '코드 맵',
+            '호출',
+            '엔트리',
+            '흐름',
+            '어느 파일',
+        ],
+    },
+    {
+        role: 'ui-fixer',
+        needles: [
+            'ui bug',
+            'visual bug',
+            'layout bug',
+            'misaligned',
+            'broken layout',
+            'smallest patch',
+            'minimal fix',
+            'ui fix',
+            'css fix',
+            '반응형 버그',
+            '레이아웃 깨짐',
+            '최소 수정',
+        ],
+    },
+    {
+        role: 'api-designer',
+        needles: [
+            'api design',
+            'api contract',
+            'route handler',
+            'rest api',
+            'openapi',
+            'request schema',
+            'response schema',
+            'breaking api',
+            'versioning api',
+            'rpc',
+            '서버 액션',
+            '계약',
+            'api 설계',
+        ],
+    },
 ];
 
 export const CONSULT_CORE_ROLES = ['product-manager', 'main-agent', 'software-engineer', 'style-architect'] as const;
@@ -190,6 +246,9 @@ export function resolveTargetedConsultRole(lastUserMessage: string): string | nu
         { role: 'software-engineer', needles: ['엔지니어', '개발자', '개발', '프론트', '백엔드', 'software engineer'] },
         { role: 'product-manager', needles: ['pm', '기획', '피엠', '프로덕트 매니저', 'product manager'] },
         { role: 'main-agent', needles: ['리드', '팀장', '메인 에이전트', '메인', '오케스트레이터', 'main agent'] },
+        { role: 'code-mapper', needles: ['코드 매퍼', 'code mapper', '코드맵'] },
+        { role: 'ui-fixer', needles: ['ui fixer', 'ui 수정자', 'ui 픽서'] },
+        { role: 'api-designer', needles: ['api designer', 'api 설계자', '계약 설계'] },
     ];
 
     for (const { role, needles } of rules) {

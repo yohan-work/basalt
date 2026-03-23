@@ -33,6 +33,11 @@ Performs a comprehensive analysis of a project directory to understand its struc
 6.  Return a structured analysis that helps other agents understand the project.
 
 ## Use Cases
--   Before writing new code, scan the project to understand existing patterns.
--   Determine which UI library (shadcn, MUI, etc.) is being used.
--   Find where to place new components based on existing structure.
+
+- Before writing new code, scan the project to understand existing patterns.
+- Determine which UI library (shadcn, MUI, etc.) is being used.
+- Find where to place new components based on existing structure.
+
+## Code map handoff
+
+After `scan_project`, for **call-chain / ownership** questions combine with `read_codebase` and `extract_patterns` (heuristic: `use client` sample counts, path aliases, default vs named exports on page samples). The **`code-mapper`** agent uses this object as input to produce a human-readable **primary path** and **unknowns** list — `scan_project` alone is not a substitute for file-level tracing.

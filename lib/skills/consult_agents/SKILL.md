@@ -5,7 +5,7 @@ description: "Facilitate a brainstorming discussion between multiple AI agents t
 
 # consult_agents
 
-This skill triggers a virtual discussion among **dynamically selected** agents: `taskAnalysis.required_agents`, keyword hints from summary/objective text, optional `complexity: high` → QA, plus core roles (product-manager, main-agent, software-engineer, style-architect) when present in `availableAgents`. Roster size is capped via env `CONSULT_MAX_PARTICIPANTS` (default 8).
+This skill triggers a virtual discussion among **dynamically selected** agents: `taskAnalysis.required_agents`, keyword hints from summary/objective text, optional `complexity: high` → QA, plus core roles (product-manager, main-agent, software-engineer, style-architect) when present in `availableAgents`. Additional roles such as **`code-mapper`**, **`api-designer`**, **`ui-fixer`**, **`database-administrator`**, **`devops-engineer`** participate when keyword hints or `required_agents` include them (see `lib/agent-roster-heuristics.ts`). Roster size is capped via env `CONSULT_MAX_PARTICIPANTS` (default 8).
 
 Agents will debate, critique each other's ideas, and propose solutions based on their roles.
 
