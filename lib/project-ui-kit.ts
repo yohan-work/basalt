@@ -1,43 +1,16 @@
 import fs from 'fs';
 import path from 'path';
-import * as ts from 'typescript';
 
 import { ProjectProfiler } from './profiler';
 import type { StackPrimary } from './stack-profile';
+import { inferComponentsUiRelativeDirFromConfig, maybeAlignNextPathAlias } from './tsconfig-paths';
 
 /**
  * `@/components/ui/*` 가 가리킬 실제 디렉터리 (프로젝트 루트 기준 POSIX 경로).
- * tsconfig `paths["@/*"]` 와 `src/app` 등 휴리스틱으로 결정한다.
+ * tsconfig/jsconfig 병합 `paths["@/*"]` 를 우선하고, 없거나 모호할 때만 폴더 휴리스틱을 쓴다.
  */
 export function inferComponentsUiRelativeDir(projectRoot: string): string {
-    const tsconfigPath = path.join(projectRoot, 'tsconfig.json');
-    if (fs.existsSync(tsconfigPath)) {
-        try {
-            const raw = fs.readFileSync(tsconfigPath, 'utf-8');
-            const parsed = ts.parseConfigFileTextToJson(tsconfigPath, raw);
-            const paths = parsed.config?.compilerOptions?.paths as Record<string, string[]> | undefined;
-            const atStar = paths?.['@/*'];
-            if (Array.isArray(atStar) && typeof atStar[0] === 'string') {
-                const t = atStar[0].replace(/\*$/, '').replace(/^\.\//, '');
-                if (t === 'src' || t.startsWith('src/')) {
-                    return 'src/components/ui';
-                }
-            }
-        } catch {
-            /* ignore */
-        }
-    }
-
-    if (
-        fs.existsSync(path.join(projectRoot, 'src', 'app')) ||
-        fs.existsSync(path.join(projectRoot, 'src', 'pages')) ||
-        fs.existsSync(path.join(projectRoot, 'src', 'main.tsx')) ||
-        fs.existsSync(path.join(projectRoot, 'src', 'main.jsx'))
-    ) {
-        return 'src/components/ui';
-    }
-
-    return 'components/ui';
+    return inferComponentsUiRelativeDirFromConfig(projectRoot);
 }
 
 function buttonSource(useClient: boolean): string {
@@ -114,7 +87,8 @@ function allowAutoScaffoldForStack(primary: StackPrimary, dependencies: string[]
 }
 
 /**
- * 실행 시작 시: 로컬 UI 키트가 없고 스택이 React/Next 계열이면 최소 button/input/label 을 생성한다.
+ * 실행 시작·갭 필: 스택이 React/Next 계열이면 `scaffoldMinimalUiPrimitives`로
+ * 누락된 button/input/label·배럴 index를 채운다. 이미 일부 파일만 있어도(uiKitPresent) 조기 종료하지 않는다.
  * `BASALT_AUTO_SCAFFOLD_UI=0` 또는 `false` 이면 비활성.
  */
 export async function maybeScaffoldMinimalUiKit(projectRoot: string): Promise<{
@@ -126,12 +100,10 @@ export async function maybeScaffoldMinimalUiKit(projectRoot: string): Promise<{
         return { created: [], skippedReason: 'BASALT_AUTO_SCAFFOLD_UI_disabled' };
     }
 
+    maybeAlignNextPathAlias(projectRoot);
+
     const profiler = new ProjectProfiler(projectRoot);
     const data = await profiler.getProfileData();
-
-    if (data.uiKitPresent) {
-        return { created: [], skippedReason: 'ui_kit_already_present' };
-    }
 
     const primary = data.stackProfile.primary;
     if (!allowAutoScaffoldForStack(primary, data.dependencies)) {
@@ -146,5 +118,12 @@ export async function maybeScaffoldMinimalUiKit(projectRoot: string): Promise<{
         useClientDirective,
     });
 
-    return { created };
+    if (created.length > 0) {
+        return {
+            created,
+            skippedReason: data.uiKitPresent ? 'ui_kit_gap_fill' : 'new_ui_kit',
+        };
+    }
+
+    return { created: [], skippedReason: data.uiKitPresent ? 'ui_kit_already_complete' : 'nothing_to_add' };
 }

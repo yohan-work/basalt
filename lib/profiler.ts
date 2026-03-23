@@ -3,6 +3,7 @@ import path from 'path';
 
 import { formatTechStackDisplay, inferStackProfile } from './stack-profile';
 import { formatStackRulesSummary, loadStackRulesBlock } from './stack-rules/load';
+import { inferComponentsUiRelativeDirFromConfig } from './tsconfig-paths';
 
 interface AvailableUiComponent {
     name: string;
@@ -74,9 +75,14 @@ export class ProjectProfiler {
         components: AvailableUiComponent[],
         relativePath: string | null,
     }> {
-        let componentsPath = path.join(this.projectRoot, 'components', 'ui');
-        if (!fs.existsSync(componentsPath)) {
-            componentsPath = path.join(this.projectRoot, 'src', 'components', 'ui');
+        const canonicalRel = inferComponentsUiRelativeDirFromConfig(this.projectRoot);
+        let componentsPath = path.join(this.projectRoot, ...canonicalRel.split('/'));
+        const legacyRel = canonicalRel.startsWith('src/')
+            ? 'components/ui'
+            : 'src/components/ui';
+        const legacyPath = path.join(this.projectRoot, ...legacyRel.split('/'));
+        if (!fs.existsSync(componentsPath) && fs.existsSync(legacyPath)) {
+            componentsPath = legacyPath;
         }
         const result = {
             names: [] as string[],
@@ -352,7 +358,17 @@ export class ProjectProfiler {
 
         const clientDirectiveInfo =
             data.stackProfile.primary === 'next' && data.structure.includes('app-router')
-                ? '\n- Next.js Client Components: If you use React hooks (useState, useEffect, etc.), you MUST add `"use client"` at the very top of the file. CRITICAL: You CANNOT export `metadata` in a Client Component file.'
+                ? '\n- Next.js Client Components: If you use React hooks (useState, useEffect, etc.), you MUST add `"use client"` at the very top of the file.'
+                : '';
+
+        const nextMetadataRscInfo =
+            data.stackProfile.primary === 'next' && data.structure.includes('app-router')
+                ? '\n- Next.js metadata: `export const metadata` and `export async function generateMetadata` are server-only. Never put them in a file that has `"use client"`. Keep `page.tsx` / `layout.tsx` as Server Components for SEO exports; put hooks and `"use client"` in a separate component file (e.g. `*Client.tsx`) and import it from the page.'
+                : '';
+
+        const nextLinkInfo =
+            data.stackProfile.primary === 'next' && data.structure.includes('app-router')
+                ? '\n- Next.js `Link`: Do not nest `<a>` inside `<Link>` (invalid-new-link-with-extra-anchor). Put `className` and children on `<Link href="...">` directly unless using `legacyBehavior` per docs.'
                 : '';
 
         const routePolicyHint = this.getRoutePolicyHint(data);
@@ -368,7 +384,7 @@ export class ProjectProfiler {
         return `
 [PROJECT CONTEXT]
 - Tech Stack: ${data.techStack}
-- Router Type: ${data.structure}${clientDirectiveInfo}
+- Router Type: ${data.structure}${clientDirectiveInfo}${nextMetadataRscInfo}${nextLinkInfo}
 - Styling: ${data.hasTailwind ? 'Tailwind CSS IS installed. Use Tailwind classes.' : 'Tailwind CSS IS NOT installed. Do NOT use tailwind classes. Use standard CSS or inline styles.'}${shadcnWarning}
 ${uiPolicySection}
 - UI Component Import Style: ${importStyleInfo}${barrelInfo}

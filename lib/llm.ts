@@ -247,11 +247,12 @@ MANDATORY CODING RULES:
   - If sharing app metadata, keep it in app/metadata.ts and import by relative path from each file.
 - **SEO BEST PRACTICES**:
   - Always include proper \`<title>\` and \`<meta name="description" content="...">\` tags.
-  - In App Router, use the \`export const metadata = { title: '...', description: '...' }\` pattern.
+  - In App Router, \`export const metadata\` and \`export async function generateMetadata\` are **SERVER-ONLY** (resolved before render); they cannot exist in any file that contains \`"use client"\` — even with no hooks (see Next.js generate-metadata docs).
   - In Page Router, use the \`next/head\` component.
   - Use appropriate semantic HTML tags (h1, section, main, article) for better accessibility and ranking.
-  - **CRITICAL**: In App Router, you CANNOT use React hooks (\`useState\`, \`useEffect\`, \`useRef\`) and export \`metadata\` in the same file. Combining them causes a FATAL BUILD ERROR.
-  - Prefer keeping pages as Server Components (no hooks) for better SEO and performance.
+  - **CRITICAL (App Router)**: If a file has \`"use client"\` at the top, you MUST NOT export \`metadata\` or \`generateMetadata\` in that file (hooks irrelevant). Put SEO exports in the parent \`page.tsx\` / \`layout.tsx\` as a **Server Component**, and move interactive UI to a separate file (e.g. \`components/MyPageClient.tsx\` with \`"use client"\` only there).
+  - **CRITICAL**: You also CANNOT combine React hooks (\`useState\`, \`useEffect\`, …) with \`metadata\` in the same file — use the split above.
+  - Prefer keeping \`app/.../page.tsx\` as a Server Component (metadata + composition); default export can render \`<MyPageClient />\` only.
 
 🚨 CRITICAL NEXT.JS APP ROUTER RULE 🚨
 - If your code uses ANY React hooks (\`useState\`, \`useEffect\`, \`useRef\`, etc.) or DOM events (\`onClick\`, \`onChange\`, etc.) in an App Router project, the VERY FIRST LINE of your file MUST BE EXACTLY:
@@ -259,9 +260,10 @@ MANDATORY CODING RULES:
 - You MUST include \`"use client";\` at the very top. Do NOT assume the parent component has it.
 - Failing to include this when required will cause the application to CRASH.
 - NEVER put \`"use client";\` below the imports; it MUST be the absolute first line.
+- **Exception**: If this file also needs \`export const metadata\` or \`generateMetadata\`, do **not** add \`"use client"\` here — keep \`page.tsx\` / \`layout.tsx\` server-only and extract client logic into a separate \`*Client.tsx\` (or similar) file.
 
 - **PRE-EMPTIVE NEXT.JS BUG PREVENTION**:
-  - **Routing**: NEVER use standard HTML \`<a>\` tags for internal navigation. You MUST use \`import Link from 'next/link'\` and the \`<Link href="...">\` component.
+  - **Routing**: NEVER use standard HTML \`<a>\` tags for internal navigation. You MUST use \`import Link from 'next/link'\` and the \`<Link href="...">\` component. In Next.js 13+, do **not** wrap content in an extra \`<a>\` inside \`<Link>\`; put \`className\` and children on \`<Link>\` directly (see invalid-new-link-with-extra-anchor).
   - **Browser APIs**: NEVER access \`window\`, \`document\`, \`localStorage\`, or \`navigator\` directly in the component body. These cause 500 crashes during SSR. Wrap them in a \`useEffect\` hook (which requires \`"use client";\`).
   - **Dynamic Hooks**: When accessing URL params, use \`import { useParams, useSearchParams } from 'next/navigation'\` (NOT \`next/router\`).
   - **Data Fetching**: NEVER use \`getServerSideProps\` or \`getStaticProps\` (Page Router legacy). In App Router, use standard \`async/await\` in Server Components, or \`fetch\` inside \`useEffect\` in Client Components.
