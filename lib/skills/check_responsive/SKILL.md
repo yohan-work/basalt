@@ -32,3 +32,4 @@ Falls back to a stub result when agent-browser is not installed.
 3. Check `document.body.scrollWidth > window.innerWidth` for horizontal overflow.
 4. Take a full-page screenshot for each breakpoint.
 5. Return the combined results.
+6. (Optional) If animations are heavy on the page, note whether layout still works with the OS/browser **reduced motion** preference — execution design should not rely on motion for core layout.

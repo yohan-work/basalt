@@ -392,6 +392,7 @@ export class ProjectProfiler {
         const allDeps = data.dependencies.sort().join(', ') || 'None';
 
         const stackRules = loadStackRulesBlock(this.projectRoot, data.stackProfile);
+        const designHints = await this.getDesignHintsBlock();
 
         const routerConflictWarning =
             data.routerDualRoot && data.routerResolutionNote
@@ -412,10 +413,54 @@ ${uiPolicySection}
 - Available UI Component Files: ${availableComponentFiles}
 - INSTALLED PACKAGES (package.json): ${allDeps}
 - CRITICAL: You MUST ONLY import npm packages that appear in the INSTALLED PACKAGES list above. Do NOT use any package that is not listed. If a package is missing, use built-in alternatives (e.g., use native fetch instead of axios, use URLSearchParams instead of qs).
-
+${designHints}
 [STACK_RULES]
 ${stackRules}
 `.trim();
+    }
+
+    /**
+     * Read-only excerpts from globals / Tailwind config so generated UI matches the target repo.
+     */
+    public async getDesignHintsBlock(): Promise<string> {
+        const chunks: string[] = [];
+        const maxCss = 3500;
+        const cssCandidates = [
+            'app/globals.css',
+            'src/app/globals.css',
+            'app/global.css',
+            'src/app/global.css',
+            'src/index.css',
+            'app/index.css',
+            'styles/globals.css',
+            'src/styles/globals.css',
+        ];
+        for (const rel of cssCandidates) {
+            const full = path.join(this.projectRoot, rel);
+            if (!fs.existsSync(full) || !fs.statSync(full).isFile()) continue;
+            let raw = fs.readFileSync(full, 'utf8');
+            if (raw.length > maxCss) {
+                raw = `${raw.slice(0, maxCss)}\n/* …truncated… */\n`;
+            }
+            chunks.push(`### Excerpt: \`${rel}\`\n\`\`\`css\n${raw}\n\`\`\``);
+            break;
+        }
+        const maxTw = 4000;
+        const twNames = ['tailwind.config.ts', 'tailwind.config.js', 'tailwind.config.mjs', 'tailwind.config.cjs'];
+        for (const name of twNames) {
+            const full = path.join(this.projectRoot, name);
+            if (!fs.existsSync(full) || !fs.statSync(full).isFile()) continue;
+            let raw = fs.readFileSync(full, 'utf8');
+            if (raw.length > maxTw) {
+                raw = `${raw.slice(0, maxTw)}\n// …truncated…\n`;
+            }
+            chunks.push(`### Excerpt: \`${name}\`\n\`\`\`\n${raw}\n\`\`\``);
+            break;
+        }
+        if (chunks.length === 0) {
+            return '\n## DESIGN HINTS\n_No `globals.css` / `tailwind.config` found at common paths; infer styling only from files you read._\n';
+        }
+        return `\n## DESIGN HINTS (target repo — match this; do not impose an unrelated product theme)\n${chunks.join('\n\n')}\n`;
     }
 
     private getRoutePolicyHint(data: any): string {

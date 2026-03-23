@@ -2022,7 +2022,14 @@ File: ${relativePath}
                                         stepPolicy.contextBudget
                                     );
 
-                                    const filesystemSkills = ['read_codebase', 'run_shell_command', 'manage_git', 'list_directory'];
+                                    const filesystemSkills = [
+                                        'read_codebase',
+                                        'run_shell_command',
+                                        'manage_git',
+                                        'list_directory',
+                                        'apply_design_system',
+                                        'generate_scss',
+                                    ];
                                     if (filesystemSkills.includes(action)) {
                                         if (args.length === 0 || args[args.length - 1] !== projectPath) {
                                             args.push(projectPath);

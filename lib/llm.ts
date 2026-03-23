@@ -227,6 +227,7 @@ MANDATORY CODING RULES:
 - If Tailwind is NOT present, DO NOT use tailwind classes (e.g., no "flex", "grid", "gap-4", "p-4"). Use standard CSS or inline styles.
 - CRITICAL: If the [PROJECT CONTEXT] says "None found" for UI components OR has a [WARNING] about missing Tailwind, DO NOT use shadcn/ui components. Use standard HTML tags (div, button, h1) with appropriate inline styles for a premium look.
 - Use design tokens ONLY IF the project supports them.
+- **EXECUTION UI (Request Work / any target repo)**: Match the **target** project's visual language from [PROJECT CONTEXT], **DESIGN HINTS**, and files you read. Reuse that repo's CSS variables, Tailwind theme tokens, and component patterns. Do **not** impose Basalt's or any other fixed product palette, fonts, or radius. Prefer neutral, cohesive spacing and accessible contrast; avoid random one-off hex colors when the project already defines tokens.
 - Generate COMPLETE, working TypeScript code with all necessary imports.
 - For React components, use proper TypeScript types and export as default.
 - MANDATORY FILE PATH RULE: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/some-feature/page.tsx", NOT "/app/some-feature/page.tsx"). YOU MUST prepend the Router Base Path (e.g., "src/app/", "app/", "src/pages/", "pages/") explicitly mentioned in the [PROJECT CONTEXT].

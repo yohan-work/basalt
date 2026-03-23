@@ -1,68 +1,36 @@
 ---
 name: apply_design_system
-description: Applies the project's design system to a component or page.
+description: Aligns one file in the **target project** with that repo's design tokens and styling patterns (Request Work execution).
 ---
 
 # Apply Design System
 
-Injects appropriate classes or styles to match the project's design guidelines.
+Updates classes, layout utilities, or minimal markup so the file **matches the repository** the task runs against. Does **not** apply Basalt or any fixed external theme.
 
 ## Inputs
--   `componentPath`: Path to the component file.
+
+-   `componentPath`: Path to the file relative to the project root (e.g. `app/features/chat/ChatPanel.tsx`). No leading `/`.
+-   `projectPath` (optional): Absolute path to the target repo; the orchestrator appends this like other filesystem skills.
 
 ## Outputs
--   Success message.
 
-## Project Design System
+-   Success message, or an error string if the file is missing, generation failed, or `write_code` validation failed.
 
-### Available shadcn/ui Components
-The project uses **shadcn/ui** (new-york style) with the following components available at `@/components/ui/`:
+## Execution rules
 
-| Component | Exports | Usage |
-|-----------|---------|-------|
-| `button` | `Button`, `buttonVariants` | Primary actions, form submissions |
-| `input` | `Input` | Text inputs, form fields |
-| `label` | `Label` | Form field labels |
-| `card` | `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter` | Content containers, forms |
-| `dialog` | `Dialog`, `DialogTrigger`, `DialogContent`, `DialogHeader`, `DialogTitle` | Modals, popups |
-| `select` | `Select`, `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem` | Dropdowns |
-| `avatar` | `Avatar`, `AvatarImage`, `AvatarFallback` | User avatars |
-| `badge` | `Badge` | Status indicators, tags |
-| `separator` | `Separator` | Visual dividers |
-| `scroll-area` | `ScrollArea` | Scrollable containers |
+1.  Read `[PROJECT CONTEXT]` and **DESIGN HINTS** — they describe Tailwind, shadcn availability, and real CSS/theme excerpts.
+2.  If Tailwind is installed, prefer semantic utilities already used in the project (`bg-background`, `text-muted-foreground`, etc.) when such tokens exist in DESIGN HINTS or sibling files.
+3.  If Tailwind is **not** installed, do **not** add utility classes; use the project's CSS approach.
+4.  **USE_EXISTING** UI policy: only use `@/components/ui/*` components that are listed as available. Otherwise semantic HTML.
+5.  Preserve behavior: do not remove hooks, data flow, or exports unless a styling fix requires a trivial wrapper.
+6.  Do not introduce new npm packages or fonts unless they are already in **INSTALLED PACKAGES**.
 
-### Design Tokens (CSS Variables)
-The project uses a **White/Black + Point Color (#007AFF)** theme defined in `app/globals.css`:
+## Optional: distinctive UI (rare)
 
-```css
-:root {
-  --background: #FFFFFF;
-  --foreground: #000000;
-  --primary: #007AFF;
-  --primary-foreground: #FFFFFF;
-  --card: #FFFFFF;
-  --card-foreground: #000000;
-  --border: #000000;
-  --input: #000000;
-  --ring: #007AFF;
-  --radius: 0rem; /* Flat minimalism */
-}
-```
-
-### Tailwind Class Mapping
-| Token | Tailwind Class |
-|-------|----------------|
-| Background | `bg-background` |
-| Foreground | `text-foreground` |
-| Primary Button | `bg-primary text-primary-foreground` |
-| Card | `bg-card text-card-foreground` |
-| Border | `border-border` |
-| Muted Text | `text-muted-foreground` |
+Only when the **task objective** explicitly requests a bold / marketing / portfolio look, you may additionally borrow ideas from `reference/02.design-system--type2.md` (typography contrast, motion, layered backgrounds) while still respecting the target stack (e.g. no Tailwind if not installed). Default is **neutral conformity**, not spectacle.
 
 ## Instructions
-1.  Analyze the component's current structure.
-2.  Replace plain HTML elements with shadcn/ui components.
-3.  Add Tailwind utility classes that align with the Global Design System (colors, spacing, typography).
-4.  Use CSS variable-based classes (`bg-background`, `text-foreground`, etc.) instead of hardcoded colors.
-5.  Ensure dark mode support by using the design token system.
-6.  Do not break existing functionality.
+
+1.  Load the current file from `componentPath` under the task's project root.
+2.  Produce **one** full file in the standard `File: path` + fenced code format expected by codegen.
+3.  After generation, the runtime writes via `write_code` (import/RSC rules apply).
