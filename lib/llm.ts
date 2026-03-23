@@ -253,6 +253,12 @@ MANDATORY CODING RULES:
   - **CRITICAL (App Router)**: If a file has \`"use client"\` at the top, you MUST NOT export \`metadata\` or \`generateMetadata\` in that file (hooks irrelevant). Put SEO exports in the parent \`page.tsx\` / \`layout.tsx\` as a **Server Component**, and move interactive UI to a separate file (e.g. \`components/MyPageClient.tsx\` with \`"use client"\` only there).
   - **CRITICAL**: You also CANNOT combine React hooks (\`useState\`, \`useEffect\`, …) with \`metadata\` in the same file — use the split above.
   - Prefer keeping \`app/.../page.tsx\` as a Server Component (metadata + composition); default export can render \`<MyPageClient />\` only.
+  - **Same route segment**: do **not** export both \`export const metadata\` **and** \`generateMetadata\` in one file — choose one per segment.
+  - **Relative OG/canonical/twitter URLs**: set \`metadataBase: new URL('https://...')\` (often root \`layout.tsx\`) or use absolute URLs; missing \`metadataBase\` with relative URL fields can **fail the build**.
+  - **File-based metadata** (\`opengraph-image\`, \`icon\`, etc. under \`app/\`) **overrides** conflicting exports — keep files and exports in sync.
+  - **\`searchParams\`** in \`generateMetadata\` / page props: available on **\`page.tsx\`**, not on \`layout\` — do not assume layout receives \`searchParams\`.
+  - **Next.js 15+**: \`params\` and \`searchParams\` in \`page\` / \`generateMetadata\` are often **Promises** — \`await\` them before use; check installed \`next\` major in [PROJECT CONTEXT].
+  - **Viewport / theme color**: do **not** put \`viewport\`, \`themeColor\`, or \`colorScheme\` inside \`metadata\` (deprecated in Next 14+). Use \`export const viewport\` / \`generateViewport\` (server-only; not in \`"use client"\` files).
 
 🚨 CRITICAL NEXT.JS APP ROUTER RULE 🚨
 - If your code uses ANY React hooks (\`useState\`, \`useEffect\`, \`useRef\`, etc.) or DOM events (\`onClick\`, \`onChange\`, etc.) in an App Router project, the VERY FIRST LINE of your file MUST BE EXACTLY:

@@ -361,9 +361,14 @@ export class ProjectProfiler {
                 ? '\n- Next.js Client Components: If you use React hooks (useState, useEffect, etc.), you MUST add `"use client"` at the very top of the file.'
                 : '';
 
+        const nextMajor = data.stackProfile.majors?.next;
+        const nextParamsHint =
+            typeof nextMajor === 'number' && nextMajor >= 15
+                ? ' In Next 15+, `params`/`searchParams` in pages and `generateMetadata` are often Promises — await them.'
+                : '';
         const nextMetadataRscInfo =
             data.stackProfile.primary === 'next' && data.structure.includes('app-router')
-                ? '\n- Next.js metadata: `export const metadata` and `export async function generateMetadata` are server-only. Never put them in a file that has `"use client"`. Keep `page.tsx` / `layout.tsx` as Server Components for SEO exports; put hooks and `"use client"` in a separate component file (e.g. `*Client.tsx`) and import it from the page.'
+                ? `\n- Next.js metadata: \`export const metadata\` and \`export async function generateMetadata\` are server-only. Never put them in a file that has \`"use client"\`. Do not export both static \`metadata\` and \`generateMetadata\` in the same segment. Set \`metadataBase\` in root layout when using relative OG/canonical URLs. Use \`generateViewport\` / \`export const viewport\` instead of viewport/themeColor inside \`metadata\`. \`searchParams\` applies to \`page\`, not \`layout\`.${nextParamsHint}`
                 : '';
 
         const nextLinkInfo =

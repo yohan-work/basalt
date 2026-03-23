@@ -1,8 +1,8 @@
 ---
 name: nextjs-app-router-imports
 description: >-
-  Next.js App Router에서 @/ 별칭·components/ui·next/link·metadata/RSC 경계 관련 빌드 오류를
-  예방·해결할 때 사용한다. module-not-found, invalid-new-link, metadata vs use client, tsconfig paths.
+  Next.js App Router에서 @/ 별칭·components/ui·next/link·metadata·viewport·Proxy(구 middleware)·
+  레이아웃 규약 관련 빌드 오류를 예방·해결할 때 사용한다.
 ---
 
 # Next.js App Router — import 경로와 Link
@@ -39,6 +39,40 @@ description: >-
 - [Server Components](https://nextjs.org/docs/app/building-your-application/rendering/server-components)
 - [Client Components](https://nextjs.org/docs/app/building-your-application/rendering/client-components)
 
+### P0 — 자주 나는 빌드 실수 (메타데이터)
+
+공식: [generate-metadata](https://nextjs.org/docs/app/api-reference/functions/generate-metadata)
+
+- 같은 세그먼트에서 **`metadata` 객체와 `generateMetadata` 함수를 둘 다 export하지 않는다.**
+- 상대 경로로 OG·canonical·twitter 이미지 등을 쓰려면 루트 `layout`에 **`metadataBase: new URL('https://…')`** 를 두거나, 필드마다 절대 URL을 쓴다. `metadataBase` 없이 상대 URL만 쓰면 **빌드 실패**할 수 있다.
+- **`app/opengraph-image.*`**, **`icon`**, 파비콘 등 [파일 기반 메타데이터](https://nextjs.org/docs/app/api-reference/file-conventions/metadata)가 있으면 export 기반 설정보다 **우선**한다 — 충돌 시 파일이 이긴다.
+- **`searchParams`** 는 **`page`** 에만 전달된다(`layout`의 `generateMetadata`에는 없음).
+- **Next.js 15+**: `params` / `searchParams`가 **`Promise`** 인 경우가 많다 — `await` 후 사용한다.
+- **viewport / themeColor / colorScheme** 은 `metadata` 안에 넣지 않는다(deprecated). [`generateViewport`](https://nextjs.org/docs/app/api-reference/functions/generate-viewport) / `export const viewport` 사용(역시 서버 전용).
+
+## 레이아웃·`loading`·`error`·`not-found`
+
+- [Layout](https://nextjs.org/docs/app/api-reference/file-conventions/layout) — 루트에 `<html>` / `<body>`.
+- [Template](https://nextjs.org/docs/app/api-reference/file-conventions/template) vs layout: template은 자식 **재마운트**, layout은 **상태 유지**.
+- [loading.js](https://nextjs.org/docs/app/api-reference/file-conventions/loading), [error.js](https://nextjs.org/docs/app/api-reference/file-conventions/error), [not-found](https://nextjs.org/docs/app/api-reference/file-conventions/not-found)
+
+## Proxy (구 `middleware`) — Next 16+
+
+공식: [Proxy](https://nextjs.org/docs/app/api-reference/file-conventions/proxy)
+
+- 문서 기준으로 **`middleware.ts` 파일 규칙이 `proxy.ts`로 바뀌는 방향**이 있다. 레거시 튜토리얼과 혼동하지 말 것.
+- 마이그레이션: `npx @next/codemod@canary middleware-to-proxy .` (문서에 안내된 codemod; 프로젝트 `next` 버전에 맞게 확인).
+- `export function proxy` / default export, **`config.matcher`는 빌드 타임 상수**여야 한다(변수로 동적 matcher 금지).
+- RSC 요청 시 Proxy에서 일부 내부 헤더가 숨겨질 수 있고, **`NextResponse.rewrite`가 아닌 수동 `fetch` rewrite** 는 RSC 헤더 누락으로 깨질 수 있다 — 문서 “RSC requests and rewrites” 참고.
+- 실행 순서·CORS·쿠키는 [Proxy 문서](https://nextjs.org/docs/app/api-reference/file-conventions/proxy)의 execution order / examples 참고.
+
+## 추가 참고 링크 (캐시·설정)
+
+- [Caching](https://nextjs.org/docs/app/building-your-application/caching)
+- [Segment config](https://nextjs.org/docs/app/api-reference/file-reference/segment-config) (`dynamic`, `revalidate`, …)
+- [Environment variables](https://nextjs.org/docs/app/building-your-application/configuring/environment-variables)
+- [Draft mode](https://nextjs.org/docs/app/building-your-application/configuring/draft-mode)
+
 ## 체크리스트 (에이전트)
 
 - [ ] `tsconfig.json` / `jsconfig.json`의 `paths` + `baseUrl`이 실제 폴더 구조와 맞는가?
@@ -47,3 +81,7 @@ description: >-
 - [ ] 내부 이동에 `<a href>` 대신 `next/link`의 `<Link>`를 쓰고, `<a>` 중첩이 없는가?
 - [ ] 같은 `page.tsx`에 `"use client"`와 `export const metadata` / `generateMetadata`가 동시에 없는가? (있으면 서버 `page` + 클라이언트 `*Client.tsx`로 분리)
 - [ ] SEO가 필요한 라우트는 서버 `page`/`layout`에 두고, 인터랙션만 클라이언트 파일로 옮겼는가?
+- [ ] 같은 세그먼트에 `metadata`와 `generateMetadata`를 동시에 export하지 않았는가?
+- [ ] 상대 OG/ canonical URL을 쓸 때 루트 `metadataBase` 또는 절대 URL을 두었는가?
+- [ ] Next 15+에서 `params`/`searchParams`를 `await`했는가?
+- [ ] viewport는 `metadata`가 아니라 `viewport` / `generateViewport`인가?

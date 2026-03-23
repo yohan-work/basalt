@@ -26,10 +26,14 @@ description: Next.js App Router — RSC 기본, use client, metadata, 라우팅 
 3. 내부 이동은 **`next/link`**의 `Link`를 쓴다. 외부만 `<a>`.
 4. 서버에서 데이터를 가져올 수 있으면 Server Component + `fetch`(프로젝트 관례의 cache 옵션)를 우선한다.
 5. 동적 세그먼트는 `[id]` 폴더, 라우트 그룹은 `(name)` — 기존 프로젝트의 네이밍을 따른다.
+6. **레이아웃**: 루트 `layout.tsx`는 보통 `<html>` / `<body>`를 포함한다(`lang` 등). 중첩 `layout`은 자식 세그먼트를 감싼다.
+7. **`template.tsx` vs `layout.tsx`**: `template`은 네비게이션 시 자식을 **재마운트**한다(전환 애니메이션에 적합). `layout`은 상태를 **유지**한다 — 목적에 맞게 선택한다.
+8. **특수 파일**: 같은 세그먼트에 `loading.tsx`(Suspense 경계), `error.tsx`(클라이언트 error boundary + `reset`), `not-found.tsx`를 둘 수 있다. API/의미는 공식 file conventions를 따른다.
 
 ## MUST NOT
 
-- Client Component 파일에서 `metadata` export.
+- 동일 라우트 세그먼트에서 `export const metadata`와 `generateMetadata`를 **동시에** export하지 않는다.
+- Client Component 파일에서 `metadata` / `generateMetadata` / `viewport` export.
 - Server Component 본문에서 `window` / `document` / `localStorage` 직접 접근.
 - App Router인데 Pages 전용만의 패턴으로만 구현(`getServerSideProps` 등은 Pages 라우터용).
 
@@ -41,4 +45,5 @@ description: Next.js App Router — RSC 기본, use client, metadata, 라우팅 
 
 ## Reference
 
+- [Layout](https://nextjs.org/docs/app/api-reference/file-conventions/layout), [Template](https://nextjs.org/docs/app/api-reference/file-conventions/template), [loading.js](https://nextjs.org/docs/app/api-reference/file-conventions/loading), [error.js](https://nextjs.org/docs/app/api-reference/file-conventions/error), [not-found](https://nextjs.org/docs/app/api-reference/file-conventions/not-found)
 - Next.js — App Router, Server Components, Route Handlers (공식 문서, 설치된 `next` 메이저에 맞는 버전).
