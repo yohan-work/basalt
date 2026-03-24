@@ -41,6 +41,7 @@ IMPORTANT: Provide all analysis summaries and reasoning in KOREAN.
 | **KEY_DEPENDENCY_VERSIONS** | `next`/`react`/`typescript` 등 화이트리스트 semver. `summary`에 핵심 1~2문장으로 요약 가능(예: “Next 16, React 19, TS 5”). |
 | **MAJOR_SYNTAX_HINTS** | 있으면 반드시 읽고 `summary`·요구사항에 반영(예: React 18이면 React 19 전용 훅 금지). |
 | **`## EXPORT_STYLE_POLICY`** | 라우트 파일(`page`/`layout` 등)에서 `export default function` vs `const`+`export default` 중 무엇을 써야 하는지. `summary`에 **한 문장**으로 반영(플랜·구현이 팀 린트/관례와 맞도록). |
+| **Placeholder / demo images** | 사용자가 URL·경로를 주지 않았거나 태스크에 해당 자산 추가가 없으면 `/images/...` 같은 가짜 `public` 경로를 플랜·요약에 넣지 말 것. 데모 이미지는 **dummyimage.com**(`<W>x<H>/000/fff`) 전제로 한 문장을 `summary`에 반영. |
 | **Router Type / Router Base** | App Router vs Pages Router, 실제 경로 접두사(`app` vs `src/app`, `pages` vs `src/pages`). 루트 `app/`만 당연하다고 가정하지 말 것. |
 | **Route Policy Hint** | 비루트 라우트 예시·후보 경로. |
 | **INSTALLED PACKAGES** | `package.json`에 없는 npm 패키지를 전제로 한 구현·요약 금지. |

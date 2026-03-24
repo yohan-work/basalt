@@ -224,6 +224,8 @@ MANDATORY CODING RULES:
   - Violating this rule causes a FATAL "Module not found" build error that crashes the entire application.
 - 🚨 PLACEHOLDER / DEMO IMAGE URLS (ZERO TOLERANCE) 🚨:
   - If you output **any hard-coded http(s) URL** that loads a **raster image** for UI (hero, feature grid, cards, gallery, avatar mock, OG preview mock, etc.) and the **task text does not paste an exact URL** the user provided, you MUST use **only** \`https://dummyimage.com/<W>x<H>/000/fff\`. Change **only** \`<W>\` and \`<H>\` (e.g. \`https://dummyimage.com/1200x630/000/fff\` for hero, \`400x300\` for thumbnails). Keep \`/000/fff\` unless the user explicitly requests different hex colors.
+  - **Local/static \`src\` paths count too**: Unless the task **explicitly** names a file to add under \`public/\` (or you are actually writing that static/binary asset in the same output), you MUST **not** invent \`/images/...\`, \`/assets/...\`, \`./images/...\`, \`public/images/...\`, or similar — they **404** when the file does not exist. For demo/hero/card/gallery images in that situation, use **dummyimage** in \`<img src="https://dummyimage.com/...">\` instead.
+  - **Exception**: The user pasted an **exact** URL or **exact** repo/static path, **or** the task explicitly requires creating that asset — then you may use that URL/path.
   - This applies to **landing pages, marketing pages, /features, and any “nice” stock-looking image** — not only when the word “placeholder” appears.
   - **FORBIDDEN** for those cases: \`unsplash.com\`, \`images.unsplash.com\`, \`picsum.photos\`, \`via.placeholder.com\`, \`placehold.co\`, \`loremflickr\`, \`pexels.com\`, \`pixabay.com\`, or other stock/CDN URLs you invent.
   - Prefer plain \`<img src="https://dummyimage.com/...">\` so \`next/image\` does not require \`remotePatterns\` for dummy hosts.
@@ -289,7 +291,7 @@ MANDATORY CODING RULES:
   - **Data Fetching**: NEVER use \`getServerSideProps\` or \`getStaticProps\` (Page Router legacy). In App Router, use standard \`async/await\` in Server Components, or \`fetch\` inside \`useEffect\` in Client Components.
   - **Fetch API (JSON Parsing Error Prevention)**: When using \`fetch()\` to get JSON data, **ALWAYS** check \`response.ok\` and ensure the Content-Type is \`application/json\` BEFORE calling \`await response.json()\`. Otherwise, fetching a 404 endpoint will return Next.js HTML error pages, causing a fatal \`Unexpected token '<', "<!DOCTYPE "... is not valid JSON\` runtime crash.
 - **NEXT.JS IMAGE COMPONENTS**:
-  - Follow **PLACEHOLDER / DEMO IMAGE URLS (ZERO TOLERANCE)** above for any non-user-supplied image URL.
+  - Follow **PLACEHOLDER / DEMO IMAGE URLS (ZERO TOLERANCE)** above for any non-user-supplied **remote** image URL **and** for any non-user-supplied demo UI image (including invented \`/images/...\` / \`/assets/...\` static paths).
   - If you use \`next/image\` for a remote host, it MUST be listed in \`next.config\` \`images.remotePatterns\`. **dummyimage.com** is usually easier with \`<img>\` to avoid config (see next-image-unconfigured-host).
 - **HYDRATION**: Do not render different HTML on server vs first client paint (random IDs, \`Date.now()\` in markup, browser-only APIs in the render path). See react-hydration-error docs.
 - **SERVER ACTIONS**: Follow App Router server action rules — async functions, correct \`"use server"\` module/file placement, serializable arguments only.
