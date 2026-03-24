@@ -23,6 +23,7 @@ import {
     DialogFooter,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { pickPrimaryPageSourceFileFromChanges } from '@/lib/qa/infer-route-from-files';
 import { parseReactGrabClipboard } from '@/lib/parse-react-grab-clipboard';
 import { useIncomingReactGrab } from './IncomingReactGrabProvider';
 import { Badge } from '@/components/ui/badge';
@@ -322,6 +323,10 @@ export function TaskDetailsModal({
     const [isEditing, setIsEditing] = useState(false);
     const [modifyElementFilePath, setModifyElementFilePath] = useState('');
     const [modifyElementDescriptor, setModifyElementDescriptor] = useState('');
+    const [modifyElementLine, setModifyElementLine] = useState('');
+    const [modifyElementColumn, setModifyElementColumn] = useState('');
+    const [modifyElementSelector, setModifyElementSelector] = useState('');
+    const [modifyElementHtmlSnippet, setModifyElementHtmlSnippet] = useState('');
     const [modifyElementRequest, setModifyElementRequest] = useState('');
     const [isModifyingElement, setIsModifyingElement] = useState(false);
     const [isReviewing, setIsReviewing] = useState(false);
@@ -379,6 +384,10 @@ export function TaskDetailsModal({
             p.elementDescriptor ??
             ([p.componentName, p.filePath && (p.line != null ? `${p.filePath}:${p.line}` : p.filePath)].filter(Boolean).join(' ').trim() || p.stackString || '');
         setModifyElementDescriptor(descriptor);
+        setModifyElementLine(p.line != null ? String(p.line) : '');
+        setModifyElementColumn(p.column != null ? String(p.column) : '');
+        setModifyElementSelector(p.selector ?? '');
+        setModifyElementHtmlSnippet(p.htmlSnippet ?? '');
         setView('changes');
         clearIncomingReactGrab();
     }, [incomingReactGrabPayload, task, open, clearIncomingReactGrab]);
@@ -491,6 +500,9 @@ export function TaskDetailsModal({
         Boolean(qaSignoff) || ['testing', 'review', 'done'].includes(task.status);
     const progress = metadata.progress as ProgressInfo | undefined;
     const fileChanges = metadata.fileChanges as FileChange[] | undefined;
+    const defaultModifyFilePath =
+        pickPrimaryPageSourceFileFromChanges(fileChanges?.map((fc) => fc.filePath) ?? []) ??
+        fileChanges?.[0]?.filePath;
     const isFailed = task.status === 'failed';
     const isReview = task.status === 'review';
     const canEditOrReview = ['testing', 'review', 'done'].includes(task.status);
@@ -574,6 +586,10 @@ export function TaskDetailsModal({
             }
             if (parsed.filePath) setModifyElementFilePath(parsed.filePath);
             setModifyElementDescriptor(parsed.elementDescriptor);
+            setModifyElementLine(parsed.line != null ? String(parsed.line) : '');
+            setModifyElementColumn(parsed.column != null ? String(parsed.column) : '');
+            setModifyElementSelector('');
+            setModifyElementHtmlSnippet(parsed.htmlSnippet ?? '');
         } catch (e) {
             console.error('Paste element context failed', e);
             setActionError('클립보드를 읽을 수 없습니다. 브라우저에서 클립보드 접근을 허용해 주세요.');
@@ -581,17 +597,27 @@ export function TaskDetailsModal({
     };
 
     const handleOpenPreviewForGrab = async () => {
-        const projectId = task?.project_id;
-        if (!projectId) {
+        if (!task?.id) return;
+        if (!task.project_id) {
             setActionError('이 태스크에 연결된 프로젝트가 없어 미리보기를 열 수 없습니다.');
             return;
         }
         setActionError(null);
         try {
-            const res = await fetch(`/api/project/dev-server-info?projectId=${encodeURIComponent(projectId)}`);
+            const res = await fetch(`/api/project/task-preview-url?taskId=${encodeURIComponent(task.id)}`);
             const data = await res.json();
-            if (!res.ok || data.error) throw new Error(data.error || 'Failed to get dev server URL');
-            const url = data.url || `http://localhost:${data.port ?? 3001}`;
+            if (!res.ok || data.error) throw new Error(data.error || 'Failed to get task preview URL');
+            let url = typeof data.url === 'string' ? data.url.trim() : '';
+            if (!url) {
+                const res2 = await fetch(
+                    `/api/project/dev-server-info?projectId=${encodeURIComponent(task.project_id)}`
+                );
+                const d2 = await res2.json();
+                if (res2.ok && !d2.error) {
+                    url = (typeof d2.url === 'string' && d2.url.trim()) || `http://localhost:${d2.port ?? 3001}`;
+                }
+            }
+            if (!url) throw new Error('No preview URL');
             window.open(url, 'basalt-preview', 'noopener,noreferrer');
         } catch (e) {
             console.error('Open preview failed', e);
@@ -604,20 +630,39 @@ export function TaskDetailsModal({
         setIsModifyingElement(true);
         setActionError(null);
         try {
+            const parsePositiveInt = (s: string): number | undefined => {
+                const t = s.trim();
+                if (!t) return undefined;
+                const n = parseInt(t, 10);
+                if (!Number.isFinite(n) || n < 1) return undefined;
+                return n;
+            };
+            const line = parsePositiveInt(modifyElementLine);
+            const column = parsePositiveInt(modifyElementColumn);
+            const resolvedModifyFilePath =
+                modifyElementFilePath.trim() || defaultModifyFilePath || undefined;
             const res = await fetch('/api/agent/modify-element', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     taskId: task.id,
-                    filePath: modifyElementFilePath || undefined,
+                    filePath: resolvedModifyFilePath,
                     elementDescriptor: modifyElementDescriptor.trim() || undefined,
                     request: modifyElementRequest.trim(),
+                    ...(line != null ? { line } : {}),
+                    ...(column != null ? { column } : {}),
+                    ...(modifyElementSelector.trim() ? { selector: modifyElementSelector.trim() } : {}),
+                    ...(modifyElementHtmlSnippet.trim() ? { htmlSnippet: modifyElementHtmlSnippet.trim() } : {}),
                 }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Element modify request failed');
             setModifyElementRequest('');
             setModifyElementDescriptor('');
+            setModifyElementLine('');
+            setModifyElementColumn('');
+            setModifyElementSelector('');
+            setModifyElementHtmlSnippet('');
         } catch (error) {
             console.error('Modify element failed', error);
             setActionError(error instanceof Error ? error.message : '요소 수정 요청에 실패했습니다.');
@@ -1099,13 +1144,25 @@ export function TaskDetailsModal({
                                                 <Label className="text-xs">File</Label>
                                                 <select
                                                     className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                                                    value={modifyElementFilePath}
+                                                    value={
+                                                        modifyElementFilePath || defaultModifyFilePath || ''
+                                                    }
                                                     onChange={(e) => setModifyElementFilePath(e.target.value)}
                                                     disabled={isModifyingElement}
                                                 >
-                                                    <option value="">첫 번째 파일</option>
+                                                    {modifyElementFilePath &&
+                                                        !fileChanges!.some((f) => f.filePath === modifyElementFilePath) && (
+                                                            <option value={modifyElementFilePath}>
+                                                                {modifyElementFilePath} (grab)
+                                                            </option>
+                                                        )}
                                                     {fileChanges!.map((fc, idx) => (
-                                                        <option key={`${fc.filePath}-${fc.stepIndex ?? ''}-${idx}`} value={fc.filePath}>{fc.filePath}</option>
+                                                        <option
+                                                            key={`${fc.filePath}-${fc.stepIndex ?? ''}-${idx}`}
+                                                            value={fc.filePath}
+                                                        >
+                                                            {idx === 0 ? `${fc.filePath} · 최근 변경` : fc.filePath}
+                                                        </option>
                                                     ))}
                                                 </select>
                                             </div>
@@ -1117,6 +1174,41 @@ export function TaskDetailsModal({
                                                     placeholder="예: 타이틀, HeroSection"
                                                     value={modifyElementDescriptor}
                                                     onChange={(e) => setModifyElementDescriptor(e.target.value)}
+                                                    disabled={isModifyingElement}
+                                                />
+                                            </div>
+                                            <div className="flex flex-col gap-1 w-14">
+                                                <Label className="text-xs">Line</Label>
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                                                    placeholder="—"
+                                                    value={modifyElementLine}
+                                                    onChange={(e) => setModifyElementLine(e.target.value)}
+                                                    disabled={isModifyingElement}
+                                                />
+                                            </div>
+                                            <div className="flex flex-col gap-1 w-14">
+                                                <Label className="text-xs">Col</Label>
+                                                <input
+                                                    type="text"
+                                                    inputMode="numeric"
+                                                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                                                    placeholder="—"
+                                                    value={modifyElementColumn}
+                                                    onChange={(e) => setModifyElementColumn(e.target.value)}
+                                                    disabled={isModifyingElement}
+                                                />
+                                            </div>
+                                            <div className="flex flex-col gap-1 min-w-[120px] flex-1">
+                                                <Label className="text-xs">Selector (optional)</Label>
+                                                <input
+                                                    type="text"
+                                                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                                                    placeholder="CSS selector"
+                                                    value={modifyElementSelector}
+                                                    onChange={(e) => setModifyElementSelector(e.target.value)}
                                                     disabled={isModifyingElement}
                                                 />
                                             </div>
@@ -1138,6 +1230,17 @@ export function TaskDetailsModal({
                                             >
                                                 {isModifyingElement ? 'Modifying...' : 'Request Modify Element'}
                                             </Button>
+                                        </div>
+                                        <div className="flex flex-col gap-1">
+                                            <Label className="text-xs">HTML snippet (optional)</Label>
+                                            <textarea
+                                                className="min-h-[52px] rounded-md border border-input bg-background px-2 py-1.5 text-xs font-mono"
+                                                placeholder="react-grab이 채운 DOM 일부 — 요소 위치를 LLM에 고정하는 데 도움이 됩니다"
+                                                value={modifyElementHtmlSnippet}
+                                                onChange={(e) => setModifyElementHtmlSnippet(e.target.value)}
+                                                disabled={isModifyingElement}
+                                                rows={2}
+                                            />
                                         </div>
                                     </div>
                                 )}

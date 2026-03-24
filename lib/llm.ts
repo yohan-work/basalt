@@ -344,6 +344,24 @@ For EACH file you create or modify, you MUST use the following PRECISE format.
     \`\`\`
 `.trim();
 
+/** Minimal system rules for single-file surgical edits (modify-element). Avoids layout-catalog / greenfield rules from CODE_GENERATION_SYSTEM_RULES. */
+const SURGICAL_FILE_EDIT_SYSTEM_RULES = `
+You are a surgical editor for one existing TypeScript/TSX/React source file.
+
+STRICT SCOPE:
+- Output exactly ONE file using the File: line + fenced code block format (see FORMAT RULE in system message). No other text.
+- Change only the smallest code region needed to satisfy the user request for the single UI element described in the task. Leave all unrelated code unchanged.
+- Do NOT refactor, rename symbols, reorder declarations, reformat, or "clean up" code outside that region.
+- Do NOT modify imports unless the request strictly requires it for the targeted change only.
+- Do NOT add or remove unrelated components, sections, hooks, or JSX trees.
+- Preserve comments, strings, and spacing in untouched regions when possible.
+- If you cannot locate the described element, return the input file unchanged (still output the full file in the code block).
+
+CORRECTNESS (only when your edit touches these):
+- Respect existing "use client" / server boundaries; do not add metadata exports to client files.
+- Keep hook usage and controlled-input rules valid in the edited region.
+`.trim();
+
 /**
  * Extract files from raw LLM text using FileExtractor
  */
@@ -419,6 +437,82 @@ Task: ${prompt}
         console.error('LLM Generation Failed:', error);
         return {
             content: `Failed to generate code via AI: ${error.message}`,
+            files: [],
+            error: true
+        };
+    }
+}
+
+/**
+ * Single-file minimal edit path for modify-element: avoids CODE_GENERATION_SYSTEM_RULES.
+ */
+export async function generateSurgicalFileEdit(
+    prompt: string,
+    context: string,
+    model: string = MODEL_CONFIG.CODING_MODEL,
+    techStack: string = 'nextjs',
+    telemetry?: LLMTelemetryHooks
+): Promise<LLMResponse> {
+    validateModels();
+
+    const systemPromptText = `${SURGICAL_FILE_EDIT_SYSTEM_RULES}\n\n${FILE_FORMAT_INSTRUCTIONS}`;
+
+    const userPromptText = `
+Task Context: The target tech stack is ${techStack}.
+
+Context:
+${context}
+
+Task: ${prompt}
+`;
+
+    try {
+        const startedAt = Date.now();
+        telemetry?.onRequestStart?.({ mode: 'surgical-edit', model });
+        let fullText = '';
+        let tokens: LLMResponse['tokens'] = undefined;
+        await withRetry(async () => {
+            await ollamaRequest(
+                `${OLLAMA_BASE_URL}/api/generate`,
+                { model, system: systemPromptText, prompt: userPromptText, stream: false },
+                TIMEOUT_MS.CODE,
+                async (res) => {
+                    const chunks: any[] = [];
+                    for await (const chunk of res) chunks.push(chunk);
+                    const data = JSON.parse(Buffer.concat(chunks).toString());
+                    fullText = data.response;
+                    if (data.prompt_eval_count || data.eval_count) {
+                        tokens = {
+                            prompt_eval_count: data.prompt_eval_count || 0,
+                            eval_count: data.eval_count || 0
+                        };
+                    }
+                }
+            );
+        });
+
+        const files = extractFilesFromRaw(fullText);
+        const tokenMeta = tokens as { prompt_eval_count: number; eval_count: number } | undefined;
+        if (tokenMeta) {
+            telemetry?.onTokenUsage?.({
+                mode: 'surgical-edit',
+                model,
+                promptTokens: tokenMeta.prompt_eval_count,
+                completionTokens: tokenMeta.eval_count,
+            });
+        }
+        telemetry?.onRequestEnd?.({ mode: 'surgical-edit', model, latencyMs: Date.now() - startedAt });
+
+        return {
+            content: fullText.split('File:')[0].trim(),
+            files,
+            tokens
+        };
+    } catch (error: any) {
+        telemetry?.onError?.({ mode: 'surgical-edit', model, message: error.message });
+        console.error('[generateSurgicalFileEdit] Failed:', error);
+        return {
+            content: `Failed to generate surgical edit via AI: ${error.message}`,
             files: [],
             error: true
         };

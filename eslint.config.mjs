@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Copy-paste examples (optional deps / @ts-nocheck)
+    "reference/*.example.ts",
   ]),
 ]);
 

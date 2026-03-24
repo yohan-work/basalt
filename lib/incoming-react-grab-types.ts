@@ -11,6 +11,8 @@ export interface IncomingReactGrabPayload {
     stackString?: string;
     /** Optional: pre-built descriptor string (component + location) */
     elementDescriptor?: string;
+    /** Short outerHTML or similar from the selected DOM node (helps locate exact JSX) */
+    htmlSnippet?: string;
 }
 
 export const BASALT_REACT_GRAB_MESSAGE_TYPE = 'basalt-react-grab-context' as const;

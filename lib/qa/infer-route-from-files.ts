@@ -58,6 +58,20 @@ export function inferRoutePathFromFilePaths(filePaths: string[]): string | null 
 }
 
 /**
+ * Newest-first: first file path that maps to a page route (e.g. app/login/page.tsx).
+ * Skips layout.tsx, components, etc. Aligns default "modify element" file with QA preview route inference.
+ */
+export function pickPrimaryPageSourceFileFromChanges(filePaths: string[]): string | null {
+    for (let i = filePaths.length - 1; i >= 0; i--) {
+        const raw = filePaths[i] || '';
+        const n = normalizeFileKey(raw);
+        if (!n) continue;
+        if (filePathToNextRoute(n)) return raw;
+    }
+    return null;
+}
+
+/**
  * When QA URL falls back to `/` because no `page.tsx` was inferable — e.g. only `app/.../index.tsx` in changes.
  */
 export function buildQaRouteInferenceWarning(filePaths: string[]): string | undefined {

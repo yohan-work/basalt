@@ -50,6 +50,7 @@ export function IncomingReactGrabProvider({ children }: { children: ReactNode })
                     selector: p.selector,
                     stackString: p.stackString,
                     elementDescriptor: p.elementDescriptor,
+                    htmlSnippet: p.htmlSnippet,
                 });
             }
         };
