@@ -19,7 +19,8 @@ description: Heuristic project conventions — stack, router, UI kit, sampled us
 - `pageCandidatesSample`
 - `conventions`:
   - `useClientOccurrencesInSampledFiles`, `filesSampledForUseClient`
-  - `defaultVsNamedExportInPageSample` — 페이지 샘플에서 `export default` vs named export 힌트
+  - `defaultVsNamedExportInPageSample` — 페이지 후보 경로 기반 레거시 카운트(확장자 있는 경로만 유효)
+  - `routeExportStyle` — `resolveRouteExportStyle` 결과: `style`, `source`, `defaultFunctionCount`, `constArrowCount`, `skippedCount`, `sampledRelPaths` (`[PROJECT CONTEXT]`의 `## EXPORT_STYLE_POLICY`와 동일 소스)
   - `tsconfigPathPatterns` — 컴파일러 paths 키 샘플
 - `notes` — 해석 시 주의사항
 

@@ -18,7 +18,7 @@ Writes string content to a specified file path.
 1.  Ensure the directory structure exists. If not, create it.
 2.  Write the `content` to `filePath`.
 3.  Overwrite if file exists.
-4.  **STACK_RULES + UI_COMPONENT_POLICY (CRITICAL)**: `[PROJECT CONTEXT]`에 `[STACK_RULES]`(스택 전용)와 **`## UI_COMPONENT_POLICY`** 가 함께 있다. `STACK_RULES`가 최우선 기술 제약. 추가로 **`ABSENT`** 이면 `@/components/ui/*` import 금지(파일 생성 전까지); 시맨틱 HTML 또는 선행 primitives 작성. **`USE_EXISTING`** 이면 나열·확인된 파일만 import. 실행 초기 자동 스캐폴드 후에는 다음 컨텍스트부터 `USE_EXISTING`에 준한다.
+4.  **STACK_RULES + EXPORT_STYLE_POLICY + UI_COMPONENT_POLICY (CRITICAL)**: `[PROJECT CONTEXT]`에 `[STACK_RULES]`(스택 전용), **`## EXPORT_STYLE_POLICY`**(라우트 모듈의 `export default function …` vs `const …` + `export default`), **`## UI_COMPONENT_POLICY`** 가 함께 있을 수 있다. 우선순위: **`[STACK_RULES]`** → **`## EXPORT_STYLE_POLICY`**(새 `page`/`layout`(및 Pages Router 경로) 작성 시) → **`## UI_COMPONENT_POLICY`** / **UI Component Import Style**. `EXPORT_STYLE_POLICY`는 **UI 키트 import 규칙을 덮어쓰지 않는다**. **`ABSENT`** 이면 `@/components/ui/*` import 금지(파일 생성 전까지); 시맨틱 HTML 또는 선행 primitives 작성. **`USE_EXISTING`** 이면 나열·확인된 파일만 import. 실행 초기 자동 스캐폴드 후에는 다음 컨텍스트부터 `USE_EXISTING`에 준한다.
 5.  **IMPORTANT**: Always use the correct file extension based on the explicit `Tech Stack` provided in the context (e.g., use `.tsx` for React/Next.js components, `.ts` for logic, `.css`/`.scss` for styles).
 6.  Do NOT create `.txt` or `.md` files unless explicitly asked for documentation.
 7.  For UI components in Next.js/React, ensure you import React and necessary libraries.

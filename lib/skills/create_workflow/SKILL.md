@@ -20,7 +20,7 @@ IMPORTANT:
 - Every `agent` field MUST be one of the roles listed under **Available Agents and their skills** above. Do not invent new role names.
 - MANDATORY: Use the 'codebaseContext' provided above to determine actual file paths and folder structures.
 - MANDATORY: In `codebaseContext`, read **`## UI_COMPONENT_POLICY`** first. If it is **ABSENT**, do NOT plan steps that assume `@/components/ui/*` already exists unless an earlier step explicitly creates those files (or note that execute-time auto-scaffold may add minimal button/input/label for React/Next). If **USE_EXISTING**, you may plan imports only for listed components.
-- MANDATORY (저장소 전제): `[PROJECT CONTEXT]`의 **Router Type**, **Router Base**, **INSTALLED PACKAGES**, **`[WARNING] Router root`**, **Route Policy Hint**, **`[STACK_RULES]`** 를 읽는다. UI 정책과 **동일한 우선순위**로 워크플로에 반영한다.
+- MANDATORY (저장소 전제): `[PROJECT CONTEXT]`의 **VERSION_CONSTRAINTS**, **KEY_DEPENDENCY_VERSIONS**, **MAJOR_SYNTAX_HINTS**(있을 때), **`## EXPORT_STYLE_POLICY`**, **Router Type**, **Router Base**, **INSTALLED PACKAGES**, **`[WARNING] Router root`**, **Route Policy Hint**, **`[STACK_RULES]`** 를 읽는다. UI 정책과 **동일한 우선순위**로 워크플로에 반영한다. 워크플로 단계는 **파싱된 메이저·semver에 맞는 API**만 가정할 것(버전 착오 시 빌드 실패). 신규 라우트 파일 단계는 **`EXPORT_STYLE_POLICY`와 모순되지 않게** 기술할 것.
 - 신규 페이지·라우트: **`Router Base` 값 그대로** 하위 경로를 쓴다(예: Router Base가 `src/app`이면 `src/app/<segment>/page.tsx`). App Router는 세그먼트당 **`page.tsx`**(또는 `page.js`); Pages Router는 해당 프로젝트 관례를 따른다. 루트 `app/`만 전제로 단계를 쓰지 말 것.
 - Each 'description' MUST be UNIQUE, SPECIFIC and ACTIONABLE for the designated agent.
 - EVERY 'description' MUST BE WRITTEN IN KOREAN.

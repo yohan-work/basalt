@@ -16,6 +16,7 @@ Performs a comprehensive analysis of a project directory to understand its struc
 ## Outputs
 -   A JSON object containing (실행 구현 기준):
     -   `techStack`, `structure`, `routerBase`, `pageCandidates`, `routerDualRoot`, `routerResolutionNote`
+    -   플랜에 주입되는 `[PROJECT CONTEXT]`와 정합: **`VERSION_CONSTRAINTS`**, **`KEY_DEPENDENCY_VERSIONS`**, **`MAJOR_SYNTAX_HINTS`** 는 `ProjectProfiler.getContextString()`에서 동일 `depsWithVersions`·`majors`로 생성됨(`scan_project` JSON의 `dependencies` / `depsWithVersions`와 대응). **`## EXPORT_STYLE_POLICY`** 는 `lib/component-export-style.ts`의 `resolveRouteExportStyle`와 동일 소스.
     -   `entryPoints`: 루트 라우트 후보(`package.json` 포함)
     -   `configFiles`: 루트에 존재하는 설정 파일명
     -   `dependencies`, `depsWithVersions`

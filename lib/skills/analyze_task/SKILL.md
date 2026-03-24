@@ -37,13 +37,17 @@ IMPORTANT: Provide all analysis summaries and reasoning in KOREAN.
 | 항목 | 확인 내용 |
 |------|-----------|
 | **Tech Stack** | 프레임워크·런타임 표기(예: Next.js 버전 범위). |
+| **VERSION_CONSTRAINTS** | `[PROJECT CONTEXT]`의 **파싱 메이저 한 줄**(예: Next 메이저 15, React 메이저 19). `summary`에 **한국어로 반드시 인용**하고, 이 메이저와 맞지 않는 API·문법을 전제로 한 구현을 쓰지 말 것. |
+| **KEY_DEPENDENCY_VERSIONS** | `next`/`react`/`typescript` 등 화이트리스트 semver. `summary`에 핵심 1~2문장으로 요약 가능(예: “Next 16, React 19, TS 5”). |
+| **MAJOR_SYNTAX_HINTS** | 있으면 반드시 읽고 `summary`·요구사항에 반영(예: React 18이면 React 19 전용 훅 금지). |
+| **`## EXPORT_STYLE_POLICY`** | 라우트 파일(`page`/`layout` 등)에서 `export default function` vs `const`+`export default` 중 무엇을 써야 하는지. `summary`에 **한 문장**으로 반영(플랜·구현이 팀 린트/관례와 맞도록). |
 | **Router Type / Router Base** | App Router vs Pages Router, 실제 경로 접두사(`app` vs `src/app`, `pages` vs `src/pages`). 루트 `app/`만 당연하다고 가정하지 말 것. |
 | **Route Policy Hint** | 비루트 라우트 예시·후보 경로. |
 | **INSTALLED PACKAGES** | `package.json`에 없는 npm 패키지를 전제로 한 구현·요약 금지. |
 | **`[WARNING] Router root`** | 루트 `app/`와 `src/app/` 등 이중 존재 시 경고 문구 — 한쪽 트리만 쓴다고 가정하지 말 것. |
 | **`[STACK_RULES]`** | 스택별 필수/금지 규칙 요약. |
 
-요약(`summary`)에서 경로·스택 가정이 틀리면(예: 실제는 `src/app`인데 `app/`만 언급) 구현 단계에서 빌드·QA가 깨질 수 있음을 인지하고 교정한다.
+요약(`summary`)에서 경로·스택 가정이 틀리면(예: 실제는 `src/app`인데 `app/`만 언급) 구현 단계에서 빌드·QA가 깨질 수 있음을 인지하고 교정한다. **버전 전제**가 틀리면(다른 메이저 문법을 가정하면) 타입 오류·런타임 오류로 이어지므로 `VERSION_CONSTRAINTS`·`KEY_DEPENDENCY_VERSIONS`와 모순되지 않게 쓴다.
 
 ### 역할 선택 치트시트 (required_agents)
 아래는 **Available Agents** 목록의 **role 슬러그**를 고를 때의 가이드입니다. 요청에 해당 주제가 있으면 반드시 포함하세요. 복수 역할이 필요하면 배열에 모두 넣습니다.

@@ -5,6 +5,7 @@ import { promisify } from 'util';
 import * as ts from 'typescript';
 
 import { AgentDefinition, AgentLoader } from '../agent-loader';
+import { resolveRouteExportStyle } from '../component-export-style';
 import * as llm from '../llm';
 import { MODEL_CONFIG } from '../model-config';
 import { ProjectProfiler } from '../profiler';
@@ -1469,6 +1470,7 @@ export async function extract_patterns(projectPath: string = process.cwd(), file
 
     const pageSample = (data.pageCandidates || []).filter((p: string) => /\.(tsx|ts|jsx|js)$/i.test(p));
     const exportSample = detectDefaultVsNamedExportSample(root, pageSample);
+    const routeExportStyle = resolveRouteExportStyle(root, data.routerBase, data.structure);
 
     const aliasHints: string[] = [];
     try {
@@ -1493,6 +1495,14 @@ export async function extract_patterns(projectPath: string = process.cwd(), file
             useClientOccurrencesInSampledFiles: useClientHits,
             filesSampledForUseClient: filesScannedUseClient,
             defaultVsNamedExportInPageSample: exportSample,
+            routeExportStyle: {
+                style: routeExportStyle.style,
+                source: routeExportStyle.source,
+                defaultFunctionCount: routeExportStyle.defaultFunctionCount,
+                constArrowCount: routeExportStyle.constArrowCount,
+                skippedCount: routeExportStyle.skippedCount,
+                sampledRelPaths: routeExportStyle.sampledRelPaths,
+            },
             tsconfigPathPatterns: aliasHints.slice(0, 12),
         },
         notes: [
