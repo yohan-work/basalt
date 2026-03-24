@@ -222,6 +222,7 @@ MANDATORY CODING RULES:
     - NO classnames/clsx → use template literals (unless clsx IS installed)
     - NO qs → use \`URLSearchParams\`
   - Violating this rule causes a FATAL "Module not found" build error that crashes the entire application.
+  - Even when the runner can auto-install missing packages, **still treat the INSTALLED PACKAGES list as authoritative for your first output** — avoid speculative heavy libraries (e.g. charting) unless the task clearly needs them; unnecessary imports trigger slower repair loops.
 - 🚨 PLACEHOLDER / DEMO IMAGE URLS (ZERO TOLERANCE) 🚨:
   - If you output **any hard-coded http(s) URL** that loads a **raster image** for UI (hero, feature grid, cards, gallery, avatar mock, OG preview mock, etc.) and the **task text does not paste an exact URL** the user provided, you MUST use **only** \`https://dummyimage.com/<W>x<H>/000/fff\`. Change **only** \`<W>\` and \`<H>\` (e.g. \`https://dummyimage.com/1200x630/000/fff\` for hero, \`400x300\` for thumbnails). Keep \`/000/fff\` unless the user explicitly requests different hex colors.
   - **Local/static \`src\` paths count too**: Unless the task **explicitly** names a file to add under \`public/\` (or you are actually writing that static/binary asset in the same output), you MUST **not** invent \`/images/...\`, \`/assets/...\`, \`./images/...\`, \`public/images/...\`, or similar — they **404** when the file does not exist. For demo/hero/card/gallery images in that situation, use **dummyimage** in \`<img src="https://dummyimage.com/...">\` instead.

@@ -1,5 +1,6 @@
 
 import { supabase } from '@/lib/supabase';
+import { installMissingNpmPackages } from '@/lib/package-manager-install';
 import * as skills from '@/lib/skills';
 import * as llm from '@/lib/llm';
 import fs from 'fs';
@@ -1348,6 +1349,89 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
     }
 
     private static readonly MAX_UI_IMPORT_REPAIR_ATTEMPTS = 2;
+    private static readonly MAX_UNINSTALLED_NPM_LLM_REPAIRS = 2;
+
+    /** 미설치 npm import: 제거 후 시맨틱 HTML·이미 설치된 패키지만 사용 */
+    private async repairWriteCodeUninstalledNpmImports(options: {
+        relativePath: string;
+        content: string;
+        validationMessage: string;
+        missingNpmPackageRoots: string[];
+        projectPath: string;
+        techStack: string;
+        agentName: string;
+    }): Promise<string | null> {
+        const {
+            relativePath,
+            content,
+            validationMessage,
+            missingNpmPackageRoots,
+            projectPath,
+            techStack,
+            agentName,
+        } = options;
+        const prof = await this.profiler.getProfileData();
+        const tailNote = prof.hasTailwind
+            ? 'Tailwind is installed; you may use className with utility classes where appropriate.'
+            : 'Tailwind is NOT installed; do NOT use Tailwind classes—use semantic HTML, inline style, or existing CSS patterns from the repo.';
+
+        const forbid = missingNpmPackageRoots.join(', ');
+        const userPrompt = `
+Fix ONE file. Static import validation failed (npm packages not installed / not in package.json):
+
+${validationMessage}
+
+You MUST remove every import that resolves to these package roots (including subpaths): ${forbid}.
+Do NOT add any new npm dependencies. Use only packages already in the target project's package.json, relative imports, and browser/Node built-ins.
+
+${tailNote}
+
+Original file path: ${relativePath}
+
+Original source:
+\`\`\`tsx
+${content}
+\`\`\`
+
+Requirements:
+- Output the full corrected file using the required multi-file format with this exact path.
+- Remove imports from the forbidden package roots entirely; replace charts/widgets with semantic HTML, tables, SVG, or simple CSS layouts as appropriate.
+- Preserve "use client" / "use server" if present at the top.
+- Keep readable contrast for text vs backgrounds.
+
+Return ONLY:
+File: ${relativePath}
+\`\`\`tsx
+...full file...
+\`\`\`
+`.trim();
+
+        const context = `[PROJECT CONTEXT — uninstalled npm import repair]\n${tailNote}\n- Target project root: ${projectPath}`;
+
+        const resp = await llm.generateCodeStream(
+            userPrompt,
+            context,
+            this.emitter,
+            MODEL_CONFIG.CODING_MODEL,
+            techStack,
+            () => this.refreshLock(),
+            this.llmTelemetry({ action: 'write_code_uninstalled_npm_repair', agent: agentName })
+        );
+
+        if (resp?.tokens) {
+            await this.accumulateTokens(resp.tokens.prompt_eval_count, resp.tokens.eval_count);
+        }
+
+        if (resp?.error || !resp.files?.length) return null;
+
+        const want = relativePath.replace(/\\/g, '/');
+        const norm = (p: string) => p.replace(/\\/g, '/');
+        const hit =
+            resp.files.find((f) => norm(f.path) === want) ||
+            resp.files.find((f) => want.endsWith(norm(f.path)) || norm(f.path).endsWith(want));
+        const picked = hit || resp.files[0];
+        return picked?.content?.trim() ? picked.content : null;
+    }
 
     /** `@/components/ui/*` 화이트리스트 위반 시 단일 파일만 LLM으로 수정 */
     private async repairWriteCodeDisallowedUiImports(options: {
@@ -1906,6 +1990,8 @@ File: ${relativePath}
                                             let contentToWrite = file.content;
                                             let writeResult: any = null;
                                             let uiMissingScaffoldAttempted = false;
+                                            let npmAutoInstallAttempted = false;
+                                            let uninstalledLlmRepairs = 0;
                                             for (
                                                 let repairRound = 0;
                                                 repairRound <= Orchestrator.MAX_UI_IMPORT_REPAIR_ATTEMPTS;
@@ -1922,9 +2008,91 @@ File: ${relativePath}
                                                           codes?: string[];
                                                           allowedUiBasenames?: string[];
                                                           offendingUiSpecifiers?: string[];
+                                                          missingNpmPackageRoots?: string[];
                                                       }
                                                     | undefined;
                                                 const hasUninstalled = detail.includes('Uninstalled npm package');
+                                                const missingRoots = Array.isArray(iv?.missingNpmPackageRoots)
+                                                    ? iv!.missingNpmPackageRoots!.filter(
+                                                          (p): p is string => typeof p === 'string' && p.length > 0
+                                                      )
+                                                    : [];
+
+                                                if (
+                                                    hasUninstalled &&
+                                                    missingRoots.length > 0 &&
+                                                    !npmAutoInstallAttempted
+                                                ) {
+                                                    npmAutoInstallAttempted = true;
+                                                    const installRes = await installMissingNpmPackages(
+                                                        projectPath,
+                                                        missingRoots
+                                                    );
+                                                    const installNote = installRes.skipped
+                                                        ? `auto_npm_install_skipped: ${installRes.skipReason || 'n/a'}`
+                                                        : installRes.ok
+                                                          ? `auto_npm_install_ok: [${installRes.manager}] ${installRes.packages.join(', ')} | ${installRes.command}`
+                                                          : `auto_npm_install_failed: ${installRes.command} | ${installRes.error || 'unknown'}`;
+                                                    existingRepairs.push(
+                                                        this.buildExecutionRepairRecord(stepIndex, action, installNote)
+                                                    );
+                                                    await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                    if (installRes.ok) {
+                                                        skills.reset_runtime_caches();
+                                                        await this.log(
+                                                            stepAgentDef.name,
+                                                            `Auto-installed npm: ${installRes.packages.join(', ')} (${installRes.manager})`,
+                                                            { type: 'System' }
+                                                        );
+                                                        repairRound--;
+                                                        continue;
+                                                    }
+                                                }
+
+                                                if (
+                                                    hasUninstalled &&
+                                                    missingRoots.length > 0 &&
+                                                    uninstalledLlmRepairs < Orchestrator.MAX_UNINSTALLED_NPM_LLM_REPAIRS
+                                                ) {
+                                                    uninstalledLlmRepairs += 1;
+                                                    const repairedUn = await this.repairWriteCodeUninstalledNpmImports({
+                                                        relativePath: normalizedPath.path,
+                                                        content: contentToWrite,
+                                                        validationMessage: detail,
+                                                        missingNpmPackageRoots: missingRoots,
+                                                        projectPath,
+                                                        techStack,
+                                                        agentName: stepAgentDef.name,
+                                                    });
+                                                    if (repairedUn) {
+                                                        contentToWrite = repairedUn;
+                                                        existingRepairs.push(
+                                                            this.buildExecutionRepairRecord(
+                                                                stepIndex,
+                                                                action,
+                                                                `uninstalled_npm_llm_repair round ${uninstalledLlmRepairs} for ${normalizedPath.path}`
+                                                            )
+                                                        );
+                                                        await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                        await this.log(
+                                                            stepAgentDef.name,
+                                                            `Uninstalled npm LLM repair round ${uninstalledLlmRepairs} for ${normalizedPath.path}`,
+                                                            { type: 'WARNING' }
+                                                        );
+                                                        repairRound--;
+                                                        continue;
+                                                    }
+                                                    existingRepairs.push(
+                                                        this.buildExecutionRepairRecord(
+                                                            stepIndex,
+                                                            action,
+                                                            `uninstalled_npm_llm_repair_empty round ${uninstalledLlmRepairs} for ${normalizedPath.path}`
+                                                        )
+                                                    );
+                                                    await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                    repairRound--;
+                                                    continue;
+                                                }
 
                                                 const offenders = Array.isArray(iv?.offendingUiSpecifiers)
                                                     ? iv!.offendingUiSpecifiers!

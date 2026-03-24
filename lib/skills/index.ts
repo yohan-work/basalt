@@ -62,6 +62,8 @@ export type ImportValidationResult =
           codes: ImportValidationCode[];
           allowedUiBasenames?: string[];
           offendingUiSpecifiers?: string[];
+          /** 외부 npm 패키지 미설치 시 루트 이름(@scope/pkg 또는 pkg) — 자동 설치·복구용 */
+          missingNpmPackageRoots?: string[];
       };
 
 const BUILTIN_NODE_MODULES = new Set([
@@ -277,6 +279,7 @@ async function validateImportsExistence(
     const uiComponentImports: string[] = [];
     const missingImports: string[] = [];
     const missingPackages: string[] = [];
+    let missingNpmPackageRoots: string[] | undefined;
     const violationCodes = new Set<ImportValidationCode>();
     const offendingUiSpecifiers = new Set<string>();
 
@@ -392,6 +395,7 @@ async function validateImportsExistence(
             ? Array.from(installedPkgs).sort().join(', ')
             : 'N/A';
         const missingRoots = [...new Set(missingPackages.map((s) => getBasePackageName(s)))];
+        missingNpmPackageRoots = missingRoots;
         const installHint =
             missingRoots.length > 0
                 ? ` 복구: 프로젝트 루트에서 \`npm install ${missingRoots.join(' ')}\` 실행 후 같은 단계를 재시도하거나, 해당 import를 제거하고 이미 설치된 패키지·표준 API(예: 날짜는 \`Intl.DateTimeFormat\`)만 사용하세요.`
@@ -423,6 +427,7 @@ async function validateImportsExistence(
             allowedUiBasenames: hasDiscoveredUiKit ? Array.from(uiComponents).sort() : undefined,
             offendingUiSpecifiers:
                 offendingUiSpecifiers.size > 0 ? Array.from(offendingUiSpecifiers) : undefined,
+            missingNpmPackageRoots,
         };
     }
 
@@ -851,6 +856,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
                     codes: importValidation.codes,
                     allowedUiBasenames: importValidation.allowedUiBasenames,
                     offendingUiSpecifiers: importValidation.offendingUiSpecifiers,
+                    missingNpmPackageRoots: importValidation.missingNpmPackageRoots,
                 },
             };
         }

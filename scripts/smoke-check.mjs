@@ -23,6 +23,7 @@ const REQUIRED_PATHS = [
     'lib/stack-profile.ts',
     'lib/stack-version-context.ts',
     'lib/component-export-style.ts',
+    'lib/package-manager-install.ts',
     'lib/stack-rules/load.ts',
     'lib/stack-rules/universal.md',
     'lib/stack-rules/next-app-router.md',
