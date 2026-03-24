@@ -1350,6 +1350,7 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
 
     private static readonly MAX_UI_IMPORT_REPAIR_ATTEMPTS = 2;
     private static readonly MAX_UNINSTALLED_NPM_LLM_REPAIRS = 2;
+    private static readonly MAX_TYPESCRIPT_DIAGNOSTIC_REPAIRS = 3;
 
     /** 미설치 npm import: 제거 후 시맨틱 HTML·이미 설치된 패키지만 사용 */
     private async repairWriteCodeUninstalledNpmImports(options: {
@@ -1503,6 +1504,76 @@ File: ${relativePath}
             techStack,
             () => this.refreshLock(),
             this.llmTelemetry({ action: 'write_code_ui_import_repair', agent: agentName })
+        );
+
+        if (resp?.tokens) {
+            await this.accumulateTokens(resp.tokens.prompt_eval_count, resp.tokens.eval_count);
+        }
+
+        if (resp?.error || !resp.files?.length) return null;
+
+        const want = relativePath.replace(/\\/g, '/');
+        const norm = (p: string) => p.replace(/\\/g, '/');
+        const hit =
+            resp.files.find((f) => norm(f.path) === want) ||
+            resp.files.find((f) => want.endsWith(norm(f.path)) || norm(f.path).endsWith(want));
+        const picked = hit || resp.files[0];
+        return picked?.content?.trim() ? picked.content : null;
+    }
+
+    /** 단일 파일 TypeScript 진단 실패(write_code 후 검증) 시 LLM으로 수정 */
+    private async repairWriteCodeTypeScriptDiagnostics(options: {
+        relativePath: string;
+        content: string;
+        validationMessage: string;
+        projectPath: string;
+        techStack: string;
+        agentName: string;
+    }): Promise<string | null> {
+        const { relativePath, content, validationMessage, projectPath, techStack, agentName } = options;
+        const prof = await this.profiler.getProfileData();
+        const tailNote = prof.hasTailwind
+            ? 'Tailwind is installed; you may use className with utility classes where appropriate.'
+            : 'Tailwind is NOT installed; do NOT use Tailwind classes—use semantic HTML, inline style, or existing CSS patterns from the repo.';
+
+        const userPrompt = `
+Fix ONE file. TypeScript validation failed after write (tsc diagnostics):
+
+${validationMessage}
+
+Hard rules:
+- Remove ANY \`import … from 'intl'\` or \`require('intl')\`. Do NOT add the npm \`intl\` polyfill. Use the **global \`Intl\` object** only (\`Intl.DateTimeFormat\`, \`Intl.NumberFormat\`, \`Intl.RelativeTimeFormat\`, etc.).
+- Fix syntax errors (e.g. TS1005) so the file is valid TypeScript/TSX — especially broken \`import\` / \`import type\` lines.
+- Do NOT add new npm packages or \`@types/*\` unless already in the project's package.json; prefer built-ins and existing deps.
+- Preserve "use client" / "use server" if present at the top (when valid for that file).
+- Keep readable contrast for text vs backgrounds.
+
+${tailNote}
+
+Original file path: ${relativePath}
+
+Original source:
+\`\`\`tsx
+${content}
+\`\`\`
+
+Return ONLY:
+File: ${relativePath}
+\`\`\`tsx
+...full corrected file...
+\`\`\`
+`.trim();
+
+        const context = `[PROJECT CONTEXT — TypeScript diagnostic repair]\n${tailNote}\n- Target project root: ${projectPath}`;
+
+        const resp = await llm.generateCodeStream(
+            userPrompt,
+            context,
+            this.emitter,
+            MODEL_CONFIG.CODING_MODEL,
+            techStack,
+            () => this.refreshLock(),
+            this.llmTelemetry({ action: 'write_code_typescript_repair', agent: agentName })
         );
 
         if (resp?.tokens) {
@@ -1992,6 +2063,7 @@ File: ${relativePath}
                                             let uiMissingScaffoldAttempted = false;
                                             let npmAutoInstallAttempted = false;
                                             let uninstalledLlmRepairs = 0;
+                                            let typescriptDiagnosticRepairs = 0;
                                             for (
                                                 let repairRound = 0;
                                                 repairRound <= Orchestrator.MAX_UI_IMPORT_REPAIR_ATTEMPTS;
@@ -2136,6 +2208,47 @@ File: ${relativePath}
                                                             stepAgentDef.name,
                                                             `Auto-scaffolded missing UI: ${scaffolded.createdFiles.join(', ')}`,
                                                             { type: 'System' }
+                                                        );
+                                                        repairRound--;
+                                                        continue;
+                                                    }
+                                                }
+
+                                                const isTypeScriptDiagnosticFailure =
+                                                    (detail.includes('TypeScript errors') ||
+                                                        detail.includes('Type validation failed') ||
+                                                        detail.includes('Failed to validate TypeScript')) &&
+                                                    !writeResult?.rscBoundaryViolation;
+
+                                                if (
+                                                    isTypeScriptDiagnosticFailure &&
+                                                    typescriptDiagnosticRepairs <
+                                                        Orchestrator.MAX_TYPESCRIPT_DIAGNOSTIC_REPAIRS
+                                                ) {
+                                                    typescriptDiagnosticRepairs += 1;
+                                                    const repairedTs = await this.repairWriteCodeTypeScriptDiagnostics({
+                                                        relativePath: normalizedPath.path,
+                                                        content: contentToWrite,
+                                                        validationMessage: detail,
+                                                        projectPath,
+                                                        techStack,
+                                                        agentName: stepAgentDef.name,
+                                                    });
+                                                    if (repairedTs) {
+                                                        contentToWrite = repairedTs;
+                                                        skills.reset_runtime_caches();
+                                                        existingRepairs.push(
+                                                            this.buildExecutionRepairRecord(
+                                                                stepIndex,
+                                                                action,
+                                                                `typescript_diagnostic_repair round ${typescriptDiagnosticRepairs} for ${normalizedPath.path}`
+                                                            )
+                                                        );
+                                                        await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                        await this.log(
+                                                            stepAgentDef.name,
+                                                            `TypeScript repair round ${typescriptDiagnosticRepairs} for ${normalizedPath.path}`,
+                                                            { type: 'WARNING' }
                                                         );
                                                         repairRound--;
                                                         continue;

@@ -233,6 +233,7 @@ MANDATORY CODING RULES:
     - NO axios → use native \`fetch()\`
     - NO lodash → use native JS methods (map, filter, reduce, structuredClone)
     - NO moment/dayjs → use native \`Date\` or \`Intl.DateTimeFormat\`
+    - NO npm package \`intl\` and NO \`import … from 'intl'\` / \`require('intl')\` — the **global \`Intl\` API** (\`Intl.DateTimeFormat\`, \`Intl.NumberFormat\`, \`Intl.RelativeTimeFormat\`, \`Intl.DisplayNames\`, etc.) is built into modern JS runtimes and Next.js targets. The legacy \`intl\` polyfill package lacks typings and often breaks TypeScript (TS7016) or invites invalid import syntax (TS1005).
     - NO uuid → use \`crypto.randomUUID()\`
     - NO classnames/clsx → use template literals (unless clsx IS installed)
     - NO qs → use \`URLSearchParams\`
@@ -256,7 +257,7 @@ MANDATORY CODING RULES:
   - **Design tokens**: When the project defines \`bg-background\`, \`text-foreground\`, \`text-muted-foreground\`, etc., prefer them on page/section roots so body copy stays readable without relying on fragile inheritance.
   - **Inline styles**: If you set a light \`background\`/\`backgroundColor\`, you MUST set an explicit dark enough \`color\` on the same element (or a child wrapper) so text never inherits a near-white color onto a near-white background.
   - Violations produce **unusable UI** (invisible text); treat this as seriously as import or routing errors.
-- Generate COMPLETE, working TypeScript code with all necessary imports.
+- Generate COMPLETE, working TypeScript code with all necessary imports; every \`import\` / \`import type\` line MUST be valid TS/TSX syntax (no mixed keywords, no stray commas).
 - For React components, use proper TypeScript types and export as default.
 - 🚨 STATE / JSX IDENTIFIER CONSISTENCY (ZERO TOLERANCE) 🚨:
   - Every identifier referenced inside JSX or render expressions (\`{showPassword}\`, \`{isOpen && …}\`, \`value={query}\`, etc.) MUST be **declared in the same component function scope** (e.g. \`useState\`, \`useReducer\`, props, or \`const\` above the \`return\`) or **imported**. Never reference a name you did not define — this causes **ReferenceError** / **TS2304 Cannot find name** at runtime or build.

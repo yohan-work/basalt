@@ -1172,13 +1172,64 @@ export { consult_agents, type ConsultAgentsOptions } from './consult_agents/exec
 export { verify_final_output } from './verify_final_output/execute';
 
 // --- Software Engineer Skills ---
+
+/**
+ * When `path.relative(project, absoluteFile)` fails (different roots, symlinks), infer repo-relative path from
+ * Next.js / Pages markers. First match wins. May mis-detect rare paths like `.../node_modules/.../app/`.
+ */
+function extractFrameworkRelativeFromAbsolutePath(absolutePosixish: string): string | null {
+    const n = absolutePosixish.replace(/\\/g, '/');
+    let idx = n.indexOf('/src/app/');
+    if (idx >= 0) {
+        return n.slice(idx + 1).replace(/\/+/g, '/');
+    }
+    idx = n.indexOf('/src/pages/');
+    if (idx >= 0) {
+        return n.slice(idx + 1).replace(/\/+/g, '/');
+    }
+    idx = n.search(/\/app\//);
+    if (idx >= 0) {
+        return n.slice(idx + 1).replace(/\/+/g, '/');
+    }
+    idx = n.search(/\/pages\//);
+    if (idx >= 0) {
+        return n.slice(idx + 1).replace(/\/+/g, '/');
+    }
+    if (/^(src\/app\/|app\/|src\/pages\/|pages\/)/.test(n)) {
+        return n.replace(/\/+/g, '/');
+    }
+    return null;
+}
+
+/**
+ * Normalize a path for reads/writes under `projectPath`.
+ * - Absolute paths inside the project → repo-relative POSIX path (fixes modify-element / react-grab absolute file paths).
+ * - If `path.relative` leaves the tree (`..`) or is empty, try `src/app/`, `app/`, etc. from the absolute path.
+ * - Otherwise → strip mistaken leading slashes (e.g. "/app/page.tsx" → "app/page.tsx") and normalize separators.
+ */
+export function resolvePathRelativeToProject(filePath: string, projectPath: string): string {
+    const trimmed = filePath.trim();
+    if (!trimmed) return trimmed;
+    const absProj = path.resolve(projectPath);
+    if (path.isAbsolute(trimmed)) {
+        const absTarget = path.resolve(trimmed);
+        const rel = path.relative(absProj, absTarget);
+        if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+            return rel.split(path.sep).join('/');
+        }
+        const posixish = absTarget.split(path.sep).join('/');
+        const fromMarker = extractFrameworkRelativeFromAbsolutePath(posixish);
+        if (fromMarker) {
+            return fromMarker.replace(/^\/+/, '');
+        }
+        return trimmed.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+    }
+    return trimmed.replace(/^[/\\]+/, '').replace(/\\/g, '/');
+}
+
 export async function read_codebase(filePath: string, projectPath: string = process.cwd()) {
     try {
-        // Secure handle: if path starts with '/', treat it as relative to projectPath to avoid OS root access
-        let relativePath = filePath;
-        if (path.isAbsolute(filePath)) {
-            relativePath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-        }
+        const relativePath = resolvePathRelativeToProject(filePath, projectPath);
         const fullPath = path.resolve(projectPath, relativePath);
         const cacheKey = `${projectPath}:${relativePath}`;
         if (READ_CACHE.has(cacheKey)) {
@@ -1198,8 +1249,7 @@ export async function read_codebase(filePath: string, projectPath: string = proc
 
 export async function write_code(filePath: string, content: string, baseDir: string = process.cwd()) {
     try {
-        // Ensure relative path by stripping leading slash
-        const relativePath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+        const relativePath = resolvePathRelativeToProject(filePath, baseDir);
         const fullPath = path.resolve(baseDir, relativePath);
         const dir = path.dirname(fullPath);
 
@@ -1213,7 +1263,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
             };
         }
 
-        const withClientDirective = ensureClientDirectiveForReactHooks(filePath, content);
+        const withClientDirective = ensureClientDirectiveForReactHooks(relativePath, content);
         const sanitizedContent = sanitizeMetadataImportAliases(withClientDirective, relativePath, baseDir);
 
         const boundaryFinal = validateAppRouterServerExportClientBoundary(relativePath, sanitizedContent);
@@ -1267,6 +1317,15 @@ export async function write_code(filePath: string, content: string, baseDir: str
         fs.writeFileSync(fullPath, sanitizedContent, 'utf-8');
         const typeSafety = await validateGeneratedTypeSafety(relativePath, baseDir, filePath);
         if (!typeSafety.valid) {
+            try {
+                if (before !== null) {
+                    fs.writeFileSync(fullPath, before, 'utf-8');
+                } else if (fs.existsSync(fullPath)) {
+                    fs.unlinkSync(fullPath);
+                }
+            } catch {
+                // Best-effort rollback; caller may retry with repaired content.
+            }
             return {
                 success: false,
                 message: typeSafety.message || `Type validation failed for ${filePath}`,
@@ -1421,16 +1480,12 @@ export async function search_npm_package(query: string, projectPath: string = pr
 }
 
 // --- Style Architect Skills ---
-function normalizeProjectRelativePath(filePath: string): string {
-    return filePath.startsWith('/') ? filePath.substring(1) : filePath;
-}
-
 /**
  * Aligns one component/page file with the **target** project's styling (tokens, Tailwind, existing patterns).
  * Requires `projectPath` as final arg when invoked from the orchestrator (same pattern as `read_codebase`).
  */
 export async function apply_design_system(componentPath: string, projectPath: string = process.cwd()) {
-    const relativePath = normalizeProjectRelativePath(componentPath);
+    const relativePath = resolvePathRelativeToProject(componentPath, projectPath);
     const fullPath = path.resolve(projectPath, relativePath);
     if (!fs.existsSync(fullPath)) {
         return `apply_design_system: file not found — ${relativePath} (project: ${projectPath})`;

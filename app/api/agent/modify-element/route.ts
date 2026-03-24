@@ -179,14 +179,15 @@ export async function POST(req: NextRequest) {
         let currentContent: string;
 
         if (filePath && typeof filePath === 'string' && filePath.trim()) {
-            targetPath = filePath.trim();
-            const readResult = await skills.read_codebase(targetPath, projectPath);
+            const trimmedFilePath = filePath.trim();
+            const readResult = await skills.read_codebase(trimmedFilePath, projectPath);
             if (typeof readResult !== 'string' || readResult.startsWith('File "')) {
-                return NextResponse.json({ error: `File not found: ${targetPath}` }, { status: 400 });
+                return NextResponse.json({ error: `File not found: ${trimmedFilePath}` }, { status: 400 });
             }
             currentContent = readResult;
+            targetPath = skills.resolvePathRelativeToProject(trimmedFilePath, projectPath);
         } else if (fileChanges?.length) {
-            targetPath = fileChanges[0].filePath;
+            targetPath = skills.resolvePathRelativeToProject(fileChanges[0].filePath, projectPath);
             currentContent = fileChanges[0].after;
         } else {
             return NextResponse.json({ error: 'No file to modify. Provide filePath or ensure task has file changes.' }, { status: 400 });
