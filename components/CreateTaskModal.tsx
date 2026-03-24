@@ -188,14 +188,18 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-lg" onKeyDown={handleKeyDown}>
-                <DialogHeader>
+            <DialogContent
+                className="sm:max-w-lg max-h-[min(90dvh,calc(100vh-2rem))] flex flex-col overflow-hidden gap-4"
+                onKeyDown={handleKeyDown}
+            >
+                <DialogHeader className="shrink-0">
                     <DialogTitle>Create New Task</DialogTitle>
                     <DialogDescription>
                         AI 에이전트가 처리할 새 태스크를 입력하세요.
                     </DialogDescription>
                 </DialogHeader>
 
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pr-1 -mr-1">
                 {/* Template Selection */}
                 <div className="border border-border">
                     <button
@@ -362,8 +366,9 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
                         </div>
                     )}
                 </div>
+                </div>
 
-                <DialogFooter>
+                <DialogFooter className="shrink-0 border-t border-border pt-4">
                     <span className="text-xs text-muted-foreground mr-auto hidden sm:inline">
                         Cmd+Enter로 바로 생성
                     </span>
