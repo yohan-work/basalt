@@ -42,6 +42,7 @@ IMPORTANT: Provide all analysis summaries and reasoning in KOREAN.
 | **MAJOR_SYNTAX_HINTS** | 있으면 반드시 읽고 `summary`·요구사항에 반영(예: React 18이면 React 19 전용 훅 금지). |
 | **`## EXPORT_STYLE_POLICY`** | 라우트 파일(`page`/`layout` 등)에서 `export default function` vs `const`+`export default` 중 무엇을 써야 하는지. `summary`에 **한 문장**으로 반영(플랜·구현이 팀 린트/관례와 맞도록). |
 | **Placeholder / demo images** | 사용자가 URL·경로를 주지 않았거나 태스크에 해당 자산 추가가 없으면 `/images/...` 같은 가짜 `public` 경로를 플랜·요약에 넣지 말 것. 데모 이미지는 **dummyimage.com**(`<W>x<H>/000/fff`) 전제로 한 문장을 `summary`에 반영. |
+| **UI 레이아웃 패턴** | 화면 구조가 태스크에 **명시되지 않은** UI·페이지 요청이면, 전역 규칙의 패턴 카탈로그 중 하나를 고른다: `ContainedStack`, `HeroBandPlusSections`, `SplitFeature`, `BentoGrid`, `SidebarContent`, `AppShell`, `DashboardGrid`, `SingleColumnArticle`, `PricingOrCompare`, `StepsTimeline`, `FAQStack`. `summary`에 **영문 패턴 ID 한 개**와 **한국어로 선택 근거 한 문장**(키워드·의도)을 반드시 넣는다. 태스크가 이미 레이아웃을 정했으면 그에 맞춰 패턴 이름을 쓰거나 “명시됨”으로 적고 카탈로그를 덮어쓰지 않는다. 애매하면 `ContainedStack`을 쓴다고 명시한다. |
 | **Router Type / Router Base** | App Router vs Pages Router, 실제 경로 접두사(`app` vs `src/app`, `pages` vs `src/pages`). 루트 `app/`만 당연하다고 가정하지 말 것. |
 | **Route Policy Hint** | 비루트 라우트 예시·후보 경로. |
 | **INSTALLED PACKAGES** | `package.json`에 없는 npm 패키지를 전제로 한 구현·요약 금지. |

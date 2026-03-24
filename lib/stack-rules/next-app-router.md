@@ -35,9 +35,11 @@ description: Next.js App Router — RSC 기본, use client, metadata, 라우팅 
 11. **Hydration**: 서버가 보낸 HTML과 클라이언트 첫 렌더가 같아야 한다. 렌더 경로에서 `Date.now` / `Math.random` / 브라우저 전용 값으로 마크업이 달라지지 않게 한다.
 12. **next/image**: 외부 호스트는 `next.config`의 `images.remotePatterns`(또는 문서 권장 설정)에 등록한다.
 13. **더미·데모·랜딩 이미지 (필수)**: 태스크에 **구체적인 이미지 URL**이나 **실제로 추가할 정적 파일 경로**가 없으면, 히어로·기능 소개·카드·갤러리 등 **데모용 래스터**는 `https://dummyimage.com/<W>x<H>/000/fff` 만 쓴다. **W·H 숫자만** 바꾼다(예: `1200x630`, `600x600`). `/000/fff`는 사용자가 색을 지정할 때만 변경. **금지**: 존재하지 않는 파일을 가정하는 `/images/...`, `/assets/...`, `public/images/...` 등(같은 변경에서 해당 파일을 만들지 않는 한). **금지**: Unsplash, Picsum, via.placeholder.com, placehold.co, Pexels 등 스톡/임의 CDN. 설정 부담을 줄이려면 `<img src="https://dummyimage.com/...">`를 우선한다. 사용자가 URL/경로를 명시했거나 태스크가 해당 자산 추가를 요구할 때만 로컬·상대 경로 허용.
+14. **페이지 본문 레이아웃 vs 루트 `layout`**: 마케팅·앱 셸·사이드바 등은 **`page.tsx`(또는 클라이언트 하위 컴포넌트) 본문**에서만 구성한다. 루트 `layout.tsx`가 이미 `<html>` / `<body>`를 제공하므로, 새 페이지에 **중복 `<html>`·`<body>`** 를 두지 않는다. `AppShell`·`SidebarContent` 패턴은 기존 루트/중첩 레이아웃과 **역할이 겹치지 않게** 조정한다(필요하면 공유 레이아웃으로 승격하는 것은 태스크·플랜이 명시할 때만).
 
 ## MUST NOT
 
+- 라우트 `page`에서 또 다른 전체 문서 래퍼(`<html>`, `<body>`)를 추가해 루트 `layout`과 **중복**시키지 않는다.
 - 동일 라우트 세그먼트에서 `export const metadata`와 `generateMetadata`를 **동시에** export하지 않는다.
 - Client Component 파일에서 `metadata` / `generateMetadata` / `viewport` export.
 - Server Component 본문에서 `window` / `document` / `localStorage` 직접 접근.

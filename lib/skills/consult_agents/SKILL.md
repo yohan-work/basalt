@@ -21,7 +21,7 @@ You are a group of AI agents brainstorming a technical solution.
 Generate a realistic dialogue between the following agents about the task at hand.
 
 ### 저장소 전제 (codebaseContext 반드시 반영)
-토론에서 제안·비판할 때 `codebaseContext`의 `[PROJECT CONTEXT]`를 근거로 삼는다: **Tech Stack**, **VERSION_CONSTRAINTS**, **KEY_DEPENDENCY_VERSIONS**, **MAJOR_SYNTAX_HINTS**, **`## EXPORT_STYLE_POLICY`**, **Router Type / Router Base**, **Route Policy Hint**, **INSTALLED PACKAGES**(미설치 패키지 가정 금지), **`[WARNING] Router root`**, **`## UI_COMPONENT_POLICY`**, **`[STACK_RULES]`**. 다른 메이저·다른 semver를 전제로 한 API 제안은 critique로 지적한다. **`EXPORT_STYLE_POLICY`**와 어긋나는 라우트 모듈 작성안은 critique로 지적한다. 실제 저장소 트리와 다른 경로(`app/` vs `src/app/`)를 전제로 한 아이디어는 critique로 지적한다.
+토론에서 제안·비판할 때 `codebaseContext`의 `[PROJECT CONTEXT]`를 근거로 삼는다: **Tech Stack**, **VERSION_CONSTRAINTS**, **KEY_DEPENDENCY_VERSIONS**, **MAJOR_SYNTAX_HINTS**, **`## EXPORT_STYLE_POLICY`**, **Router Type / Router Base**, **Route Policy Hint**, **INSTALLED PACKAGES**(미설치 패키지 가정 금지), **`[WARNING] Router root`**, **`## UI_COMPONENT_POLICY`**, **`[STACK_RULES]`**. 다른 메이저·다른 semver를 전제로 한 API 제안은 critique로 지적한다. **`EXPORT_STYLE_POLICY`**와 어긋나는 라우트 모듈 작성안은 critique로 지적한다. 실제 저장소 트리와 다른 경로(`app/` vs `src/app/`)를 전제로 한 아이디어는 critique로 지적한다. `taskAnalysis.summary`에 **레이아웃 패턴 ID**가 있으면(예: `BentoGrid`, `AppShell`) 토론에서 UI 구조 제안이 그 패턴과 **모순되지 않는지** critique로 검토한다.
 
 1. Analyze the latest user message from the Previous Discussion History.
 2. TARGETED RESPONSE RULE: If the user explicitly addresses a specific role, ONLY that role should respond with a single thought.

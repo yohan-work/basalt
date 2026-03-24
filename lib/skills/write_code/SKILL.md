@@ -53,12 +53,13 @@ When the project **has** those files **and** the basename appears under **Known 
 
 ### 2. Layout & Styling Rules
 - **Follow the exact layout requested.** If the user asks for a grid, vertical stack, or specific section ordering, implement exactly that.
+- **When layout is not specified**: follow the **layout pattern catalog** in the global code-generation rules (`ContainedStack`, `HeroBandPlusSections`, `SplitFeature`, `BentoGrid`, `SidebarContent`, `AppShell`, `DashboardGrid`, `SingleColumnArticle`, `PricingOrCompare`, `StepsTimeline`, `FAQStack`) and the **pattern picker** there. If the task analysis / plan / summary already names a pattern, use that name consistently.
 - **Styling**: Check the `[PROJECT CONTEXT]` for `Tailwind CSS`. Use Tailwind `grid`, `flex`, `gap-X` only if it is installed.
 - **Import Style**: Check `[PROJECT CONTEXT]` for `UI Component Import Style`.
     - **MANDATORY**: If named imports are required, use `import { Component } from "@/components/ui/component"`.
     - If a barrel file exists, you MAY use `import { … } from "@/components/ui"` **only** for symbols that are both in **Known component basenames** and re-exported from that index (never import `Card` from the barrel if `card` is not on disk).
 - **CRITICAL**: If Tailwind is NOT installed, **NEVER** use its classes. If `shadcn/ui` components are present but Tailwind is missing, they are likely broken; use standard HTML tags with premium inline styles instead.
-- **NEVER** stick to a fixed template if the task description implies a different structure.
+- **NEVER** stick to a fixed template when the task description implies a different structure; the catalog applies only when the task is silent on layout.
 
 ### 3. Component Reference Example
 *This is a reference for how to use shadcn/ui components, NOT a template to be used every time.*
