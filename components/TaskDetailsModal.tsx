@@ -356,6 +356,13 @@ export function TaskDetailsModal({
         }
     }, [open]);
 
+    /** 다른 태스크/보드에서 모달을 열 때 이전 탭(Logs·Changes 등)이 남아 Original Request가 안 보이는 문제 방지 */
+    useEffect(() => {
+        if (!open || !task?.id) return;
+        setView('details');
+        setOriginalRequestViewMode('text');
+    }, [open, task?.id]);
+
     useEffect(() => {
         if (!task || !open) return;
         const previewOk = Boolean(task.project_id) && ['working', 'testing'].includes(task.status);
@@ -1140,6 +1147,28 @@ export function TaskDetailsModal({
                                         taskId={canEditOrReview ? task.id : null}
                                     />
                                 </div>
+                            </div>
+                        ) : view === 'changes' && !hasChanges ? (
+                            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+                                <div className="rounded-md border border-dashed bg-muted/20 p-4 space-y-2">
+                                    <h3 className="text-sm font-medium text-foreground">코드 변경 없음</h3>
+                                    <p className="text-xs text-muted-foreground leading-relaxed">
+                                        아직 기록된 파일 변경(diff)이 없습니다. 실행이 끝나면 여기에 표시됩니다. Changes 탭을 눌렀을 때 로그 화면으로 잘못 넘어가던 문제를 막기 위한 화면입니다.
+                                    </p>
+                                    <Button type="button" size="sm" variant="secondary" onClick={() => setView('details')}>
+                                        Details로 이동 · Original Request 전체 보기
+                                    </Button>
+                                </div>
+                                {task.description.trim() ? (
+                                    <div className="space-y-2">
+                                        <h3 className="text-sm font-medium text-muted-foreground">Original Request (요약)</h3>
+                                        <div className="p-3 bg-muted/40 rounded-md text-xs text-foreground/90 whitespace-pre-wrap max-h-[200px] overflow-y-auto leading-relaxed">
+                                            {task.description.length > 1200
+                                                ? `${task.description.slice(0, 1200)}…`
+                                                : task.description}
+                                        </div>
+                                    </div>
+                                ) : null}
                             </div>
                         ) : view === 'details' ? (
                             <div className="flex-1 overflow-y-auto p-6 space-y-6">
