@@ -46,6 +46,7 @@ IMPORTANT: Provide all analysis summaries and reasoning in KOREAN.
 | **Router Type / Router Base** | App Router vs Pages Router, 실제 경로 접두사(`app` vs `src/app`, `pages` vs `src/pages`). 루트 `app/`만 당연하다고 가정하지 말 것. |
 | **Route Policy Hint** | 비루트 라우트 예시·후보 경로. |
 | **INSTALLED PACKAGES** | `package.json`에 없는 npm 패키지를 전제로 한 구현·요약 금지. |
+| **인터랙티브 UI (폼 토글·모달·탭 등)** | 상태가 필요한 UI면 `summary`에 **한 줄**: `useState`(등) 선언·setter·JSX에서 참조하는 이름이 **같은 컴포넌트 안에서 완결**되도록 구현할 것(예: 비밀번호 표시 토글은 상태+버튼+`type` 조건을 세트로). JSX에만 이름을 쓰고 선언을 빠뜨리지 말 것. |
 | **`[WARNING] Router root`** | 루트 `app/`와 `src/app/` 등 이중 존재 시 경고 문구 — 한쪽 트리만 쓴다고 가정하지 말 것. |
 | **`[STACK_RULES]`** | 스택별 필수/금지 규칙 요약. |
 

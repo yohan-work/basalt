@@ -12,16 +12,61 @@ const explicitTypecheckFiles = cliArgsList.filter((arg) => !arg.startsWith('--')
 const runBoundaryCheck = !cliArgs.has('--types-only');
 const runTypecheckMode = !cliArgs.has('--boundary-only');
 const runChangedTypecheck = cliArgs.has('--changed');
+const boundaryFileArg = cliArgsList.find((arg) => arg.startsWith('--boundary-file='));
+const boundarySingleFile = boundaryFileArg
+    ? path.resolve(projectRoot, boundaryFileArg.slice('--boundary-file='.length).trim())
+    : null;
 const explicitGitRef = (() => {
     const gitRefArg = cliArgsList.find((arg) => arg.startsWith('--git-ref='));
     return gitRefArg ? gitRefArg.replace('--git-ref=', '').trim() || 'HEAD' : 'HEAD';
 })();
-const targets = [
-    'app',
-    'components'
+const targetDirCandidates = ['app', 'components', 'src/app', 'src/components'];
+const targets = targetDirCandidates.filter((t) => fs.existsSync(path.join(projectRoot, t)));
+const hookNames = [
+    'useState',
+    'useEffect',
+    'useMemo',
+    'useCallback',
+    'useReducer',
+    'useRef',
+    'useLayoutEffect',
+    'useTransition',
+    'useActionState',
+    'useOptimistic',
+    'useDeferredValue',
+    'useId',
+    'use',
 ];
-const hookNames = ['useState', 'useEffect', 'useMemo', 'useCallback', 'useReducer', 'useRef', 'useLayoutEffect', 'useTransition', 'useActionState', 'useOptimistic', 'useDeferredValue', 'useId'];
-const hookNameSet = new Set(hookNames);
+const nextNavigationHookNames = [
+    'useRouter',
+    'usePathname',
+    'useSearchParams',
+    'useParams',
+    'useSelectedLayoutSegment',
+    'useSelectedLayoutSegments',
+    'useServerInsertedHTML',
+];
+const nextNavigationHookNameSet = new Set(nextNavigationHookNames);
+const nextRouterPageHookNameSet = new Set(['useRouter']);
+const reactDomHookNameSet = new Set(['useFormState', 'useFormStatus']);
+const reactCoreHookNameSet = new Set(hookNames);
+const interactiveJsxAttrNames = new Set([
+    'onClick',
+    'onChange',
+    'onSubmit',
+    'onKeyDown',
+    'onKeyUp',
+    'onFocus',
+    'onBlur',
+    'onInput',
+    'onMouseDown',
+    'onMouseUp',
+    'onPointerDown',
+    'onPointerUp',
+    'onDragStart',
+    'onDragEnd',
+    'onDrop',
+]);
 const nextHeadPattern = /from\s+['"]next\/head['"]/;
 const tsconfigAliasCache = new Map();
 
@@ -101,13 +146,17 @@ function hasAliasResolution(importPath, projectRoot) {
 }
 
 function hasAppMetadataFile(projectRoot) {
-    const metadataCandidates = [
-        path.join(projectRoot, 'app', 'metadata.ts'),
-        path.join(projectRoot, 'app', 'metadata.tsx'),
-        path.join(projectRoot, 'app', 'metadata.js'),
-        path.join(projectRoot, 'app', 'metadata.jsx')
-    ];
-    return metadataCandidates.some((file) => fs.existsSync(file));
+    const bases = [path.join(projectRoot, 'app'), path.join(projectRoot, 'src/app')];
+    for (const base of bases) {
+        const metadataCandidates = [
+            path.join(base, 'metadata.ts'),
+            path.join(base, 'metadata.tsx'),
+            path.join(base, 'metadata.js'),
+            path.join(base, 'metadata.jsx'),
+        ];
+        if (metadataCandidates.some((file) => fs.existsSync(file))) return true;
+    }
+    return false;
 }
 
 function validateAppMetadataAliasImport(sourceFile, projectRoot) {
@@ -166,48 +215,89 @@ function getBoundaryDirectives(statements) {
     return { hasClientDirective, hasServerDirective };
 }
 
-function collectReactHookUsage(sourceFile) {
-    const importedReactHooks = new Set();
+function collectReactHookUsage(sourceFile, filePath) {
+    const importedReactCoreHooks = new Set();
+    const importedNextNavHooks = new Set();
+    const importedNextRouterHooks = new Set();
+    const importedReactDomHooks = new Set();
     const importedReactNamespaces = new Set();
     let hasReactImport = false;
     let usesHooks = false;
+    let usesReactCoreHookCall = false;
+    const isTsx = /\.(tsx|jsx)$/i.test(filePath || '');
 
-    const addImport = (importDecl) => {
-        if (!ts.isStringLiteral(importDecl.moduleSpecifier)) return;
-        if (importDecl.moduleSpecifier.text !== 'react') return;
-
-        hasReactImport = true;
-        const clause = importDecl.importClause;
-        if (!clause) return;
-
-        if (clause.name) {
-            importedReactNamespaces.add(clause.name.text);
-        }
-
-        if (!clause.namedBindings) return;
-        if (ts.isNamespaceImport(clause.namedBindings)) {
-            importedReactNamespaces.add(clause.namedBindings.name.text);
-            return;
-        }
-        if (ts.isNamedImports(clause.namedBindings)) {
-            for (const element of clause.namedBindings.elements) {
-                const importedName = element.propertyName ? element.propertyName.text : element.name.text;
-                if (hookNameSet.has(importedName)) {
-                    importedReactHooks.add(element.name.text);
-                }
+    const addNamed = (elements, allowedSet, targetSet) => {
+        for (const element of elements) {
+            const importedName = element.propertyName ? element.propertyName.text : element.name.text;
+            if (allowedSet.has(importedName)) {
+                targetSet.add(element.name.text);
             }
         }
     };
 
+    const addImport = (importDecl) => {
+        if (!ts.isStringLiteral(importDecl.moduleSpecifier)) return;
+        const mod = importDecl.moduleSpecifier.text;
+        const clause = importDecl.importClause;
+        if (!clause) return;
+
+        if (mod === 'react') {
+            hasReactImport = true;
+            if (clause.name) {
+                importedReactNamespaces.add(clause.name.text);
+            }
+            if (!clause.namedBindings) return;
+            if (ts.isNamespaceImport(clause.namedBindings)) {
+                importedReactNamespaces.add(clause.namedBindings.name.text);
+                return;
+            }
+            if (ts.isNamedImports(clause.namedBindings)) {
+                addNamed(clause.namedBindings.elements, reactCoreHookNameSet, importedReactCoreHooks);
+            }
+            return;
+        }
+
+        if (mod === 'next/navigation') {
+            if (!clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return;
+            addNamed(clause.namedBindings.elements, nextNavigationHookNameSet, importedNextNavHooks);
+            return;
+        }
+
+        if (mod === 'next/router') {
+            if (!clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return;
+            addNamed(clause.namedBindings.elements, nextRouterPageHookNameSet, importedNextRouterHooks);
+            return;
+        }
+
+        if (mod === 'react-dom') {
+            if (!clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return;
+            addNamed(clause.namedBindings.elements, reactDomHookNameSet, importedReactDomHooks);
+        }
+    };
+
     const isHookCall = (expression) => {
-        if (ts.isIdentifier(expression) && importedReactHooks.has(expression.text)) {
-            return true;
+        if (ts.isIdentifier(expression)) {
+            if (importedReactCoreHooks.has(expression.text)) {
+                usesReactCoreHookCall = true;
+                return true;
+            }
+            if (
+                importedNextNavHooks.has(expression.text) ||
+                importedNextRouterHooks.has(expression.text) ||
+                importedReactDomHooks.has(expression.text)
+            ) {
+                return true;
+            }
+            return false;
         }
 
         if (ts.isPropertyAccessExpression(expression)) {
             const obj = expression.expression;
             if (ts.isIdentifier(obj) && ts.isIdentifier(expression.name)) {
-                return importedReactNamespaces.has(obj.text) && hookNameSet.has(expression.name.text);
+                if (importedReactNamespaces.has(obj.text) && reactCoreHookNameSet.has(expression.name.text)) {
+                    usesReactCoreHookCall = true;
+                    return true;
+                }
             }
         }
 
@@ -217,6 +307,13 @@ function collectReactHookUsage(sourceFile) {
     const visit = (node) => {
         if (ts.isImportDeclaration(node)) {
             addImport(node);
+        }
+
+        if (isTsx && ts.isJsxAttribute(node)) {
+            const n = node.name;
+            if (ts.isIdentifier(n) && interactiveJsxAttrNames.has(n.text)) {
+                usesHooks = true;
+            }
         }
 
         if (ts.isCallExpression(node) && isHookCall(node.expression)) {
@@ -229,7 +326,7 @@ function collectReactHookUsage(sourceFile) {
 
     visit(sourceFile);
 
-    return { usesHooks, hasReactImport };
+    return { usesHooks, hasReactImport, usesReactCoreHookCall };
 }
 
 function hasClientIncompatibleMetadataExport(sourceFile, hasClientDirective) {
@@ -252,6 +349,67 @@ function hasClientIncompatibleMetadataExport(sourceFile, hasClientDirective) {
     return hasMetadataExport;
 }
 
+function analyzeBoundaryForFile(nextPath, problems) {
+    if (!fs.existsSync(nextPath)) return;
+    if (!/\.(ts|tsx|js|jsx)$/.test(nextPath)) return;
+
+    const content = fs.readFileSync(nextPath, 'utf8');
+    const sourceFile = ts.createSourceFile(
+        nextPath,
+        content,
+        ts.ScriptTarget.Latest,
+        true,
+        getScriptKind(nextPath)
+    );
+    const { hasClientDirective, hasServerDirective } = getBoundaryDirectives(sourceFile.statements);
+    const { usesHooks, hasReactImport, usesReactCoreHookCall } = collectReactHookUsage(sourceFile, nextPath);
+    const badMetadataAliasImports = validateAppMetadataAliasImport(sourceFile, projectRoot);
+    const invalidMetadataExport = hasClientIncompatibleMetadataExport(sourceFile, hasClientDirective);
+    const usesNextHead = nextHeadPattern.test(content);
+
+    if (usesNextHead) {
+        problems.push({
+            type: 'DEPRECATED_NEXT_HEAD',
+            file: nextPath,
+            message: 'use of next/head is deprecated in app router. use metadata in page.tsx or layout.tsx instead.',
+        });
+    }
+
+    if (usesHooks && !hasClientDirective && !hasServerDirective) {
+        problems.push({
+            type: 'MISSING_USE_CLIENT',
+            file: nextPath,
+            message:
+                'React/Next client hook usage, React.use(), or interactive JSX requires "use client" at top of file (or split into a *Client.tsx).',
+        });
+        return;
+    }
+
+    for (const importPath of badMetadataAliasImports) {
+        problems.push({
+            type: 'INVALID_ALIAS_IMPORT',
+            file: nextPath,
+            message: `Alias import "${importPath}" does not resolve under current tsconfig. Use a relative path for app/metadata import.`,
+        });
+    }
+
+    if (invalidMetadataExport) {
+        problems.push({
+            type: 'INVALID_METADATA_EXPORT',
+            file: nextPath,
+            message: 'Client Component exports `metadata`. App Router forbids export const metadata in client components.',
+        });
+    }
+
+    if (usesHooks && usesReactCoreHookCall && !hasReactImport) {
+        problems.push({
+            type: 'MISSING_REACT_IMPORT',
+            file: nextPath,
+            message: 'React hook usage found without importing from react.',
+        });
+    }
+}
+
 function scanDir(dir, problems) {
     if (!fs.existsSync(dir)) return;
     const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -265,61 +423,20 @@ function scanDir(dir, problems) {
 
         if (!/\.(ts|tsx|js|jsx)$/.test(entry.name)) continue;
 
-        const content = fs.readFileSync(nextPath, 'utf8');
-        const sourceFile = ts.createSourceFile(
-            nextPath,
-            content,
-            ts.ScriptTarget.Latest,
-            true,
-            getScriptKind(nextPath)
-        );
-        const { hasClientDirective, hasServerDirective } = getBoundaryDirectives(sourceFile.statements);
-        const { usesHooks, hasReactImport } = collectReactHookUsage(sourceFile);
-        const badMetadataAliasImports = validateAppMetadataAliasImport(sourceFile, projectRoot);
-        const invalidMetadataExport = hasClientIncompatibleMetadataExport(sourceFile, hasClientDirective);
-        const usesNextHead = nextHeadPattern.test(content);
-
-        if (usesNextHead) {
-            problems.push({
-                type: 'DEPRECATED_NEXT_HEAD',
-                file: nextPath,
-                message: 'use of next/head is deprecated in app router. use metadata in page.tsx or layout.tsx instead.',
-            });
-        }
-
-        if (usesHooks && !hasClientDirective && !hasServerDirective) {
-            problems.push({
-                type: 'MISSING_USE_CLIENT',
-                file: nextPath,
-                message: 'React hook imported without "use client" at top of file',
-            });
-            continue;
-        }
-
-        for (const importPath of badMetadataAliasImports) {
-            problems.push({
-                type: 'INVALID_ALIAS_IMPORT',
-                file: nextPath,
-                message: `Alias import "${importPath}" does not resolve under current tsconfig. Use a relative path for app/metadata import.`,
-            });
-        }
-
-        if (invalidMetadataExport) {
-            problems.push({
-                type: 'INVALID_METADATA_EXPORT',
-                file: nextPath,
-                message: 'Client Component exports `metadata`. App Router forbids export const metadata in client components.',
-            });
-        }
-
-        if (usesHooks && !hasReactImport) {
-            problems.push({
-                type: 'MISSING_REACT_IMPORT',
-                file: nextPath,
-                message: 'React hook-like usage found without importing from react.',
-            });
-        }
+        analyzeBoundaryForFile(nextPath, problems);
     }
+}
+
+function dedupeProblems(problems) {
+    const seen = new Set();
+    const out = [];
+    for (const p of problems) {
+        const k = `${p.file}\0${p.type}\0${p.message}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(p);
+    }
+    return out;
 }
 
 function runTypeCheck(problems, targetFiles = []) {
@@ -394,7 +511,10 @@ function runTypeCheck(problems, targetFiles = []) {
 }
 
 async function main() {
-    const problems = [];
+    let problems = [];
+    if (boundarySingleFile) {
+        analyzeBoundaryForFile(boundarySingleFile, problems);
+    }
     if (runBoundaryCheck) {
         for (const target of targets) {
             scanDir(path.join(projectRoot, target), problems);
@@ -405,6 +525,8 @@ async function main() {
         const typecheckTargets = resolveTypecheckTargets();
         runTypeCheck(problems, typecheckTargets);
     }
+
+    problems = dedupeProblems(problems);
 
     if (problems.length === 0) {
         if (runBoundaryCheck && runTypecheckMode) {

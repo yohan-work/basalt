@@ -16,7 +16,8 @@ const READ_CACHE = new Map<string, string>();
 const DIR_CACHE = new Map<string, string[] | string>();
 const CLIENT_DIRECTIVE_RE = /^\s*['"]use client['"]/;
 const SERVER_DIRECTIVE_RE = /^\s*['"]use server['"]/;
-const REACT_HOOK_NAMES = [
+/** React core hooks (local import names tracked; supports `use` / aliases). */
+const REACT_CORE_HOOK_NAMES = [
     'useState',
     'useEffect',
     'useMemo',
@@ -29,9 +30,46 @@ const REACT_HOOK_NAMES = [
     'useOptimistic',
     'useDeferredValue',
     'useId',
-];
-const HOOK_USAGE_RE = new RegExp(`\\b(?:${REACT_HOOK_NAMES.join('|')})\\s*\\(`);
-const REACT_NAMESPACE_HOOK_USAGE_RE = new RegExp(`\\b(?:React|[A-Za-z_$][\\w$]*)\\.\\s*(?:${REACT_HOOK_NAMES.join('|')})\\s*\\(`);
+    'use',
+] as const;
+const REACT_CORE_HOOK_NAME_SET = new Set<string>(REACT_CORE_HOOK_NAMES);
+
+const NEXT_NAVIGATION_HOOK_NAMES = [
+    'useRouter',
+    'usePathname',
+    'useSearchParams',
+    'useParams',
+    'useSelectedLayoutSegment',
+    'useSelectedLayoutSegments',
+    'useServerInsertedHTML',
+] as const;
+const NEXT_NAVIGATION_HOOK_NAME_SET = new Set<string>(NEXT_NAVIGATION_HOOK_NAMES);
+
+const NEXT_ROUTER_PAGE_HOOK_NAMES = ['useRouter'] as const;
+const NEXT_ROUTER_PAGE_HOOK_NAME_SET = new Set<string>(NEXT_ROUTER_PAGE_HOOK_NAMES);
+
+const REACT_DOM_HOOK_NAMES = ['useFormState', 'useFormStatus'] as const;
+const REACT_DOM_HOOK_NAME_SET = new Set<string>(REACT_DOM_HOOK_NAMES);
+
+/** DOM event props in JSX require a Client boundary in App Router (host elements). */
+const INTERACTIVE_JSX_ATTR_NAMES = new Set([
+    'onClick',
+    'onChange',
+    'onSubmit',
+    'onKeyDown',
+    'onKeyUp',
+    'onFocus',
+    'onBlur',
+    'onInput',
+    'onMouseDown',
+    'onMouseUp',
+    'onPointerDown',
+    'onPointerUp',
+    'onDragStart',
+    'onDragEnd',
+    'onDrop',
+]);
+
 const APP_METADATA_IMPORT_RE = /from\s+(['"])(@\/app\/metadata(?:\.(?:t|j)sx?)?)(\1)/g;
 
 /** `app/page.tsx` / `src/app/page.tsx` (root segment) */
@@ -484,9 +522,246 @@ function stripCommentsAndStringsForHookScan(source: string): string {
         .replace(/`[\s\S]*?`/g, ' ');
 }
 
-function hasHookUsageForBoundary(content: string): boolean {
-    const cleaned = stripCommentsAndStringsForHookScan(content);
-    return HOOK_USAGE_RE.test(cleaned) || REACT_NAMESPACE_HOOK_USAGE_RE.test(cleaned);
+function getScriptKindForBoundaryPath(filePath: string): ts.ScriptKind {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.tsx' || ext === '.jsx') return ts.ScriptKind.TSX;
+    return ts.ScriptKind.TS;
+}
+
+interface ClientBoundaryScanResult {
+    needsClientDirective: boolean;
+    usesReactCoreHookCall: boolean;
+    hasReactImport: boolean;
+}
+
+/**
+ * TypeScript AST scan: React / next/navigation / react-dom hooks (incl. aliases), React.use*, JSX events.
+ * Align with `scripts/validate-client-boundary.mjs` logic.
+ */
+function scanSourceFileForClientBoundary(sourceFile: ts.SourceFile, normalizedPath: string): ClientBoundaryScanResult {
+    const importedReactCoreHooks = new Set<string>();
+    const importedNextNavHooks = new Set<string>();
+    const importedNextRouterHooks = new Set<string>();
+    const importedReactDomHooks = new Set<string>();
+    const importedReactNamespaces = new Set<string>();
+    let hasReactImport = false;
+    let needsClientDirective = false;
+    let usesReactCoreHookCall = false;
+    const isTsx = /\.(tsx|jsx)$/i.test(normalizedPath);
+
+    const addNamed = (
+        elements: ts.NodeArray<ts.ImportSpecifier>,
+        allowed: Set<string>,
+        target: Set<string>
+    ) => {
+        for (const element of elements) {
+            const importedName = element.propertyName ? element.propertyName.text : element.name.text;
+            if (allowed.has(importedName)) {
+                target.add(element.name.text);
+            }
+        }
+    };
+
+    const addImport = (importDecl: ts.ImportDeclaration) => {
+        if (!ts.isStringLiteral(importDecl.moduleSpecifier)) return;
+        const mod = importDecl.moduleSpecifier.text;
+        const clause = importDecl.importClause;
+        if (!clause) return;
+
+        if (mod === 'react') {
+            hasReactImport = true;
+            if (clause.name) {
+                importedReactNamespaces.add(clause.name.text);
+            }
+            if (!clause.namedBindings) return;
+            if (ts.isNamespaceImport(clause.namedBindings)) {
+                importedReactNamespaces.add(clause.namedBindings.name.text);
+                return;
+            }
+            if (ts.isNamedImports(clause.namedBindings)) {
+                addNamed(clause.namedBindings.elements, REACT_CORE_HOOK_NAME_SET, importedReactCoreHooks);
+            }
+            return;
+        }
+
+        if (mod === 'next/navigation') {
+            if (!clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return;
+            addNamed(clause.namedBindings.elements, NEXT_NAVIGATION_HOOK_NAME_SET, importedNextNavHooks);
+            return;
+        }
+
+        if (mod === 'next/router') {
+            if (!clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return;
+            addNamed(clause.namedBindings.elements, NEXT_ROUTER_PAGE_HOOK_NAME_SET, importedNextRouterHooks);
+            return;
+        }
+
+        if (mod === 'react-dom') {
+            if (!clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) return;
+            addNamed(clause.namedBindings.elements, REACT_DOM_HOOK_NAME_SET, importedReactDomHooks);
+        }
+    };
+
+    const isHookCallExpression = (expression: ts.Expression): boolean => {
+        if (ts.isIdentifier(expression)) {
+            if (importedReactCoreHooks.has(expression.text)) {
+                usesReactCoreHookCall = true;
+                return true;
+            }
+            if (
+                importedNextNavHooks.has(expression.text) ||
+                importedNextRouterHooks.has(expression.text) ||
+                importedReactDomHooks.has(expression.text)
+            ) {
+                return true;
+            }
+            return false;
+        }
+
+        if (ts.isPropertyAccessExpression(expression)) {
+            const obj = expression.expression;
+            const prop = expression.name;
+            if (ts.isIdentifier(obj) && ts.isIdentifier(prop)) {
+                if (importedReactNamespaces.has(obj.text) && REACT_CORE_HOOK_NAME_SET.has(prop.text)) {
+                    usesReactCoreHookCall = true;
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    const visit = (node: ts.Node) => {
+        if (ts.isImportDeclaration(node)) {
+            addImport(node);
+        }
+
+        if (ts.isJsxAttribute(node) && isTsx) {
+            const n = node.name;
+            if (ts.isIdentifier(n) && INTERACTIVE_JSX_ATTR_NAMES.has(n.text)) {
+                needsClientDirective = true;
+            }
+        }
+
+        if (ts.isCallExpression(node)) {
+            if (isHookCallExpression(node.expression)) {
+                needsClientDirective = true;
+                return;
+            }
+        }
+
+        ts.forEachChild(node, visit);
+    };
+
+    visit(sourceFile);
+
+    return { needsClientDirective, usesReactCoreHookCall, hasReactImport };
+}
+
+function analyzeContentForClientBoundary(content: string, pathForLabel: string): ClientBoundaryScanResult {
+    const kind = getScriptKindForBoundaryPath(pathForLabel);
+    const sourceFile = ts.createSourceFile(pathForLabel, content, ts.ScriptTarget.Latest, true, kind);
+    const normalized = pathForLabel.replace(/\\/g, '/');
+    return scanSourceFileForClientBoundary(sourceFile, normalized);
+}
+
+function needsClientDirectiveHeuristic(content: string, normalizedPath: string): boolean {
+    return analyzeContentForClientBoundary(content, normalizedPath).needsClientDirective;
+}
+
+function resolveSpecifierToFirstExistingFile(
+    specifier: string,
+    containingDir: string,
+    baseDir: string
+): string | null {
+    const aliases = parseProjectPathAliases(baseDir);
+    let basesToTry: string[] = [];
+
+    if (specifier.startsWith('.')) {
+        basesToTry = [path.resolve(containingDir, specifier)];
+    } else if (specifier.startsWith('/')) {
+        basesToTry = [path.join(baseDir, specifier.replace(/^\/+/, ''))];
+    } else if (specifier.startsWith('@/')) {
+        basesToTry = collectAliasResolvedBases(specifier, baseDir);
+    } else if (
+        aliases.length > 0 &&
+        aliases.some((alias) => specifier.startsWith(alias.pattern.replace(/\*$/, '')))
+    ) {
+        const rb = resolveAliasImportPath(specifier, baseDir);
+        basesToTry = rb ? [rb] : [];
+    } else {
+        const rb = resolveAliasImportPath(specifier, baseDir);
+        basesToTry = rb ? [rb] : [];
+    }
+
+    for (const b of basesToTry) {
+        const hit = resolveModuleCandidates(b).find((candidate) => fs.existsSync(candidate));
+        if (hit) return hit;
+    }
+    return null;
+}
+
+/**
+ * Server `page`/`layout` (no leading `"use client"`) must not statically import project modules that use hooks/events without `"use client"`.
+ * Applies with or without `metadata` / `generateMetadata` / `viewport` exports.
+ */
+function validateServerPageLayoutImportedClientBoundaries(
+    relativePath: string,
+    content: string,
+    baseDir: string
+): { valid: true } | { valid: false; message: string } {
+    if (!isAppRouterPageOrLayoutFile(relativePath)) return { valid: true };
+    if (fileLeadsWithUseClientDirective(content)) return { valid: true };
+
+    const normalized = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    const fullPath = path.join(baseDir, normalized);
+    const containingDir = path.dirname(fullPath);
+    const sourceFile = ts.createSourceFile(
+        fullPath,
+        content,
+        ts.ScriptTarget.Latest,
+        true,
+        getScriptKindForBoundaryPath(fullPath)
+    );
+
+    const problems: string[] = [];
+
+    for (const stmt of sourceFile.statements) {
+        if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+        if (stmt.importClause?.isTypeOnly) continue;
+        const spec = stmt.moduleSpecifier.text.trim();
+        if (isExternalPackageImport(spec)) continue;
+        if (!shouldValidateImportPath(spec)) continue;
+
+        const resolvedAbs = resolveSpecifierToFirstExistingFile(spec, containingDir, baseDir);
+        if (!resolvedAbs) continue;
+
+        let targetContent: string;
+        try {
+            targetContent = fs.readFileSync(resolvedAbs, 'utf8');
+        } catch {
+            continue;
+        }
+
+        const targetRel = path.relative(baseDir, resolvedAbs).replace(/\\/g, '/');
+        if (fileLeadsWithUseClientDirective(targetContent)) continue;
+
+        if (needsClientDirectiveHeuristic(targetContent, targetRel)) {
+            problems.push(
+                `- "${spec}" -> ${targetRel}: uses client-only hooks/JSX events but is missing "use client" at the top.`
+            );
+        }
+    }
+
+    if (problems.length === 0) return { valid: true };
+
+    return {
+        valid: false,
+        message:
+            `Next.js App Router: server ${path.basename(relativePath)} imports modules that need a Client Component boundary:\n` +
+            problems.join('\n') +
+            `\nAdd "use client" at the top of those files (or use a *Client.tsx split). If this route needs metadata/generateMetadata/viewport, keep those exports only in the server page/layout. Docs: https://nextjs.org/docs/app/api-reference/directives/use-client`,
+    };
 }
 
 function isAppRouterPageOrLayoutFile(relativePath: string): boolean {
@@ -540,7 +815,7 @@ function validateAppRouterServerExportClientBoundary(
     if (!hasServerOnlyAppRouterExports(content)) return { valid: true };
 
     const hasUse = fileLeadsWithUseClientDirective(content);
-    const hooks = hasHookUsageForBoundary(content);
+    const hooks = needsClientDirectiveHeuristic(content, relativePath.replace(/\\/g, '/').replace(/^\/+/, ''));
 
     if (hasUse) {
         return {
@@ -555,8 +830,8 @@ function validateAppRouterServerExportClientBoundary(
         return {
             valid: false,
             message:
-                `Next.js App Router: this file exports server-only metadata/viewport but uses React hooks. ` +
-                `Keep SEO exports in the server page/layout and move hooks to a separate *Client.tsx with "use client". ` +
+                `Next.js App Router: this file exports server-only metadata/viewport but uses React/Next client hooks, React.use(), or interactive JSX (e.g. onClick). ` +
+                `Keep SEO exports in the server page/layout and move that UI to a separate *Client.tsx with "use client". ` +
                 `Docs: ${GENERATE_METADATA_DOC}`,
         };
     }
@@ -598,24 +873,129 @@ function getFirstNonEmptyCodeLine(content: string): string | null {
     return null;
 }
 
+/** When `validate-client-boundary.mjs` is absent (e.g. target workspace), catch MISSING_USE_CLIENT-class issues in-process. */
+function validateInProcessSingleFileClientBoundary(
+    relativePath: string,
+    content: string
+): { valid: true } | { valid: false; message: string } {
+    const norm = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!/\.(tsx|ts|jsx|js)$/i.test(norm)) return { valid: true };
+
+    const hasClient = fileLeadsWithUseClientDirective(content);
+    const firstLine = getFirstNonEmptyCodeLine(content);
+    const hasServer = firstLine ? SERVER_DIRECTIVE_RE.test(firstLine) : false;
+
+    if (needsClientDirectiveHeuristic(content, norm) && !hasClient && !hasServer) {
+        return {
+            valid: false,
+            message:
+                `React/Next client hooks, React.use(), or interactive JSX in ${relativePath} require "use client" at the top of the file (or split into *Client.tsx). ` +
+                `Docs: https://nextjs.org/docs/app/api-reference/directives/use-client`,
+        };
+    }
+    return { valid: true };
+}
+
+/**
+ * When `validate-client-boundary.mjs` is missing, run the same single-file `tsc` pattern in-process
+ * (catches e.g. `showPassword` / TS2304 before the app runs).
+ */
+function runInProcessTypeScriptDiagnosticsForFile(
+    baseDir: string,
+    absoluteFilePath: string,
+    fileLabel: string
+): { valid: true } | { valid: false; message: string } {
+    const tsconfigPath = path.join(baseDir, 'tsconfig.json');
+    if (!fs.existsSync(tsconfigPath)) {
+        return { valid: true };
+    }
+
+    const resolvedAbs = path.resolve(absoluteFilePath);
+    if (!/\.(tsx?|jsx?)$/i.test(resolvedAbs)) {
+        return { valid: true };
+    }
+
+    const rawConfig = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+    if (rawConfig.error) {
+        return { valid: true };
+    }
+
+    const parsed = ts.parseJsonConfigFileContent(rawConfig.config, ts.sys, baseDir);
+    const requestedSet = new Set([resolvedAbs]);
+
+    const program = ts.createProgram({
+        rootNames: [resolvedAbs],
+        options: {
+            ...parsed.options,
+            noEmit: true,
+            pretty: false,
+        },
+        projectReferences: parsed.projectReferences,
+    });
+
+    const lines: string[] = [];
+    for (const diagnostic of ts.getPreEmitDiagnostics(program)) {
+        const file = diagnostic.file;
+        if (!file) continue;
+        const sourceFile = path.resolve(file.fileName);
+        if (!requestedSet.has(sourceFile)) continue;
+        const { line, character } = file.getLineAndCharacterOfPosition(diagnostic.start ?? 0);
+        const messageText = ts.flattenDiagnosticMessageText(diagnostic.messageText, ' ');
+        lines.push(`[TS${diagnostic.code}] ${messageText} (line ${line + 1}:${character + 1})`);
+    }
+
+    for (const diag of parsed.errors) {
+        if (!diag.file) continue;
+        const file = path.resolve(diag.file.fileName);
+        if (!requestedSet.has(file)) continue;
+        const msg = ts.flattenDiagnosticMessageText(diag.messageText, ' ');
+        lines.push(`[TS${diag.code}] ${msg}`);
+    }
+
+    if (lines.length > 0) {
+        return {
+            valid: false,
+            message: `TypeScript errors in ${fileLabel}:\n${lines.join('\n')}`,
+        };
+    }
+    return { valid: true };
+}
+
 async function validateGeneratedTypeSafety(relativePath: string, baseDir: string, fileLabel: string): Promise<{ valid: boolean; message?: string }> {
     const ext = path.extname(relativePath).toLowerCase();
     if (!['.ts', '.tsx', '.js', '.jsx'].includes(ext)) {
         return { valid: true };
     }
 
+    const normalizedPath = path.resolve(baseDir, relativePath);
     const scriptPath = path.join(baseDir, 'scripts', 'validate-client-boundary.mjs');
     if (!fs.existsSync(scriptPath)) {
+        let diskContent: string;
+        try {
+            diskContent = fs.readFileSync(normalizedPath, 'utf8');
+        } catch {
+            diskContent = '';
+        }
+        const boundary = validateInProcessSingleFileClientBoundary(relativePath, diskContent);
+        if (!boundary.valid) {
+            return { valid: false, message: boundary.message };
+        }
+        const tscResult = runInProcessTypeScriptDiagnosticsForFile(baseDir, normalizedPath, fileLabel);
+        if (!tscResult.valid) {
+            return { valid: false, message: tscResult.message };
+        }
         return { valid: true };
     }
 
-    const normalizedPath = path.resolve(baseDir, relativePath);
     try {
-        await execAsync(`node "${scriptPath}" --types-only "${normalizedPath}"`, {
-            cwd: baseDir,
-            encoding: 'utf8',
-            maxBuffer: 1024 * 1024,
-        });
+        await execAsync(
+            `node "${scriptPath}" --types-only --boundary-file="${normalizedPath}" "${normalizedPath}"`,
+            {
+                cwd: baseDir,
+                encoding: 'utf8',
+                maxBuffer: 1024 * 1024,
+            }
+        );
         return { valid: true };
     } catch (error: any) {
         const raw = `${error.stdout || ''}${error.stderr || ''}`.trim();
@@ -626,11 +1006,11 @@ async function validateGeneratedTypeSafety(relativePath: string, baseDir: string
 
 function ensureClientDirectiveForReactHooks(filePath: string, rawContent: string): string {
     const normalizedPath = filePath.replace(/\\/g, '/');
-    if (!/\.(tsx|jsx)$/.test(normalizedPath)) {
+    if (!/\.(tsx|jsx|ts|js)$/.test(normalizedPath)) {
         return rawContent;
     }
 
-    if (!hasHookUsageForBoundary(rawContent)) {
+    if (!needsClientDirectiveHeuristic(rawContent, normalizedPath)) {
         return rawContent;
     }
 
@@ -846,6 +1226,20 @@ export async function write_code(filePath: string, content: string, baseDir: str
             };
         }
 
+        const importedBoundary = validateServerPageLayoutImportedClientBoundaries(
+            relativePath,
+            sanitizedContent,
+            baseDir
+        );
+        if (!importedBoundary.valid) {
+            return {
+                success: false,
+                message: importedBoundary.message,
+                filePath,
+                rscBoundaryViolation: true,
+            };
+        }
+
         const importValidation = await validateImportsExistence(sanitizedContent, relativePath, baseDir);
         if (!importValidation.valid) {
             return {
@@ -933,6 +1327,21 @@ Return the refactored code ONLY, with NO explanations.
 
         if (targetFilePath) {
             const relativePath = targetFilePath.startsWith('/') ? targetFilePath.substring(1) : targetFilePath;
+
+            const refactorBoundary = validateAppRouterServerExportClientBoundary(relativePath, sanitizedRefactorContent);
+            if (!refactorBoundary.valid) {
+                return `Error during refactoring: ${refactorBoundary.message}`;
+            }
+
+            const refactorImported = validateServerPageLayoutImportedClientBoundaries(
+                relativePath,
+                sanitizedRefactorContent,
+                process.cwd()
+            );
+            if (!refactorImported.valid) {
+                return `Error during refactoring: ${refactorImported.message}`;
+            }
+
             const refactorImportValidation = await validateImportsExistence(sanitizedRefactorContent, relativePath, process.cwd());
             if (!refactorImportValidation.valid) {
                 return `Error during refactoring: ${refactorImportValidation.message || `Invalid imports for ${targetFilePath}`}`;

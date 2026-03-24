@@ -258,6 +258,11 @@ MANDATORY CODING RULES:
   - Violations produce **unusable UI** (invisible text); treat this as seriously as import or routing errors.
 - Generate COMPLETE, working TypeScript code with all necessary imports.
 - For React components, use proper TypeScript types and export as default.
+- 🚨 STATE / JSX IDENTIFIER CONSISTENCY (ZERO TOLERANCE) 🚨:
+  - Every identifier referenced inside JSX or render expressions (\`{showPassword}\`, \`{isOpen && …}\`, \`value={query}\`, etc.) MUST be **declared in the same component function scope** (e.g. \`useState\`, \`useReducer\`, props, or \`const\` above the \`return\`) or **imported**. Never reference a name you did not define — this causes **ReferenceError** / **TS2304 Cannot find name** at runtime or build.
+  - **Password visibility toggle**: If you use \`type={showPassword ? "text" : "password"}\` or similar, you MUST output the full set in that file: \`const [showPassword, setShowPassword] = useState(false)\` (or equivalent), plus any \`onClick\`/\`onPointerDown\` that calls \`setShowPassword\`. Do not output the JSX condition without the state.
+  - **Controlled inputs**: If an \`<input>\` (or textarea/select) uses \`value={…}\`, you MUST provide a matching \`onChange\` (or \`onInput\`) that updates that state. If the field is intentionally uncontrolled, use \`defaultValue\` and do not pair it with a controlled \`value\` — mixing causes broken or read-only fields.
+- **Lists & handlers (short)**: \`.map(...)\` over arrays MUST include a stable \`key\` (e.g. id, not only index when items reorder). Event props (\`onClick={handleSubmit}\`) MUST reference a function that exists in scope (define the handler or use an inline function you actually wrote).
 - MANDATORY FILE PATH RULE: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/some-feature/page.tsx", NOT "/app/some-feature/page.tsx"). YOU MUST prepend the Router Base Path (e.g., "src/app/", "app/", "src/pages/", "pages/") explicitly mentioned in the [PROJECT CONTEXT].
 - CRITICAL FILE PATH MAPPING RULE:
   - For NEW feature pages, choose non-root routes by default (e.g., "app/chat/page.tsx").
@@ -298,6 +303,8 @@ MANDATORY CODING RULES:
 - Failing to include this when required will cause the application to CRASH.
 - NEVER put \`"use client";\` below the imports; it MUST be the absolute first line.
 - **Exception**: If this file also needs \`export const metadata\` or \`generateMetadata\`, do **not** add \`"use client"\` here — keep \`page.tsx\` / \`layout.tsx\` server-only and extract client logic into a separate \`*Client.tsx\` (or similar) file.
+- **next/navigation**: \`useRouter\`, \`useSearchParams\`, \`useParams\`, etc. are **client-only** (same boundary rules as React hooks). Prefer \`import { useRouter } from 'next/navigation'\` only in files that start with \`"use client"\` (or split into \`*Client.tsx\`). Server \`page.tsx\` should receive \`searchParams\`/\`params\` as props instead of these hooks.
+- **Hook imports**: Prefer standard names (\`useEffect\`, not \`useEffect as mount\`) so automated validators stay aligned; aliasing is still valid TypeScript but easier to misconfigure across files.
 
 - **PRE-EMPTIVE NEXT.JS BUG PREVENTION**:
   - **Routing**: NEVER use standard HTML \`<a>\` tags for internal navigation. You MUST use \`import Link from 'next/link'\` and the \`<Link href="...">\` component. In Next.js 13+, do **not** wrap content in an extra \`<a>\` inside \`<Link>\`; put \`className\` and children on \`<Link>\` directly (see invalid-new-link-with-extra-anchor).
