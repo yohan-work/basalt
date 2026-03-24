@@ -2,6 +2,12 @@ import fs from 'fs';
 import path from 'path';
 
 import { formatTechStackDisplay, inferStackProfile } from './stack-profile';
+import { formatExportStylePolicySection, resolveRouteExportStyle } from './component-export-style';
+import {
+    formatKeyDependencyVersionsBlock,
+    formatMajorSyntaxHints,
+    formatVersionConstraintsLine,
+} from './stack-version-context';
 import { formatStackRulesSummary, loadStackRulesBlock } from './stack-rules/load';
 import { inferComponentsUiRelativeDirFromConfig } from './tsconfig-paths';
 
@@ -399,13 +405,26 @@ export class ProjectProfiler {
                 ? `\n- [WARNING] Router root: ${data.routerResolutionNote}`
                 : '';
 
+        const majorSyntaxHints = formatMajorSyntaxHints(data.stackProfile);
+        const majorSyntaxSection = majorSyntaxHints
+            ? `\n- MAJOR_SYNTAX_HINTS (감지된 메이저 기준 — 플랜·코드에 반영):\n${majorSyntaxHints}`
+            : '';
+
+        const routeExportResolution = resolveRouteExportStyle(this.projectRoot, data.routerBase, data.structure);
+        const exportStylePolicyBlock = formatExportStylePolicySection(routeExportResolution);
+
         return `
 [PROJECT CONTEXT]
 - Tech Stack: ${data.techStack}
+- VERSION_CONSTRAINTS (package.json → 파싱 메이저): ${formatVersionConstraintsLine(data.stackProfile)}
+- KEY_DEPENDENCY_VERSIONS (semver; 플랜 summary에 인용 가능):
+${formatKeyDependencyVersionsBlock(data.depsWithVersions)}${majorSyntaxSection}
 - Router Type: ${data.structure}${routerConflictWarning}${clientDirectiveInfo}${nextMetadataRscInfo}${nextLinkInfo}${nextGuardrails}
 - Styling: ${data.hasTailwind ? 'Tailwind CSS IS installed. Use Tailwind classes.' : 'Tailwind CSS IS NOT installed. Do NOT use tailwind classes. Use standard CSS or inline styles.'}${shadcnWarning}
 ${uiPolicySection}
 - UI Component Import Style: ${importStyleInfo}${barrelInfo}
+
+${exportStylePolicyBlock}
 - Router Base: ${data.routerBase || 'unknown'}
 - Root Page Rewrite: ${data.rootPageOverwriteAllowed ? 'Explicitly allowed' : 'NOT allowed by default. Create under non-root route.'}
 - Route Policy Hint: ${routePolicyHint}
