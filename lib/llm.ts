@@ -239,6 +239,11 @@ MANDATORY CODING RULES:
     - NO qs → use \`URLSearchParams\`
   - Violating this rule causes a FATAL "Module not found" build error that crashes the entire application.
   - Even when the runner can auto-install missing packages, **still treat the INSTALLED PACKAGES list as authoritative for your first output** — avoid speculative heavy libraries (e.g. charting) unless the task clearly needs them; unnecessary imports trigger slower repair loops.
+- 🚨 SYNTAX VALIDITY (ZERO TOLERANCE) 🚨:
+  - Every file you output MUST be syntactically valid TypeScript/TSX.
+  - Ensure all \`import\` and \`import type\` statements are correctly formatted (e.g., no missing commas, no mixed keywords like \`import type { ..., } from ...\` if not supported by the project's TS version).
+  - Ensure all braces, brackets, and parentheses are balanced.
+  - Violating this causes immediate build failures.
 - 🚨 PLACEHOLDER / DEMO IMAGE URLS (ZERO TOLERANCE) 🚨:
   - If you output **any hard-coded http(s) URL** that loads a **raster image** for UI (hero, feature grid, cards, gallery, avatar mock, OG preview mock, etc.) and the **task text does not paste an exact URL** the user provided, you MUST use **only** \`https://dummyimage.com/<W>x<H>/000/fff\`. Change **only** \`<W>\` and \`<H>\` (e.g. \`https://dummyimage.com/1200x630/000/fff\` for hero, \`400x300\` for thumbnails). Keep \`/000/fff\` unless the user explicitly requests different hex colors.
   - **Local/static \`src\` paths count too**: Unless the task **explicitly** names a file to add under \`public/\` (or you are actually writing that static/binary asset in the same output), you MUST **not** invent \`/images/...\`, \`/assets/...\`, \`./images/...\`, \`public/images/...\`, or similar — they **404** when the file does not exist. For demo/hero/card/gallery images in that situation, use **dummyimage** in \`<img src="https://dummyimage.com/...">\` instead.
@@ -322,6 +327,15 @@ MANDATORY CODING RULES:
 - **ROUTE HANDLERS**: In \`app/.../route.ts\`, export the HTTP methods you need; respect Edge vs Node runtime limits for APIs you import.
 - **ENVIRONMENT VARIABLES**: Never read server-only secrets in Client Components; only \`NEXT_PUBLIC_*\` is embedded for the browser.
 
+🚨 TYPESCRIPT / TSX CHECKLIST (reduce tsc / build failures) 🚨
+- **State generics**: Never use bare \`useState([])\` or \`useState(null)\` for data you later read properties from — use \`useState<MyType[]>([])\`, \`useState<MyType | null>(null)\`, or a union including \`undefined\` as needed.
+- **Next.js 15+**: When \`page.tsx\` or \`generateMetadata\` receives \`params\` or \`searchParams\`, treat them as **Promises** unless types say otherwise — \`const { slug } = await params\` (same for \`searchParams\`).
+- **Component props**: Declare an \`interface\` or \`type\` for every component's props; use \`React.ReactNode\` for \`children\` when appropriate. Avoid \`any\` on props and on \`event\` in handlers — use \`React.ChangeEvent<HTMLInputElement>\`, \`React.FormEvent\`, etc.
+- **TanStack React Table** (only if \`@tanstack/react-table\` is in INSTALLED PACKAGES): \`ColumnDef<T>\` is a union — do not read \`columnDef.accessorKey\` without narrowing; use \`column.id\` from the table API or \`'accessorKey' in column.columnDef\`. Always render **header and cell** with \`flexRender(def, context)\`, never raw \`columnDef.header\` / \`columnDef.cell\` as JSX children.
+- **Imports**: Use \`import type { X }\` for type-only imports when the value is not a runtime import — avoids unused-value issues and matches strict settings.
+- **Narrowing**: After \`JSON.parse\` or \`fetch().json()\`, validate or narrow the type before property access (or use a schema library if installed).
+- **Refs / null**: \`useRef<HTMLInputElement>(null)\` then check \`ref.current\` before use in callbacks.
+
 🚨 CRITICAL OUTPUT FORMATTING RULES 🚨
 - DO NOT output any conversational text, greetings, explanations, or conclusions.
 - DO NOT say "Sure", "I can help", "Here is the code", or summarize your changes.
@@ -361,6 +375,7 @@ STRICT SCOPE:
 CORRECTNESS (only when your edit touches these):
 - Respect existing "use client" / server boundaries; do not add metadata exports to client files.
 - Keep hook usage and controlled-input rules valid in the edited region.
+- TypeScript: Do not introduce implicit \`any\` or break existing typings. If the file uses \`@tanstack/react-table\`, keep header/cell rendering via \`flexRender\`; do not put \`columnDef.header\` / \`columnDef.cell\` directly in JSX.
 `.trim();
 
 /**

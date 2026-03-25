@@ -372,7 +372,7 @@ export class ProjectProfiler {
         const nextMajor = data.stackProfile.majors?.next;
         const nextParamsHint =
             typeof nextMajor === 'number' && nextMajor >= 15
-                ? ' In Next 15+, `params`/`searchParams` in pages and `generateMetadata` are often Promises — await them.'
+                ? ' In Next 15+, `params`/`searchParams` in pages and `generateMetadata` are often Promises — await them (e.g. `const { slug } = await params`).'
                 : '';
         const nextMetadataRscInfo =
             data.stackProfile.primary === 'next' && data.structure.includes('app-router')
@@ -381,12 +381,23 @@ export class ProjectProfiler {
 
         const nextLinkInfo =
             data.stackProfile.primary === 'next' && data.structure.includes('app-router')
-                ? '\n- Next.js `Link`: Do not nest `<a>` inside `<Link>` (invalid-new-link-with-extra-anchor). Put `className` and children on `<Link href="...">` directly unless using `legacyBehavior` per docs.'
+                ? '\n- Next.js `Link`: Use `<Link href="...">Label</Link>` directly. Do NOT use `legacyBehavior` or nest `<a>` tags. For buttons, use `<Button asChild><Link ...>...</Link></Button>` to ensure valid HTML (avoids nested interactive elements).'
                 : '';
+
+        const lucideIconHint = '\n- **Lucide Icons**: If an icon import fails (e.g., `CheckCircle`), check for alternative names like `Check` or `CircleCheck`. Standard names: `Check`, `X`, `AlertCircle`, `Info`, `Settings`.'
+
+        const tsCodegenHint =
+            data.stackProfile.primary === 'next' && data.structure.includes('app-router')
+                ? '\n- **TypeScript (fewer tsc errors)**: Use explicit generics on `useState` (e.g. `useState<Item[]>([])`); in Next 15+ `await params` / `await searchParams` where they are Promises; type event handlers (`React.ChangeEvent<...>`); avoid `any` on props. See `docs/typescript-best-practices.md`.'
+                : '';
+
+        const tableComponentHint = data.availableUIComponents.includes('table')
+            ? '\n- **TanStack Table**: Visual table from `@/components/ui/table`; `ColumnDef`, `flexRender`, `useReactTable` from `@tanstack/react-table` (in package.json). Always render headers and cells with `flexRender(..., context)` — never use `columnDef.header` or `columnDef.cell` as raw JSX. Do not access `columnDef.accessorKey` without narrowing; use `column.id` or `\'accessorKey\' in column.columnDef`.'
+            : '';
 
         const nextGuardrails =
             data.stackProfile.primary === 'next' && data.structure.includes('app-router')
-                ? '\n- Next.js guardrails: **Hydration** — avoid non-deterministic values (`Date.now`, `Math.random`) in server-rendered HTML; **Image** — configure `images.remotePatterns` in `next.config` for external hosts or use `<img>`; **Server Actions** — only `async function` actions; place `"use server"` per docs; **Route Handlers** — export named functions for HTTP methods (`GET`, `POST`, …) from `route.ts`; **Env** — only `NEXT_PUBLIC_*` is exposed to the browser bundle.'
+                ? `\n- Next.js guardrails: **Hydration** — avoid non-deterministic values (\`Date.now\`, \`Math.random\`) in server-rendered HTML; **Image** — configure \`images.remotePatterns\` in \`next.config\` for external hosts or use \`<img>\`; **Server Actions** — only \`async function\` actions; place \`"use server"\` per docs; **Route Handlers** — export named functions for HTTP methods (\`GET\`, \`POST\`, …) from \`route.ts\`; **Env** — only \`NEXT_PUBLIC_*\` is exposed to the browser bundle.${lucideIconHint}`
                 : '';
 
         const routePolicyHint = this.getRoutePolicyHint(data);
@@ -419,7 +430,7 @@ export class ProjectProfiler {
 - VERSION_CONSTRAINTS (package.json → 파싱 메이저): ${formatVersionConstraintsLine(data.stackProfile)}
 - KEY_DEPENDENCY_VERSIONS (semver; 플랜 summary에 인용 가능):
 ${formatKeyDependencyVersionsBlock(data.depsWithVersions)}${majorSyntaxSection}
-- Router Type: ${data.structure}${routerConflictWarning}${clientDirectiveInfo}${nextMetadataRscInfo}${nextLinkInfo}${nextGuardrails}
+- Router Type: ${data.structure}${routerConflictWarning}${clientDirectiveInfo}${nextMetadataRscInfo}${nextLinkInfo}${tsCodegenHint}${tableComponentHint}${nextGuardrails}
 - Styling: ${data.hasTailwind ? 'Tailwind CSS IS installed. Use Tailwind classes.' : 'Tailwind CSS IS NOT installed. Do NOT use tailwind classes. Use standard CSS or inline styles.'}${shadcnWarning}
 ${uiPolicySection}
 - UI Component Import Style: ${importStyleInfo}${barrelInfo}
@@ -432,6 +443,7 @@ ${exportStylePolicyBlock}
 - Available UI Component Files: ${availableComponentFiles}
 - INSTALLED PACKAGES (package.json): ${allDeps}
 - CRITICAL: You MUST ONLY import npm packages that appear in the INSTALLED PACKAGES list above. Do NOT use any package that is not listed. If a package is missing, use built-in alternatives (e.g., use native fetch instead of axios, use URLSearchParams instead of qs).
+- CRITICAL: NEVER import files from the \`docs/\` directory (e.g., markdown files) into your code. Documentation files are for your internal reference ONLY. Do NOT attempt to \`import ... from "@docs/..."\` or \`import ... from "@/docs/..."\`.
 ${designHints}
 [STACK_RULES]
 ${stackRules}

@@ -1350,7 +1350,7 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
 
     private static readonly MAX_UI_IMPORT_REPAIR_ATTEMPTS = 2;
     private static readonly MAX_UNINSTALLED_NPM_LLM_REPAIRS = 2;
-    private static readonly MAX_TYPESCRIPT_DIAGNOSTIC_REPAIRS = 3;
+    private static readonly MAX_TYPESCRIPT_DIAGNOSTIC_REPAIRS = 5;
 
     /** 미설치 npm import: 제거 후 시맨틱 HTML·이미 설치된 패키지만 사용 */
     private async repairWriteCodeUninstalledNpmImports(options: {
@@ -1542,11 +1542,12 @@ Fix ONE file. TypeScript validation failed after write (tsc diagnostics):
 ${validationMessage}
 
 Hard rules:
-- Remove ANY \`import … from 'intl'\` or \`require('intl')\`. Do NOT add the npm \`intl\` polyfill. Use the **global \`Intl\` object** only (\`Intl.DateTimeFormat\`, \`Intl.NumberFormat\`, \`Intl.RelativeTimeFormat\`, etc.).
-- Fix syntax errors (e.g. TS1005) so the file is valid TypeScript/TSX — especially broken \`import\` / \`import type\` lines.
-- Do NOT add new npm packages or \`@types/*\` unless already in the project's package.json; prefer built-ins and existing deps.
-- Preserve "use client" / "use server" if present at the top (when valid for that file).
-- Keep readable contrast for text vs backgrounds.
+- **TanStack Table (@tanstack/react-table)**: Import visual parts (\`Table\`, \`TableRow\`, etc.) from \`@/components/ui/table\`. Import \`ColumnDef\`, \`flexRender\`, etc. from \`@tanstack/react-table\` (listed in this project's package.json). For **headers and cells**, always use \`flexRender(column.columnDef.header, header.getContext())\` and \`flexRender(cell.column.columnDef.cell, cell.getContext())\` — never put \`columnDef.header\` or \`columnDef.cell\` directly in JSX (TS2322). Do not read \`columnDef.accessorKey\` on a bare \`ColumnDef\` without narrowing — use \`column.id\` from the header/cell instance or \`'accessorKey' in column.columnDef\` (TS2339).
+- **Intl API**: Remove ANY \`import … from 'intl'\` or \`require('intl')\`. Do NOT add the npm \`intl\` polyfill. Use the **global \`Intl\` object** only (\`Intl.DateTimeFormat\`, \`Intl.NumberFormat\`, \`Intl.RelativeTimeFormat\`, etc.).
+- **Syntax**: Fix syntax errors (e.g. TS1005, TS1003) so the file is valid TypeScript/TSX — especially broken \`import\` / \`import type\` lines.
+- **Packages**: Do NOT add new npm packages or \`@types/*\` unless already in the project's package.json; prefer built-ins and existing deps. (\`@tanstack/react-table\` is expected to already be present when using data tables.)
+- **Directives**: Preserve "use client" / "use server" if present at the top (when valid for that file).
+- **Design**: Keep readable contrast for text vs backgrounds.
 
 ${tailNote}
 

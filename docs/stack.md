@@ -34,3 +34,4 @@
 - gray-matter
 - react-diff-viewer-continued
 - [TypeScript Best Practices](./typescript-best-practices.md)
+- [Next.js Best Practices](./nextjs-best-practices.md)
