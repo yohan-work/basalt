@@ -7,6 +7,7 @@ import { FileText, FilePlus, FileEdit as FileEditIcon, ChevronRight, Pencil, Che
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { apiErrorText, parseResponseAsJson } from '@/lib/fetch-json';
 
 export interface FileChange {
     filePath: string;
@@ -80,8 +81,8 @@ export function CodeDiffViewer({ fileChanges, taskId, onAppliedEdit }: CodeDiffV
                     content: editContent,
                 }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Patch failed');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'Patch failed'));
             setEditMode(false);
             onAppliedEdit?.();
         } catch (e) {

@@ -34,6 +34,7 @@ import type { ReviewSuggestionSet } from '@/lib/types/review-actions';
 import type { QaSignoffStored } from '@/lib/qa/signoff-report';
 import { QA_ARTIFACT_SLOTS, type QaArtifactSlot } from '@/lib/qa/artifact-slots';
 import { TaskLivePreview } from '@/components/TaskLivePreview';
+import { apiErrorText, parseResponseAsJson } from '@/lib/fetch-json';
 
 function qaSlotLabelKo(slot: QaArtifactSlot): string {
     switch (slot) {
@@ -562,8 +563,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id, instructions: editInstructions.trim() }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Edit request failed');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'Edit request failed'));
             setIsEditModalOpen(false);
             setEditInstructions('');
             setView('changes');
@@ -605,16 +606,20 @@ export function TaskDetailsModal({
         setActionError(null);
         try {
             const res = await fetch(`/api/project/task-preview-url?taskId=${encodeURIComponent(task.id)}`);
-            const data = await res.json();
-            if (!res.ok || data.error) throw new Error(data.error || 'Failed to get task preview URL');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok || (typeof data.error === 'string' && data.error.trim())) {
+                throw new Error(apiErrorText(data, 'Failed to get task preview URL'));
+            }
             let url = typeof data.url === 'string' ? data.url.trim() : '';
             if (!url) {
                 const res2 = await fetch(
                     `/api/project/dev-server-info?projectId=${encodeURIComponent(task.project_id)}`
                 );
-                const d2 = await res2.json();
-                if (res2.ok && !d2.error) {
-                    url = (typeof d2.url === 'string' && d2.url.trim()) || `http://localhost:${d2.port ?? 3001}`;
+                const d2 = await parseResponseAsJson(res2);
+                const d2Err = typeof d2.error === 'string' ? d2.error.trim() : '';
+                if (res2.ok && !d2Err) {
+                    const port = typeof d2.port === 'number' ? d2.port : 3001;
+                    url = (typeof d2.url === 'string' && d2.url.trim()) || `http://localhost:${port}`;
                 }
             }
             if (!url) throw new Error('No preview URL');
@@ -655,8 +660,8 @@ export function TaskDetailsModal({
                     ...(modifyElementHtmlSnippet.trim() ? { htmlSnippet: modifyElementHtmlSnippet.trim() } : {}),
                 }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Element modify request failed');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'Element modify request failed'));
             setModifyElementRequest('');
             setModifyElementDescriptor('');
             setModifyElementLine('');
@@ -680,8 +685,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Review failed');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'Review failed'));
             setView('details');
         } catch (error) {
             console.error('Review failed', error);
@@ -700,8 +705,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Failed to generate review suggestions');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'Failed to generate review suggestions'));
         } catch (error) {
             console.error('Generate review suggestions failed', error);
             setActionError(error instanceof Error ? error.message : '리뷰 반영안 생성에 실패했습니다.');
@@ -719,8 +724,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Failed to apply review suggestions');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'Failed to apply review suggestions'));
             setView('changes');
         } catch (error) {
             console.error('Apply review suggestions failed', error);
@@ -763,8 +768,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'generate failed');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'generate failed'));
         } catch (e) {
             setActionError(e instanceof Error ? e.message : '질문 생성에 실패했습니다.');
         } finally {
@@ -782,8 +787,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id, answers: clarifyDraftAnswers }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'submit failed');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'submit failed'));
         } catch (e) {
             setActionError(e instanceof Error ? e.message : '답변 저장에 실패했습니다.');
         } finally {
@@ -801,8 +806,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id, skipped: true }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'skip failed');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'skip failed'));
         } catch (e) {
             setActionError(e instanceof Error ? e.message : '건너뛰기에 실패했습니다.');
         } finally {
@@ -820,8 +825,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'ack failed');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'ack failed'));
         } catch (e) {
             setActionError(e instanceof Error ? e.message : '확인 처리에 실패했습니다.');
         } finally {
@@ -839,8 +844,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id, note: recoveryNote.trim() || undefined }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || '복구 제안 생성 실패');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, '복구 제안 생성 실패'));
             setRecoveryMarkdown(typeof data.markdown === 'string' ? data.markdown : '');
         } catch (e) {
             setActionError(e instanceof Error ? e.message : '복구 제안 생성에 실패했습니다.');
@@ -859,8 +864,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || '핸드오프 요약 실패');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, '핸드오프 요약 실패'));
             setHandoffMarkdown(typeof data.markdown === 'string' ? data.markdown : '');
         } catch (e) {
             setActionError(e instanceof Error ? e.message : '핸드오프 요약에 실패했습니다.');
@@ -879,8 +884,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || '스펙 확장 실패');
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, '스펙 확장 실패'));
             /* Realtime으로 task.metadata 갱신됨 — 표시는 다음 페치에서 */
         } catch (e) {
             setActionError(e instanceof Error ? e.message : '스펙 확장에 실패했습니다.');
@@ -918,10 +923,8 @@ export function TaskDetailsModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id }),
             });
-            if (!res.ok) {
-                const data = await res.json();
-                throw new Error(data.error || 'Approve request failed');
-            }
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'Approve request failed'));
             onOpenChange(false);
         } catch (error) {
             console.error('Approve failed', error);

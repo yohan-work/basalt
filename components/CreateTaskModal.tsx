@@ -19,6 +19,7 @@ import {
     Paintbrush, TestTube, BookOpen, ChevronDown, ChevronUp, FileEdit, Wand2, Package,
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { apiErrorText, parseResponseAsJson } from '@/lib/fetch-json';
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
     LayoutGrid, Globe, Bug, RefreshCw, FileText,
@@ -66,7 +67,7 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
         }
         setComponentsLoading(true);
         fetch(`/api/project/components?projectId=${encodeURIComponent(selectedProjectId)}`)
-            .then((res) => res.json())
+            .then((res) => parseResponseAsJson<{ components?: ComponentItem[] }>(res))
             .then((data) => {
                 if (data.components) setComponents(data.components);
             })
@@ -105,8 +106,10 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
                 description: description.trim(),
             });
             fetch(`/api/tasks/similar?${params.toString()}`)
-                .then((res) => res.json())
-                .then((data: { similar?: Array<{ id: string; title: string; score: number }> }) => {
+                .then((res) =>
+                    parseResponseAsJson<{ similar?: Array<{ id: string; title: string; score: number }> }>(res)
+                )
+                .then((data) => {
                     setSimilarTasks(Array.isArray(data.similar) ? data.similar : []);
                 })
                 .catch(() => setSimilarTasks([]));
@@ -166,9 +169,9 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title, description, projectId: selectedProjectId })
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Failed to enhance prompt');
-            if (data.enhancedPrompt) {
+            const data = await parseResponseAsJson(res);
+            if (!res.ok) throw new Error(apiErrorText(data, 'Failed to enhance prompt'));
+            if (typeof data.enhancedPrompt === 'string' && data.enhancedPrompt) {
                 setDescription(data.enhancedPrompt);
             }
         } catch (err: unknown) {

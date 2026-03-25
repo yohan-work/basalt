@@ -15,6 +15,7 @@ import { StepProgress } from './StepProgress';
 import { ThemeToggle } from './ThemeToggle';
 import { useEventStream } from '@/lib/hooks/useEventStream';
 import type { ExecuteStreamOptions } from '@/lib/types/agent-visualization';
+import { apiErrorText, parseResponseAsJson } from '@/lib/fetch-json';
 
 interface Task {
     id: string;
@@ -298,9 +299,9 @@ export function KanbanBoard() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ taskId: task.id }),
             });
+            const data = await parseResponseAsJson(res);
             if (!res.ok) {
-                const data = await res.json();
-                showActionError('승인 실패: ' + (data.error || res.statusText));
+                showActionError('승인 실패: ' + apiErrorText(data, res.statusText));
             }
             // Realtime subscription이 UI를 자동 업데이트
         } catch (err) {

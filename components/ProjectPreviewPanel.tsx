@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Monitor, ExternalLink, Loader2, AlertCircle } from 'lucide-react';
+import { parseResponseAsJson } from '@/lib/fetch-json';
 
 interface DevServerInfo {
     port: number | null;
@@ -65,8 +66,8 @@ export function ProjectPreviewPanel({ projectId, open, onOpenChange }: ProjectPr
         setInfo(null);
 
         fetch(`/api/project/dev-server-info?projectId=${encodeURIComponent(projectId)}`)
-            .then((res) => res.json())
-            .then((data: DevServerInfo & { error?: string }) => {
+            .then((res) => parseResponseAsJson<DevServerInfo & { error?: string }>(res))
+            .then((data) => {
                 if (cancelled) return;
                 if (data.error && !data.url) {
                     setFetchError(data.error);

@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FolderPlus, Folder, Trash2 } from 'lucide-react';
+import { parseResponseAsJson } from '@/lib/fetch-json';
 
 interface Project {
     id: string;
@@ -114,10 +115,10 @@ export function ProjectSelector({ selectedProjectId, onProjectSelect }: ProjectS
     const handleBrowseFolder = async () => {
         try {
             const res = await fetch('/api/system/dialog', { method: 'POST' });
-            const data = await res.json();
+            const data = await parseResponseAsJson<{ path?: string; error?: string }>(res);
 
-            if (data.path) {
-                setNewProject(prev => ({ ...prev, path: data.path }));
+            if (typeof data.path === 'string' && data.path) {
+                setNewProject(prev => ({ ...prev, path: data.path as string }));
             } else if (data.error) {
                 console.error('Dialog error:', data.error);
                 alert('Error opening folder dialog: ' + data.error);

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ExternalLink, Loader2, Monitor, RefreshCw, AlertCircle } from 'lucide-react';
+import { parseResponseAsJson } from '@/lib/fetch-json';
 
 function normalizeUrl(value: string): string {
     const trimmed = value.trim();
@@ -28,8 +29,8 @@ export function TaskLivePreview({ taskId }: TaskLivePreviewProps) {
         if (!taskId) return;
         let cancelled = false;
         fetch(`/api/project/task-preview-url?taskId=${encodeURIComponent(taskId)}`)
-            .then((res) => res.json())
-            .then((data: { error?: string; url?: string; inferenceWarning?: string | null }) => {
+            .then((res) => parseResponseAsJson<{ error?: string; url?: string; inferenceWarning?: string | null }>(res))
+            .then((data) => {
                 if (cancelled) return;
                 if (data.error || !data.url) {
                     setFetchError(data.error || 'URL을 계산하지 못했습니다.');
