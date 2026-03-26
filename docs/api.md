@@ -75,6 +75,7 @@
 
 | Method | Path | 용도 |
 |---|---|---|
+| GET | `/api/system/health` | 앱 생존 확인(JSON `{ ok, service }`) |
 | POST | `/api/system/dialog` | 로컬 폴더 선택 다이얼로그 |
 | POST | `/api/tts` | edge-tts-universal 기반 TTS 스트림 생성 |
 

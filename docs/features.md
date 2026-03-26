@@ -76,6 +76,7 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - Dev 종료 파이프라인 또는 `verify()`에서 `screenshot_page`·`check_responsive` 캡처 PNG를 대상 프로젝트 경로 아래 `.basalt/basalt-qa/<taskId>/{main,mobile,tablet,desktop}.png`로 복사합니다.
 - `metadata.qaSignoff`에 스모크 결과·검증 요약·`executionRepairs` 기반 이슈 목록·한국어 서술(`narrativeKo`, `finalVerdictKo`)을 저장합니다.
 - UI: 태스크 상세 모달 **「검수 완료」** 탭에서 위 문구와 스크린샷을 확인합니다. 이미지는 `GET /api/project/qa-artifact?taskId=&slot=main|mobile|tablet|desktop`으로 제공됩니다.
+- **스크린샷이 생략**되고 로그에 `agent-browser 미사용`이 보일 때 확인 순서: (1) `AGENT_BROWSER_ENABLED=false`가 설정돼 있지 않은지, (2) Basalt 서버 프로세스에서 `agent-browser --version`이 되는지(터미널과 PATH가 다를 수 있음), (3) 필요 시 `.env.local`에 `AGENT_BROWSER_BIN`에 `which agent-browser`로 얻은 **절대 경로** 지정, (4) Dev 종료 QA 직전에 가용성 캐시를 비우므로 설정 변경 후 **재시작** 또는 다음 태스크 실행에서 재탐지됨. 구현: `lib/browser/agent-browser.ts`, `Orchestrator.runDevExitQaPipeline`. 상세는 [`setup.md`](./setup.md).
 
 ## 6) 승인 워크플로우(HITL)
 
@@ -86,6 +87,21 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 
 - `discuss` 엔드포인트로 실행 전후 브레인스토밍 대화 생성
 - `enhance-prompt`로 사용자 초안 품질 향상
+
+## 8) react-grab 연동
+
+- 클립보드 기반 요소 컨텍스트 붙여넣기 지원
+- 실시간 요소 전송 플로우(별도 플러그인 연동 필요)는 문서 가이드를 외부 환경에서 준비
+
+## 9) TTS
+
+- 서버 기반 `edge-tts-universal` 및 Web Speech API 폴백
+- 메시지별 재생 토글, 자동 재생 큐, 오디오/에이전트 식별 표시
+
+## 10) 실행/협업 시각화
+
+- Execution Discussion, Agent Collaboration Matrix, 팀 Board/라운드 메트릭 등은 실시간/폴링 기반으로 노출
+- `metadata.executionDiscussions`, `metadata.agentCollaboration` 등을 통해 뷰 데이터 구성
 
 ## 11) 동적 기술 스택 분석 기반 프롬프트 보강
 
@@ -151,21 +167,6 @@ LLM이 프로젝트에 설치되지 않은 npm 패키지(예: `axios`, `lodash`)
 ### 방어 계층 4: enhance-prompt 스택 요약 (`lib/profiler.ts` — `getStackSummary()`)
 - 전체 설치 패키지 목록 + 미설치 패키지 사용 금지 경고 포함
 - `enhance-prompt` 시스템 프롬프트에도 "설치되지 않은 패키지를 제약 조건에 넣지 마라" 명시
-
-## 8) react-grab 연동
-
-- 클립보드 기반 요소 컨텍스트 붙여넣기 지원
-- 실시간 요소 전송 플로우(별도 플러그인 연동 필요)는 문서 가이드를 외부 환경에서 준비
-
-## 9) TTS
-
-- 서버 기반 `edge-tts-universal` 및 Web Speech API 폴백
-- 메시지별 재생 토글, 자동 재생 큐, 오디오/에이전트 식별 표시
-
-## 10) 실행/협업 시각화
-
-- Execution Discussion, Agent Collaboration Matrix, 팀 Board/라운드 메트릭 등은 실시간/폴링 기반으로 노출
-- `metadata.executionDiscussions`, `metadata.agentCollaboration` 등을 통해 뷰 데이터 구성
 
 ## 13) 태스크 상세·생성 보조 (미리보기·LLM 요약·검색)
 

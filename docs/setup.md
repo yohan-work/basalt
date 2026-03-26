@@ -63,6 +63,12 @@ MOCK_LLM=false
 
 # Next: src/app 만 있고 루트 app/ 이 없는데 tsconfig 의 @/* 가 ./* 만 가리키는 경우에만, tsconfig.json 의 paths 를 ./src/* 로 맞춤 (선택).
 # BASALT_ALIGN_NEXT_PATH_ALIAS=1
+
+# Dev 종료 QA: 스크린샷·반응형 캡처에 쓰는 agent-browser CLI (외부 바이너리).
+# PATH에 없거나 IDE가 다른 환경으로 서버를 띄우면 탐지 실패할 수 있음 → 절대 경로 지정 권장.
+# AGENT_BROWSER_BIN=/usr/local/bin/agent-browser
+# 명시적으로 끄기(스크린샷·브라우저 기반 스모크 보강 생략, HTML 문자열 스모크는 유지).
+# AGENT_BROWSER_ENABLED=false
 ```
 
 대상 프로젝트 루트에 Basalt가 QA PNG를 쓸 때 `.basalt/basalt-qa/<taskId>/`가 생깁니다. 해당 레포를 Git에 올리지 않으려면 그 프로젝트의 `.gitignore`에 `.basalt/`를 추가하세요.
