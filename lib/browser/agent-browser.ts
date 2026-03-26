@@ -1,10 +1,11 @@
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const EXEC_TIMEOUT_MS = 60_000;
 const MAX_OUTPUT_CHARS = 100_000;
@@ -38,6 +39,20 @@ export interface BrowserCommandResult {
 
 let _agentBrowserAvailable: boolean | null = null;
 
+/**
+ * CLI 바이너리. GUI로 연 Next/Cursor는 nvm·Homebrew 경로가 PATH에 없을 수 있어
+ * 터미널에서 `which agent-browser`로 나온 절대 경로를 AGENT_BROWSER_BIN에 두면 된다.
+ */
+export function getAgentBrowserExecutable(): string {
+    const fromEnv = process.env.AGENT_BROWSER_BIN?.trim();
+    return fromEnv || 'agent-browser';
+}
+
+function shellQuoteArg(arg: string): string {
+    if (!arg.includes(' ') && !arg.includes('"')) return arg;
+    return `"${arg.replace(/"/g, '\\"')}"`;
+}
+
 export async function isAgentBrowserAvailable(): Promise<boolean> {
     if (_agentBrowserAvailable !== null) return _agentBrowserAvailable;
 
@@ -46,8 +61,13 @@ export async function isAgentBrowserAvailable(): Promise<boolean> {
         return false;
     }
 
+    const exe = getAgentBrowserExecutable();
     try {
-        await execAsync('agent-browser --version', { timeout: 5_000 });
+        await execFileAsync(exe, ['--version'], {
+            timeout: 5_000,
+            env: process.env,
+            windowsHide: true,
+        });
         _agentBrowserAvailable = true;
     } catch {
         _agentBrowserAvailable = false;
@@ -82,7 +102,8 @@ export class AgentBrowser {
 
         const sessionArgs = ['--session', this.session];
         if (json) sessionArgs.push('--json');
-        const cmd = ['agent-browser', ...sessionArgs, ...args]
+        const exe = getAgentBrowserExecutable();
+        const cmd = [shellQuoteArg(exe), ...sessionArgs, ...args]
             .map(a => (a.includes(' ') && !a.startsWith('"') ? `"${a}"` : a))
             .join(' ');
 
@@ -234,11 +255,13 @@ export class AgentBrowser {
 
     async batch(commands: string[][]): Promise<BrowserCommandResult> {
         const json = JSON.stringify(commands);
-        const cmd = `echo '${json.replace(/'/g, "'\\''")}' | agent-browser --session ${this.session} batch --json`;
+        const exe = shellQuoteArg(getAgentBrowserExecutable());
+        const cmd = `echo '${json.replace(/'/g, "'\\''")}' | ${exe} --session ${this.session} batch --json`;
         try {
             const { stdout } = await execAsync(cmd, {
                 timeout: EXEC_TIMEOUT_MS * 2,
                 maxBuffer: 5 * 1024 * 1024,
+                env: process.env,
             });
             return { success: true, raw: stdout };
         } catch (err: any) {

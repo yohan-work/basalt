@@ -10,7 +10,7 @@ import { ContextManager } from '../context-manager';
 import { StreamEmitter } from '../stream-emitter';
 import { ProjectProfiler } from '../profiler';
 import { MODEL_CONFIG } from '../model-config';
-import { isAgentBrowserAvailable } from '../browser/agent-browser';
+import { isAgentBrowserAvailable, resetAvailabilityCache } from '../browser/agent-browser';
 import { resolveQaPageUrl, resolveQaPageUrlWithDiagnostics } from '../project-dev-server';
 import { persistQaArtifactsFromCapture } from '../qa/artifact-paths';
 import type { QaArtifactSlot } from '../qa/artifact-slots';
@@ -2570,6 +2570,8 @@ File: ${relativePath}
         // #endregion
 
         this.emitter?.emit({ type: 'phase_start', phase: 'dev_exit_qa', taskId: this.taskId });
+        // Dev QA 직전에만 재탐지: CLI 설치·AGENT_BROWSER_BIN 설정 후에도 이전 false 캐시가 남지 않게 함
+        resetAvailabilityCache();
 
         const freshTask = (await this.getTask()) || task;
         const meta = (freshTask as any)?.metadata || task?.metadata || null;

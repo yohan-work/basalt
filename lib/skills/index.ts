@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import * as ts from 'typescript';
 
@@ -10,8 +10,10 @@ import * as llm from '../llm';
 import { MODEL_CONFIG } from '../model-config';
 import { ProjectProfiler } from '../profiler';
 import { mergeCompilerPathsFromConfigs } from '../tsconfig-paths';
+import { getAgentBrowserExecutable } from '../browser/agent-browser';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 const READ_CACHE = new Map<string, string>();
 const DIR_CACHE = new Map<string, string[] | string>();
 const CLIENT_DIRECTIVE_RE = /^\s*['"]use client['"]/;
@@ -1649,8 +1651,12 @@ export async function manage_git(action: 'checkout' | 'commit' | 'merge' | 'add'
 export async function check_environment() {
     let agentBrowser = false;
     try {
-        const { stdout } = await execAsync('agent-browser --version', { timeout: 5_000 });
-        agentBrowser = !!stdout.trim();
+        await execFileAsync(getAgentBrowserExecutable(), ['--version'], {
+            timeout: 5_000,
+            env: process.env,
+            windowsHide: true,
+        });
+        agentBrowser = true;
     } catch { /* not installed */ }
 
     return {
