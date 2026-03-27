@@ -33,6 +33,16 @@ Basalt의 LLM 호출은 `lib/llm.ts`에서 공통 처리됩니다.
 - 스트리밍 모드(`generateCodeStream`, `generateJSONStream`) 지원
 - 환경 변수로 `OLLAMA_BASE_URL` 재정의 가능
 
+## Ollama `/api/generate` 호출 규약 (로컬)
+
+`lib/llm.ts` 및 `app/api/agent/enhance-prompt/route.ts` 등은 Ollama에 `POST /api/generate`로 JSON 본문을 보낸다. 운영 시 다음을 염두에 둔다.
+
+- **thinking 계열 모델**(예: Qwen3.x): 내부 추론에 토큰이 쓰이면 `response`가 비어 보일 수 있어, Ollama 측에서는 본문 **최상위**에 `think: false`를 두는 방식이 권고되는 경우가 있다.
+- **HTTP 200**: 본문에 `error`가 있거나 `response`가 비어 있으면 실패로 처리하는 것이 안전하다.
+- **라우트별 구현**: `enhance-prompt`는 `fetch`로 직접 호출하고, 나머지 다수는 `lib/llm.ts`의 `ollamaRequest` 경로를 쓴다. 동작 차이가 있으면 각 파일을 확인한다.
+
+상세 증상·Turbopack·Realtime·디스크는 [`local-dev-troubleshooting.md`](./local-dev-troubleshooting.md)를 본다.
+
 ## App Router 가드
 
 - Next.js 훅/컴포넌트 규칙을 위반하지 않도록 `use client` 프롬프트 규칙이 강화되어 있습니다.

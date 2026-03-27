@@ -172,6 +172,8 @@ LLM이 프로젝트에 설치되지 않은 npm 패키지(예: `axios`, `lodash`)
 
 태스크 실행 품질과 운영 편의를 위한 **Basalt 앱 UI + 전용 API** 묶음입니다. **`recovery-suggestions`**, **`handoff-summary`**, **`spec-expand`**는 Ollama(`OLLAMA_BASE_URL`)·`generateText`를 쓰며, 실패 시 해당 API만 오류로 돌아갑니다. **`task-preview-url`**, **`tasks/similar`**, 칸반 검색은 LLM 없음. 미리보기는 대상 프로젝트 **dev 서버**가 떠 있어야 합니다.
 
+**AI Enhance vs 유사 태스크**: 태스크 생성 화면에서 **프롬프트를 LLM으로 고도화**하는 기능은 `POST /api/agent/enhance-prompt`이며 Ollama 스마트 모델을 쓴다. 반면 **같은 프로젝트의 완료 태스크 추천**은 `GET /api/tasks/similar`로, 토큰 유사도만 계산하고 LLM을 호출하지 않는다. 터미널에 `tasks/similar` 로그만 보인다고 해서 enhance가 성공한 것은 아니다. 로그·엔드포인트 혼동 시 [`local-dev-troubleshooting.md`](./local-dev-troubleshooting.md)를 참고한다.
+
 ### 13a) Dev / Test 라이브 미리보기
 
 - **목적**: 태스크가 **`working`(Dev)** 또는 **`testing`(Test)** 이고 프로젝트가 연결되어 있을 때, **대상 워크스페이스**의 dev 앱을 Basalt 태스크 상세 안에서 iframe으로 본다.

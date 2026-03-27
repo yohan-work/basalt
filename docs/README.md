@@ -18,7 +18,7 @@
 - `architecture/team-orchestrator.md`  
   - 팀 오케스트레이션 라운드, 메시지, handoff, 협업 지표, 토큰 예산
 - `llm.md`  
-  - 모델 구성, App Router 가드, backoff, timeout, 스트리밍, 파서 안정화
+  - 모델 구성, Ollama `/api/generate` 로컬 규약, App Router 가드, backoff, timeout, 스트리밍, 파서 안정화
 
 ### 실행 기능
 
@@ -52,6 +52,8 @@
   - 핵심 컴포넌트와 분석/대시보드 컴포넌트 카탈로그
 - `setup.md`  
   - 환경 변수, 실행 방법, 스크립트, 운영 가이드
+- `local-dev-troubleshooting.md`  
+  - Turbopack dev 캐시, Ollama(Qwen thinking·빈 응답), Realtime 부분 페이로드, enhance vs `tasks/similar`, Ollama 성능·`tsc` 점검
 - `stack.md`  
   - 기술 스택, 도입 배경, 외부 의존성 요약
 - `target-workspace-environment.md`  

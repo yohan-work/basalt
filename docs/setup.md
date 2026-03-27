@@ -15,6 +15,10 @@ npm run dev
 
 브라우저: `http://localhost:3000`
 
+## Next.js dev (Turbopack)
+
+개발 서버는 기본적으로 Turbopack을 사용한다. Turbopack dev **파일시스템 영속 캐시**는 [`next.config.ts`](../next.config.ts)에서 끄는 설정이 있다. 캐시·압축 관련 오류가 나거나 동시 쓰기 메시지가 보이면 [`local-dev-troubleshooting.md`](./local-dev-troubleshooting.md)의 Turbopack 절을 따른다.
+
 ## 환경 변수
 
 ```env
