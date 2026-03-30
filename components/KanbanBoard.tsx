@@ -9,6 +9,7 @@ import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCirc
 import Link from 'next/link';
 import { CreateTaskModal } from './CreateTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
+import { RalphModeDialog } from './RalphModeDialog';
 import { ProjectPreviewPanel } from './ProjectPreviewPanel';
 import { ProjectSelector } from './ProjectSelector';
 import { StepProgress } from './StepProgress';
@@ -510,6 +511,8 @@ export function KanbanBoard() {
                 onExecutionOptionsChange={handleExecutionOptionsChange}
                 onExecute={handleExecuteFromModal}
             />
+
+            <RalphModeDialog stream={stream} task={selectedTask} tasks={tasks} />
 
             <ProjectPreviewPanel
                 projectId={selectedProjectId}
