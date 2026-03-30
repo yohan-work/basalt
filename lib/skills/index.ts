@@ -117,6 +117,33 @@ const BUILTIN_NODE_MODULES = new Set([
 
 const installedPackagesCache = new Map<string, Set<string>>();
 
+/**
+ * When `@prisma/client` is installed and the file uses `prisma.`, require an import or local binding
+ * so TS2304 is caught before disk write (clearer than full tsc rollback).
+ */
+function validatePrismaClientIdentifierUsage(
+    content: string,
+    projectRoot: string
+): { valid: true } | { valid: false; message: string } {
+    if (!getInstalledPackages(projectRoot).has('@prisma/client')) {
+        return { valid: true };
+    }
+    if (!/\bprisma\s*\./.test(content)) {
+        return { valid: true };
+    }
+    if (/\bimport\s+[^;]*\bprisma\b[^;]*\bfrom\b/m.test(content)) {
+        return { valid: true };
+    }
+    if (/\b(?:const|let)\s+prisma\s*=/m.test(content)) {
+        return { valid: true };
+    }
+    return {
+        valid: false,
+        message:
+            'Prisma: this file uses `prisma.` but `prisma` is not imported or declared. Import the project singleton (e.g. `import { prisma } from \'@/lib/prisma\'`) or add `import { PrismaClient } from \'@prisma/client\'` and `const prisma = new PrismaClient()`. Use `read_codebase` to match the target repo.',
+    };
+}
+
 function getInstalledPackages(projectRoot: string): Set<string> {
     if (installedPackagesCache.has(projectRoot)) {
         return installedPackagesCache.get(projectRoot)!;
@@ -1304,6 +1331,15 @@ export async function write_code(filePath: string, content: string, baseDir: str
                     offendingUiSpecifiers: importValidation.offendingUiSpecifiers,
                     missingNpmPackageRoots: importValidation.missingNpmPackageRoots,
                 },
+            };
+        }
+
+        const prismaId = validatePrismaClientIdentifierUsage(sanitizedContent, baseDir);
+        if (!prismaId.valid) {
+            return {
+                success: false,
+                message: prismaId.message,
+                filePath,
             };
         }
 

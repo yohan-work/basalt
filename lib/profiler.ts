@@ -16,6 +16,29 @@ interface AvailableUiComponent {
     absolutePath: string;
 }
 
+/** Relative paths (POSIX) checked when `@prisma/client` is installed — hint only. */
+const PRISMA_SINGLETON_FILE_CANDIDATES = [
+    'lib/prisma.ts',
+    'lib/prisma.js',
+    'src/lib/prisma.ts',
+    'src/lib/prisma.js',
+] as const;
+
+function findExistingPrismaSingletonRelPaths(projectRoot: string): string[] {
+    const found: string[] = [];
+    for (const rel of PRISMA_SINGLETON_FILE_CANDIDATES) {
+        const full = path.join(projectRoot, ...rel.split('/'));
+        try {
+            if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+                found.push(rel);
+            }
+        } catch {
+            /* skip */
+        }
+    }
+    return found;
+}
+
 /**
  * Scans the project to identify the tech stack and available UI components.
  * This prevents LLM hallucinations by providing factual context.
@@ -391,6 +414,16 @@ export class ProjectProfiler {
                 ? '\n- **TypeScript (fewer tsc errors)**: Use explicit generics on `useState` (e.g. `useState<Item[]>([])`); in Next 15+ `await params` / `await searchParams` where they are Promises; type event handlers (`React.ChangeEvent<...>`); avoid `any` on props. See `docs/typescript-best-practices.md`.'
                 : '';
 
+        const hasPrismaClientDep = data.dependencies.includes('@prisma/client');
+        const prismaSingletonOnDisk = hasPrismaClientDep ? findExistingPrismaSingletonRelPaths(this.projectRoot) : [];
+        const prismaClientHint = hasPrismaClientDep
+            ? `\n- **Prisma (\`@prisma/client\`)**: Never use an undeclared global \`prisma\`. Import the app’s exported client (e.g. \`import { prisma } from '@/lib/prisma'\`) or, in the same file, \`import { PrismaClient } from '@prisma/client'\` plus \`const prisma = new PrismaClient()\`. Use \`read_codebase\` to match this repo’s pattern.${
+                  prismaSingletonOnDisk.length > 0
+                      ? ` On-disk singleton candidate(s): \`${prismaSingletonOnDisk.join('`, `')}\` — map via tsconfig \`paths\` (often \`@/lib/prisma\`).`
+                      : ' No \`lib/prisma.ts\` / \`src/lib/prisma.ts\` detected at profile time; locate or add a singleton before \`prisma.*\` in route handlers.'
+              }`
+            : '';
+
         const tableComponentHint = data.availableUIComponents.includes('table')
             ? '\n- **TanStack Table**: Visual table from `@/components/ui/table`; `ColumnDef`, `flexRender`, `useReactTable` from `@tanstack/react-table` (in package.json). Always render headers and cells with `flexRender(..., context)` — never use `columnDef.header` or `columnDef.cell` as raw JSX. Do not access `columnDef.accessorKey` without narrowing; use `column.id` or `\'accessorKey\' in column.columnDef`.'
             : '';
@@ -430,7 +463,7 @@ export class ProjectProfiler {
 - VERSION_CONSTRAINTS (package.json → 파싱 메이저): ${formatVersionConstraintsLine(data.stackProfile)}
 - KEY_DEPENDENCY_VERSIONS (semver; 플랜 summary에 인용 가능):
 ${formatKeyDependencyVersionsBlock(data.depsWithVersions)}${majorSyntaxSection}
-- Router Type: ${data.structure}${routerConflictWarning}${clientDirectiveInfo}${nextMetadataRscInfo}${nextLinkInfo}${tsCodegenHint}${tableComponentHint}${nextGuardrails}
+- Router Type: ${data.structure}${routerConflictWarning}${clientDirectiveInfo}${nextMetadataRscInfo}${nextLinkInfo}${tsCodegenHint}${prismaClientHint}${tableComponentHint}${nextGuardrails}
 - Styling: ${data.hasTailwind ? 'Tailwind CSS IS installed. Use Tailwind classes.' : 'Tailwind CSS IS NOT installed. Do NOT use tailwind classes. Use standard CSS or inline styles.'}${shadcnWarning}
 ${uiPolicySection}
 - UI Component Import Style: ${importStyleInfo}${barrelInfo}

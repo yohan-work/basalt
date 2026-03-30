@@ -228,3 +228,34 @@ import { Button } from '@/components/ui/button'
   <Button>Go to Dashboard</Button>
 </Link>
 ```
+
+## 10. Prisma client in Next.js Route Handlers
+
+### Problem
+Tutorials often show `prisma.user.findMany()` as if `prisma` were global. In real apps it is almost always a **module-level import** from a singleton file. Omitting the import yields **TS2304 Cannot find name 'prisma'**.
+
+### Recommended patterns
+
+```typescript
+// Prefer the project singleton (path varies — check `lib/prisma.ts` or `src/lib/prisma.ts`)
+import { prisma } from '@/lib/prisma'
+
+export async function GET() {
+  const rows = await prisma.user.findMany()
+  return Response.json(rows)
+}
+```
+
+If the repo has no shared module yet, the same file may use:
+
+```typescript
+import { PrismaClient } from '@prisma/client'
+
+const prisma = new PrismaClient()
+
+export async function POST(req: Request) {
+  // ...
+}
+```
+
+Use one consistent pattern per target repository; do not mix bare `prisma.` calls without a binding.

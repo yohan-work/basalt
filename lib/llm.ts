@@ -239,6 +239,7 @@ MANDATORY CODING RULES:
     - NO qs → use \`URLSearchParams\`
   - Violating this rule causes a FATAL "Module not found" build error that crashes the entire application.
   - Even when the runner can auto-install missing packages, **still treat the INSTALLED PACKAGES list as authoritative for your first output** — avoid speculative heavy libraries (e.g. charting) unless the task clearly needs them; unnecessary imports trigger slower repair loops.
+- **Prisma / DB client**: Use \`prisma.someModel\` **only** when \`@prisma/client\` appears in INSTALLED PACKAGES. Never treat \`prisma\` as a global — it must be **imported** from the target app’s singleton (e.g. \`import { prisma } from '@/lib/prisma'\`) or created in the same file with \`import { PrismaClient } from '@prisma/client'\` and \`const prisma = new PrismaClient()\`. In \`app/.../route.ts\` and other server modules, missing this causes **TS2304 Cannot find name 'prisma'**.
 - 🚨 SYNTAX VALIDITY (ZERO TOLERANCE) 🚨:
   - Every file you output MUST be syntactically valid TypeScript/TSX.
   - Ensure all \`import\` and \`import type\` statements are correctly formatted (e.g., no missing commas, no mixed keywords like \`import type { ..., } from ...\` if not supported by the project's TS version).
@@ -335,6 +336,7 @@ MANDATORY CODING RULES:
 - **Imports**: Use \`import type { X }\` for type-only imports when the value is not a runtime import — avoids unused-value issues and matches strict settings.
 - **Narrowing**: After \`JSON.parse\` or \`fetch().json()\`, validate or narrow the type before property access (or use a schema library if installed).
 - **Refs / null**: \`useRef<HTMLInputElement>(null)\` then check \`ref.current\` before use in callbacks.
+- **Prisma (again)**: Same as PACKAGE rules — if the project lists \`@prisma/client\`, every \`prisma.\` access must be preceded by a proper import or \`const prisma = …\` in that file; otherwise TypeScript fails before runtime.
 
 🚨 CRITICAL OUTPUT FORMATTING RULES 🚨
 - DO NOT output any conversational text, greetings, explanations, or conclusions.

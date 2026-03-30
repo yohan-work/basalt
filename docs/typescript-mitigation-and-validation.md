@@ -24,15 +24,17 @@ Single-file surgical edits use `SURGICAL_FILE_EDIT_SYSTEM_RULES`, which includes
 
 ### 2. Project context (`lib/profiler.ts`)
 
-The `[PROJECT CONTEXT]` block includes Next.js metadata, Link, and—when App Router is detected—a **TypeScript quick wins** line pointing at this repo’s `docs/typescript-best-practices.md`. If `table` exists in the UI kit, **TanStack Table** rules are appended.
+The `[PROJECT CONTEXT]` block includes Next.js metadata, Link, and—when App Router is detected—a **TypeScript quick wins** line pointing at this repo’s `docs/typescript-best-practices.md`. If `table` exists in the UI kit, **TanStack Table** rules are appended. When `package.json` lists **`@prisma/client`**, a **Prisma** line is added: do not assume a global `prisma`; import the app singleton (profiler may list on-disk candidates such as `lib/prisma.ts`).
 
 ### 3. `write_code` validation (`lib/skills/index.ts`)
+
+When the target project has **`@prisma/client`** installed and the incoming file body uses **`prisma.`** (member access), `write_code` runs a **lightweight check** before writing: the file must already contain an `import` that binds `prisma` or a top-level `const prisma =` / `let prisma =`. That catches **TS2304 Cannot find name 'prisma'** early with a direct message instead of only relying on post-write TypeScript diagnostics.
 
 After writing a file, `validateGeneratedTypeSafety` runs (via `scripts/validate-client-boundary.mjs --types-only` when present, or in-process TypeScript diagnostics). If validation **fails**, the implementation attempts to **restore the previous file contents** or **remove** a newly created file so bad output does not persist.
 
 ### 4. Orchestrator repair loop (`lib/agents/Orchestrator.ts`)
 
-If `write_code` still fails (imports, UI allowlist, TS diagnostics, etc.), the orchestrator can trigger targeted repairs, including **TypeScript diagnostic repair** with a bounded number of rounds (`MAX_TYPESCRIPT_DIAGNOSTIC_REPAIRS`, currently **5**).
+If `write_code` still fails (imports, UI allowlist, TS diagnostics, etc.), the orchestrator can trigger targeted repairs, including **TypeScript diagnostic repair** with a bounded number of rounds (`MAX_TYPESCRIPT_DIAGNOSTIC_REPAIRS`, currently **5**). That repair prompt includes explicit guidance for missing **`prisma`** bindings (import singleton or instantiate `PrismaClient`).
 
 ## Operational recommendations (target projects)
 
