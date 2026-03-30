@@ -22,8 +22,22 @@ export async function parseResponseAsJson<T extends ApiJsonObject = ApiJsonObjec
 
     const trimmed = text.trimStart();
     if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+        const preview = trimmed.slice(0, 120).replace(/\s+/g, ' ');
+        const urlNote = res.url?.trim() ? ` 요청 URL: ${res.url}.` : '';
+        const isLocalDevUrl = /localhost|127\.0\.0\.1/i.test(res.url || '');
+        let hint404 = '';
+        if (res.status === 404) {
+            hint404 =
+                ' HTTP 404이면 Basalt의 `app/api/...` 라우트에 닿기 전에 Next/HTML 404가 온 경우가 많습니다. Basalt와 **같은 오리진**에서 UI를 열었는지(로컬은 `npm run dev` 주소), 리버스 프록시가 **`/api`를 Basalt로 전달**하는지, 배포본에 해당 API가 **포함됐는지** 확인하세요.';
+            if (isLocalDevUrl) {
+                hint404 +=
+                    ' **로컬 URL이 맞는데도 HTML 404면:** `npm run dev`를 **Basalt 저장소 루트**에서 실행 중인지, 해당 포트에 다른 Next 앱이 붙어 있지 않은지 확인하세요. `.next`를 삭제한 뒤 dev를 재기동해 보세요. `GET /api/agent/spec-expand`가 JSON(`ok`, `service`)을 주면 라우트는 등록된 것입니다.';
+            }
+        } else if (res.status >= 400) {
+            hint404 = ' 서버가 JSON 대신 HTML 오류 페이지를 반환했을 수 있습니다.';
+        }
         throw new Error(
-            `JSON이 필요한데 HTML이 왔습니다 (HTTP ${res.status}). 미리보기: ${trimmed.slice(0, 120).replace(/\s+/g, ' ')}`
+            `JSON이 필요한데 HTML이 왔습니다 (HTTP ${res.status}).${urlNote} 미리보기: ${preview}${hint404}`
         );
     }
 

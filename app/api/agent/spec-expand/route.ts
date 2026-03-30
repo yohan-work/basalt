@@ -7,6 +7,15 @@ import { ProjectProfiler } from '@/lib/profiler';
 
 export const maxDuration = 120;
 
+/** Route 등록·포트·프로젝트 루트 진단용. 본 기능은 POST만 사용. */
+export async function GET() {
+    return NextResponse.json({
+        ok: true,
+        service: 'spec-expand',
+        usage: 'POST with JSON body { taskId } (pending/planning tasks only)',
+    });
+}
+
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();

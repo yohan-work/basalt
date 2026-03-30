@@ -48,6 +48,28 @@ Basalt를 로컬에서 `npm run dev`로 돌릴 때 나올 수 있는 이슈와, 
 
 성공 시 서버가 `Tasks.metadata.specExpansion`에 `{ markdown, generatedAt }`을 저장하고, UI는 일반적으로 그 메타를 읽어 표시한다. Realtime 전파가 늦으면 “생성했는데 바로 안 보임”처럼 느껴질 수 있다. 그 경우 API 응답 본문을 로컬 state에 반영하는 패턴으로 보완할 수 있다(구현 여부는 [`TaskDetailsModal`](../components/TaskDetailsModal.tsx)를 확인).
 
+### AC·스모크 시나리오 생성 — “JSON이 필요한데 HTML” / HTTP 404
+
+버튼은 `POST /api/agent/spec-expand`를 호출한 뒤 [`parseResponseAsJson`](../lib/fetch-json.ts)으로 본문을 파싱한다. 응답이 `<!DOCTYPE html>…`처럼 **HTML**이면 JSON 파싱 전에 오류가 난다.
+
+- **태스크가 없을 때** API는 `404`이지만 본문은 **`{ "error": "Task not found" }` 형태의 JSON**이다. 그 경우 메시지는 보통 “Task not found” 류로 표시된다.
+- **HTTP 404 + HTML**(한국어 `lang` 속성이 있는 문서 등)이면, 대개 **Basalt의 Route Handler에 도달하지 못하고** Next(또는 프록시)의 **HTML 404 페이지**가 온 것이다.
+
+**확인 체크리스트**
+
+1. 브라우저 개발자 도구 **Network**에서 `spec-expand` 요청의 **전체 URL**이 Basalt 앱 호스트인지(대상 워크스페이스 dev 포트만 연 탭이 아닌지).
+2. 응답 **Content-Type**이 `text/html`인지, **Preview**가 앱 404 페이지인지.
+3. 리버스 프록시·팀널 사용 시 **`/api` 경로가 Basalt로 프록시**되는지.
+4. 배포 환경이면 최신 빌드에 `app/api/agent/spec-expand/route.ts`가 포함됐는지.
+
+**URL이 이미 `http://localhost:3000/api/agent/spec-expand`처럼 로컬인데도 HTML 404인 경우**
+
+- 오리진 불일치가 아니라 **그 포트에서 돌아가는 dev가 이 Basalt 트리가 아니거나**, **`.next`/Turbopack 캐시**로 라우트가 비어 보이는 경우가 흔합니다.
+- 터미널에서 **Basalt 루트**인지 확인한 뒤 `.next`를 지우고 `npm run dev`를 다시 실행해 본다.
+- 브라우저 주소창 또는 `curl -s http://localhost:3000/api/agent/spec-expand`로 **`GET`**을 호출한다. JSON에 `ok`, `service: "spec-expand"`가 오면 라우트는 등록된 것이고, 여전히 HTML 404면 **3000 포트에 다른 프로세스**가 붙어 있을 가능성을 의심한다.
+
+자세한 오류 문구는 `lib/fetch-json.ts`의 HTML 분기에서 상태 코드별 힌트를 병합한다.
+
 ## Ollama 느려짐·무응답 (모델 여러 개 import 이후)
 
 Hugging Face 등에서 GGUF를 연속 import하거나 대형 모델을 여러 개 두면 디스크·RAM·VRAM 압박으로 추론이 매우 느려지거나 타임아웃처럼 보일 수 있다.
