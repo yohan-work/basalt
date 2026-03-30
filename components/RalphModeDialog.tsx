@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { StreamEvent } from '@/lib/stream-emitter';
 import type { EventStreamState } from '@/lib/hooks/useEventStream';
 import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sparkles, Square } from 'lucide-react';
 
 function formatEventLine(e: StreamEvent): string | null {
@@ -57,6 +57,7 @@ export interface RalphModeDialogProps {
  */
 export function RalphModeDialog({ stream, task, tasks }: RalphModeDialogProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
+    const logScrollRef = useRef<HTMLDivElement>(null);
     const [videoLoadError, setVideoLoadError] = useState(false);
     const open = stream.streamAction === 'ralph' && stream.status !== 'idle';
 
@@ -100,6 +101,13 @@ export function RalphModeDialog({ stream, task, tasks }: RalphModeDialogProps) {
         return lines.slice(-80);
     }, [stream.events, stream.errorMessage]);
 
+    useEffect(() => {
+        if (!open) return;
+        const el = logScrollRef.current;
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
+    }, [open, logLines]);
+
     if (!open) return null;
 
     const busy = stream.status === 'connecting' || stream.status === 'streaming';
@@ -110,18 +118,19 @@ export function RalphModeDialog({ stream, task, tasks }: RalphModeDialogProps) {
               ? 'error'
               : null;
 
-    return (
+    /** Radix Task Dialog는 z-50 + body pointer-events 조정이 있어, body 포털 + 더 높은 z + pointer-events-auto 필요 */
+    const overlay = (
         <div
-            className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+            className="pointer-events-auto fixed inset-0 z-[300] flex items-center justify-center p-4"
             role="dialog"
             aria-modal="true"
             aria-labelledby="ralph-dialog-title"
         >
             <div
-                className="absolute inset-0 bg-black/75 backdrop-blur-[2px]"
+                className="pointer-events-auto absolute inset-0 bg-black/75 backdrop-blur-[2px]"
                 aria-hidden
             />
-            <div className="relative z-10 flex w-full max-w-md flex-col overflow-hidden rounded-xl border border-violet-500/30 bg-background shadow-2xl">
+            <div className="relative z-[310] flex w-full max-w-md flex-col overflow-hidden rounded-xl border border-violet-500/30 bg-background shadow-2xl pointer-events-auto">
                 <div className="border-b border-border bg-gradient-to-r from-violet-600/15 to-transparent px-4 py-3">
                     <div className="flex items-center gap-2">
                         <Sparkles className="h-5 w-5 shrink-0 text-violet-500" aria-hidden />
@@ -165,8 +174,8 @@ export function RalphModeDialog({ stream, task, tasks }: RalphModeDialogProps) {
                     )}
                 </div>
 
-                <div className="space-y-2 border-t border-border bg-muted/30 px-3 py-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-h-0 shrink space-y-2 border-t border-border bg-muted/30 px-3 py-2">
+                    <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2">
                         <p className="text-[10px] text-muted-foreground">
                             {busy
                                 ? '플랜 → 실행 → 검증 루프가 돌고 있습니다.'
@@ -198,13 +207,25 @@ export function RalphModeDialog({ stream, task, tasks }: RalphModeDialogProps) {
                             </Button>
                         </div>
                     </div>
-                    <ScrollArea className="h-[88px] rounded-md border border-border/60 bg-background/80">
+                    <div
+                        ref={logScrollRef}
+                        role="log"
+                        aria-live="polite"
+                        tabIndex={0}
+                        className="min-h-[72px] max-h-[min(40vh,220px)] overflow-y-auto overflow-x-auto overscroll-y-contain scroll-smooth rounded-md border border-border/60 bg-background/80"
+                    >
                         <pre className="whitespace-pre-wrap break-all p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
                             {logLines.length > 0 ? logLines.join('\n') : '이벤트 대기 중…'}
                         </pre>
-                    </ScrollArea>
+                    </div>
                 </div>
             </div>
         </div>
     );
+
+    if (typeof document === 'undefined') {
+        return null;
+    }
+
+    return createPortal(overlay, document.body);
 }
