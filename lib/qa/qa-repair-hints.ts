@@ -41,11 +41,23 @@ export const SIGNAL_DOC_HINTS: Partial<Record<string, string>> = {
     'error occurred prerendering': 'https://nextjs.org/docs/messages/prerender-error — 동일.',
     'static generation failed': 'https://nextjs.org/docs/messages/prerender-error — `export const dynamic` / 데이터 소스 확인.',
     'client-side exception occurred': 'https://nextjs.org/docs/messages/client-side-exception-occurred — 클라이언트 경계·error boundary.',
+    'rendered more hooks than during the previous render':
+        'https://react.dev/reference/rules/rules-of-components-and-hooks — 모든 훅을 조기 `return` 위에 두세요. `useReactTable`/`useMemo(columns)`는 `if (loading) return …` 앞에서 호출하고 `data: rows ?? []`로 폴백.',
     'prop on a dom element':
         'https://react.dev/warnings/unknown-prop — `fullWidth`·`variant` 등 커스텀 prop을 `<button>`/`<input>`에 `{...props}`로 넘기지 말고 구조 분해 후 DOM 허용 속성만 전달.',
     'server actions must': 'https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations — Server Action은 async·직렬화 가능한 인자만.',
     'server action': 'https://nextjs.org/docs/app/building-your-application/data-fetching/server-actions-and-mutations — 폼 `action`/직렬화 가능 인자.',
     'failed to fetch rsc payload': 'https://nextjs.org/docs/messages/failed-to-fetch-rsc-payload — 네트워크·프록시·rewrite; dev 서버 재시작.',
+    'failed to fetch':
+        '클라이언트 fetch 실패 — 엔드포인트 존재·CORS·메서드·mock 데이터 또는 `app/api/.../route.ts` 추가. UI-only는 파일 내 typed mock 배열 권장.',
+    'failed to load resource':
+        '리소스 HTTP 오류(콘솔) — URL·404·호스트 설정 확인; Next는 `route.ts` 또는 인라인 mock으로 맞추기.',
+    'same-origin-api-http-error':
+        '동일 오리진 API가 4xx/5xx — `app/api/.../route.ts`를 구현하거나 `fetch` 대신 컴포넌트 내 mock 데이터 사용(agent-browser 0.23+ 네트워크 로그).',
+    'browser-console-error':
+        '브라우저 콘솔 error — 스모크의 `browserDiagnostics.consoleLines`와 DevTools를 대조해 원인 스택·누락 라우트를 수정.',
+    'browser-uncaught-script-error':
+        '처리되지 않은 스크립트 예외 — `browserDiagnostics.pageErrorSummaries`의 파일/줄을 우선 수정.',
 };
 
 /**

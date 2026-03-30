@@ -61,9 +61,30 @@ function buildIncidents(params: {
     }
 
     for (const sig of params.qaPageCheck.pageErrorSignals) {
+        let detailKo =
+            '스냅샷/본문에서 알려진 오류 문구가 감지되었습니다. 빌드·런타임 오버레이 여부를 확인하세요.';
+        if (sig === 'same-origin-api-http-error') {
+            const lines = params.qaPageCheck.browserDiagnostics?.sameOriginFailedRequests;
+            detailKo =
+                lines && lines.length > 0
+                    ? `같은 사이트에서 fetch/XHR 요청이 4xx/5xx로 끝났습니다:\n${lines.join('\n')}`
+                    : '같은 오리진 fetch/XHR이 4xx/5xx입니다. `app/api/.../route` 존재 여부·경로·mock 데이터를 확인하세요.';
+        } else if (sig === 'browser-console-error') {
+            const lines = params.qaPageCheck.browserDiagnostics?.consoleLines;
+            detailKo =
+                lines && lines.length > 0
+                    ? `브라우저 콘솔 error/리소스 실패:\n${lines.slice(0, 12).join('\n')}`
+                    : '브라우저 콘솔에 error 급 메시지 또는 리소스 로드 실패 문구가 있습니다.';
+        } else if (sig === 'browser-uncaught-script-error') {
+            const lines = params.qaPageCheck.browserDiagnostics?.pageErrorSummaries;
+            detailKo =
+                lines && lines.length > 0
+                    ? `페이지 스크립트 오류:\n${lines.slice(0, 8).join('\n')}`
+                    : '페이지에 처리되지 않은 스크립트 오류가 기록되었습니다.';
+        }
         out.push({
             title: `페이지 오류 신호: ${sig}`,
-            detailKo: '스냅샷/본문에서 알려진 오류 문구가 감지되었습니다. 빌드·런타임 오버레이 여부를 확인하세요.',
+            detailKo,
             source: 'smoke',
         });
     }

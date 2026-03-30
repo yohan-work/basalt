@@ -1,4 +1,10 @@
-import { AgentBrowser, isAgentBrowserAvailable } from '@/lib/browser/agent-browser';
+import {
+    AgentBrowser,
+    isAgentBrowserAvailable,
+    type AgentBrowserConsoleMessage,
+    type AgentBrowserNetworkRequestEntry,
+    type AgentBrowserQaDiagnostics,
+} from '@/lib/browser/agent-browser';
 
 /** Matched case-insensitively against page snapshot / body text / HTTP HTML snippet */
 export const PAGE_ERROR_SIGNALS = [
@@ -40,9 +46,15 @@ export const PAGE_ERROR_SIGNALS = [
     'error occurred prerendering',
     'static generation failed',
     'client-side exception occurred',
+    /** React 18+ dev: hook order / early return before useReactTable */
+    'rendered more hooks than during the previous render',
     'prop on a dom element',
     'server actions must',
     'failed to fetch rsc payload',
+    /** Client `fetch` / XHR failures often surface in UI or console-derived diagnostics */
+    'failed to fetch',
+    /** Chromium logs missing static/API assets with this phrase */
+    'failed to load resource',
     // Avoid "__next_error__", "nextjs-original-stack-frame", bare "digest:" — common inside Next dev <script>
     // bundles even on healthy pages; we strip scripts from the HTTP body before matching (see below).
 ] as const;
@@ -62,6 +74,12 @@ export type QaPageCheckResult = {
     errorExcerpt?: string;
     /** Dev overlay / nextjs portal text when available */
     nextOverlayExcerpt?: string;
+    /** Structured agent-browser console / page errors / xhr+fetch network (same session as smoke) */
+    browserDiagnostics?: {
+        sameOriginFailedRequests: string[];
+        pageErrorSummaries: string[];
+        consoleLines: string[];
+    };
     passed: boolean;
     summary: string;
 };
@@ -70,6 +88,59 @@ const HTTP_TIMEOUT_MS = 12_000;
 const HTTP_BODY_MAX_CHARS = 120_000;
 const DIAGNOSTIC_EXCERPT_MAX = 6000;
 const OVERLAY_EVAL_MAX = 10_000;
+/** Let in-flight `fetch` after `networkidle` settle before reading agent-browser network log */
+const POST_NETWORKIDLE_SETTLE_MS = 900;
+
+function samePageOrigin(pageUrl: string, requestUrl: string): boolean {
+    try {
+        return new URL(requestUrl).origin === new URL(pageUrl).origin;
+    } catch {
+        return false;
+    }
+}
+
+function failingSameOriginFetchOrXhr(
+    requests: AgentBrowserNetworkRequestEntry[],
+    pageUrl: string
+): string[] {
+    const out: string[] = [];
+    for (const r of requests) {
+        const u = r.url;
+        const st = r.status;
+        if (typeof u !== 'string' || typeof st !== 'number') continue;
+        if (!samePageOrigin(pageUrl, u)) continue;
+        const rt = String(r.resourceType || '').toLowerCase();
+        if (rt !== 'fetch' && rt !== 'xhr') continue;
+        if (st >= 400) {
+            out.push(`${r.method || 'GET'} ${u} → HTTP ${st}`);
+        }
+    }
+    return out;
+}
+
+function formatBrowserDiagnosticsBlock(d: AgentBrowserQaDiagnostics): string {
+    const lines: string[] = ['\n--- agent-browser diagnostics ---'];
+    for (const m of d.consoleMessages) {
+        lines.push(`${m.type || 'log'}: ${m.text || ''}`);
+    }
+    for (const e of d.pageErrors) {
+        lines.push(`page-error: ${e.text || ''}`);
+    }
+    for (const r of d.networkRequests) {
+        lines.push(`net ${r.method || '?'} ${r.url || '?'} → ${String(r.status ?? '?')}`);
+    }
+    return lines.join('\n');
+}
+
+function consoleIndicatesHardFailure(messages: AgentBrowserConsoleMessage[]): boolean {
+    for (const m of messages) {
+        const t = (m.type || '').toLowerCase();
+        const txt = (m.text || '').toLowerCase();
+        if (t === 'error') return true;
+        if (/failed to load resource|net::err/.test(txt)) return true;
+    }
+    return false;
+}
 
 /**
  * Strip inline script/style/noscript so minified framework bundles do not false-trigger substring error signals.
@@ -182,6 +253,8 @@ export async function runQaPageSmokeCheck(baseUrl: string): Promise<QaPageCheckR
     let pageErrorSignals: string[] = [];
     let combinedText = '';
     let nextOverlayExcerpt: string | undefined;
+    let browserDiagnostics: QaPageCheckResult['browserDiagnostics'];
+    let sameOriginApiFailures: string[] = [];
 
     if (http.bodySnippet) {
         combinedText += stripHtmlScriptsStylesAndNoscript(http.bodySnippet);
@@ -219,7 +292,33 @@ export async function runQaPageSmokeCheck(baseUrl: string): Promise<QaPageCheckR
                     nextOverlayExcerpt = maskLikelySecrets(overlay.value.trim().slice(0, OVERLAY_EVAL_MAX));
                     combinedText += `\n${overlay.value}`;
                 }
-                pageErrorSignals = collectErrorSignals(combinedText);
+
+                await browser.waitMs(POST_NETWORKIDLE_SETTLE_MS);
+                const diag = await browser.collectQaDiagnostics();
+                combinedText += formatBrowserDiagnosticsBlock(diag);
+
+                sameOriginApiFailures = failingSameOriginFetchOrXhr(diag.networkRequests, baseUrl);
+                const syntheticSignals: string[] = [];
+                if (sameOriginApiFailures.length > 0) {
+                    syntheticSignals.push('same-origin-api-http-error');
+                }
+                if (diag.pageErrors.length > 0) {
+                    syntheticSignals.push('browser-uncaught-script-error');
+                }
+                if (consoleIndicatesHardFailure(diag.consoleMessages)) {
+                    syntheticSignals.push('browser-console-error');
+                }
+
+                const domSignals = collectErrorSignals(combinedText);
+                pageErrorSignals = Array.from(new Set([...domSignals, ...syntheticSignals]));
+
+                browserDiagnostics = {
+                    sameOriginFailedRequests: sameOriginApiFailures,
+                    pageErrorSummaries: diag.pageErrors.map((e) => String(e.text || '').slice(0, 500)),
+                    consoleLines: diag.consoleMessages.map(
+                        (m) => `${m.type || 'log'}: ${String(m.text || '').slice(0, 500)}`
+                    ),
+                };
             }
         } catch (e: any) {
             browserError = e?.message || String(e);
@@ -253,6 +352,9 @@ export async function runQaPageSmokeCheck(baseUrl: string): Promise<QaPageCheckR
     else if (statusBad) parts.push(`HTTP ${http.httpStatus}`);
     if (browserError) parts.push(`브라우저: ${browserError}`);
     if (pageErrorSignals.length) parts.push(`페이지 오류 신호: ${pageErrorSignals.join(', ')}`);
+    if (sameOriginApiFailures.length) {
+        parts.push(`동일 오리진 API 실패: ${sameOriginApiFailures.slice(0, 4).join('; ')}`);
+    }
     if (passed) parts.push('스모크 통과');
 
     return {
@@ -267,6 +369,7 @@ export async function runQaPageSmokeCheck(baseUrl: string): Promise<QaPageCheckR
         pageErrorSignals,
         errorExcerpt: errorExcerpt || undefined,
         nextOverlayExcerpt,
+        browserDiagnostics,
         passed,
         summary: parts.join(' | '),
     };
