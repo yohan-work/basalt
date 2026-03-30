@@ -152,9 +152,27 @@ export const columns: ColumnDef<Payment>[] = [ ... ]
 
 #### Anti-Patterns (DO NOT DO THIS)
 - `import { ColumnDef } from "@/components/ui/table"` -> **Error: Module has no exported member 'ColumnDef'.**
+- `import { useTable } from "@tanstack/react-table"` or `useTable(...)` -> **TS2305** in v8. Use **`useReactTable`** and **`getCoreRowModel`** from `@tanstack/react-table`.
+- `import { flexRender } from "@/components/ui/table"` -> **TS2305**. **`flexRender` is only exported from `@tanstack/react-table`**; `@/components/ui/table` is for visual wrappers (`Table`, `TableRow`, …). Basalt’s extended UI scaffold creates those wrappers when `table.tsx` is auto-generated.
+- `<Button asChild><Link …></Link></Button>` when the project’s `Button` is a **minimal native `<button>` wrapper** -> **TS2322** (`asChild` does not exist). Use `<Link className="...">` or `<button>` instead.
 - Using `row` without types in `map` -> **Error: Binding element 'row' implicitly has an 'any' type.** Always type your data.
 - `{column.columnDef.header}` or `{column.columnDef.cell}` as JSX children -> **TS2322** (template may be a function). Use `flexRender` with `header.getContext()` / `cell.getContext()`.
 - `someColumn.columnDef.accessorKey` on an untyped `ColumnDef` -> **TS2339**. Use `column.id` or narrow with `'accessorKey' in column.columnDef`.
+
+### 5.1 Basalt extended UI scaffold contract (avoid `components/ui/*` TS2305)
+
+When Basalt **auto-creates** missing `@/components/ui/<name>` files (`lib/project-ui-kit.ts` extended scaffold), some basenames use **dedicated templates** with **multiple named exports** (e.g. `table`, `card`, `tabs`). Any other basename typically becomes a **single `forwardRef` wrapper** around a `<div>` (one export only).
+
+- **Do not** copy full shadcn compound APIs (`DialogTrigger`, `DropdownMenuItem`, `SheetContent`, …) unless that file on disk (or **Available UI** in `[PROJECT CONTEXT]`) actually exports them — otherwise you get **TS2305 Module has no exported member**.
+- Prefer **semantic HTML** (`<dialog>`, `<select>`, `<details>`) or only import symbols you have verified.
+- **`cn` / `@/lib/utils`**: If the profiler reports no `lib/utils` / `src/lib/utils`, avoid `import { cn } from '@/lib/utils'` — use string concatenation for `className` or add a real `cn` helper first.
+- **App Router client hooks**: Use `useRouter`, `usePathname`, `useSearchParams`, `useParams` from **`next/navigation`**, never **`next/router`**, in `app/` projects (**TS2305** / wrong runtime).
+- **Optional packages** (`sonner`, `next-themes`, `vaul`, …): Import only if listed in `package.json`; otherwise use native patterns.
+- **Forms**: Use `react-hook-form` + `zod` + `@hookform/resolvers` only when **all** required packages are installed.
+
+### 5.2 Cross-file and repair limits
+
+Single-file `write_code` validation and Orchestrator **TypeScript repair** cannot fix every cross-file type error. If diagnostics keep referencing other modules, use **`read_codebase`** (or human edit) to align imports and shared types before regenerating.
 
 ## 6. Next.js 15+ Dynamic APIs (Params & SearchParams)
 
@@ -211,14 +229,19 @@ export type User = z.infer<typeof UserSchema>
 ## 9. Radix UI `asChild` Pattern
 
 ### Context
-To avoid nested `<a>` or `<button>` tags (which cause hydration errors and invalid HTML), use the `asChild` prop provided by Radix UI and Shadcn UI components.
+To avoid nested `<a>` or `<button>` tags (which cause hydration errors and invalid HTML), full **Radix / shadcn** `Button` components may support the `asChild` prop.
 
-### Recommended Patterns
+**Basalt minimal scaffold `Button`** (native `<button>` wrapper in auto-generated `components/ui/button.tsx`) **does not** implement `asChild` — using it causes **TS2322**. For those targets, style **`<Link className="...">`** like a button or use a plain `<button>` (see §5.1 and Next.js `Link` notes in `[PROJECT CONTEXT]`).
+
+### When `asChild` is valid
+Use the `asChild` prop only when the project’s `Button` (or other primitive) is actually implemented with Radix **Slot** / shadcn and exposes `asChild` in its types.
+
+### Recommended Patterns (Radix / full shadcn `Button` only)
 ```typescript
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 
-// Good: Link is rendered as the button element
+// Good: Link is rendered as the button element (requires Button with asChild + Slot)
 <Button asChild variant="outline">
   <Link href="/dashboard">Go to Dashboard</Link>
 </Button>
@@ -229,9 +252,16 @@ import { Button } from '@/components/ui/button'
 </Link>
 ```
 
+For **Basalt minimal** `Button`, use `<Link className="...">` instead of `asChild` (see §5.1).
+
 ## 10. Prisma client in Next.js Route Handlers
 
-### Problem
+### UI-only work (default for many tasks)
+
+If the goal is **screens and layout** (boards, tables, dashboards) and the user did **not** ask for a real database, **you do not need Prisma**. Use typed **mock/sample data** in the page or a small `lib/mock-*.ts` so nothing imports `@prisma/client`. The package may be listed in `package.json` from a template — that is not a reason to wire every page to the DB.
+
+### Problem (when you do use Prisma)
+
 Tutorials often show `prisma.user.findMany()` as if `prisma` were global. In real apps it is almost always a **module-level import** from a singleton file. Omitting the import yields **TS2304 Cannot find name 'prisma'**.
 
 ### Recommended patterns
@@ -259,3 +289,11 @@ export async function POST(req: Request) {
 ```
 
 Use one consistent pattern per target repository; do not mix bare `prisma.` calls without a binding.
+
+### TS2305: `Module '"@prisma/client"' has no exported member 'PrismaClient'`
+
+This usually means the **generated client was never created** (or the install is incomplete). After schema changes or a fresh clone, run **`npx prisma generate`** at the project root so **`node_modules/.prisma/client`** exists. Do not “fix” with `any` or unrelated imports.
+
+If the schema uses **`generator client { output = "..." }`**, types and runtime load from that **custom path** instead; the default folder check may not exist even when the project is healthy.
+
+For `app/**/page.tsx`, prefer `import { prisma } from '@/lib/prisma'` when the singleton file exists, instead of instantiating `new PrismaClient()` in every page (generation is still required). Never use Prisma inside `"use client"` components.

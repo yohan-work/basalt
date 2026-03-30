@@ -222,6 +222,105 @@ function cardExtendedSource(useClient: boolean): string {
     return `${head}import * as React from "react";\n\nexport const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(\n  ({ className, style, ...props }, ref) => (\n    <div ref={ref} className={className} style={{ border: "1px solid rgba(0,0,0,0.12)", borderRadius: 8, ...style }} {...props} />\n  ),\n);\nCard.displayName = "Card";\n\nexport const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(\n  ({ className, ...props }, ref) => <div ref={ref} className={className} style={{ padding: "1rem 1rem 0" }} {...props} />\n);\nCardHeader.displayName = "CardHeader";\n\nexport const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(\n  ({ className, ...props }, ref) => <p ref={ref} className={className} style={{ margin: 0, fontSize: "1.125rem", fontWeight: 600 }} {...props} />\n);\nCardTitle.displayName = "CardTitle";\n\nexport const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(\n  ({ className, ...props }, ref) => <p ref={ref} className={className} style={{ margin: "0.25rem 0 0", opacity: 0.8, fontSize: "0.875rem" }} {...props} />\n);\nCardDescription.displayName = "CardDescription";\n\nexport const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(\n  ({ className, ...props }, ref) => <div ref={ref} className={className} style={{ padding: "1rem" }} {...props} />\n);\nCardContent.displayName = "CardContent";\n\nexport const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(\n  ({ className, ...props }, ref) => <div ref={ref} className={className} style={{ padding: "0 1rem 1rem" }} {...props} />\n);\nCardFooter.displayName = "CardFooter";\n`;
 }
 
+/** shadcn-compatible table primitives for TanStack examples (no `cn`, no Radix). */
+function tableExtendedSource(useClient: boolean): string {
+    const head = useClient ? '"use client";\n\n' : '';
+    return `${head}import * as React from "react";\n\nexport const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(\n  ({ className, ...props }, ref) => (\n    <div style={{ position: "relative", width: "100%", overflow: "auto" }}>\n      <table ref={ref} className={className} {...props} />\n    </div>\n  ),\n);\nTable.displayName = "Table";\n\nexport const TableHeader = React.forwardRef<\n  HTMLTableSectionElement,\n  React.HTMLAttributes<HTMLTableSectionElement>\n>(\n  ({ className, ...props }, ref) => <thead ref={ref} className={className} {...props} />\n);\nTableHeader.displayName = "TableHeader";\n\nexport const TableBody = React.forwardRef<\n  HTMLTableSectionElement,\n  React.HTMLAttributes<HTMLTableSectionElement>\n>(\n  ({ className, ...props }, ref) => <tbody ref={ref} className={className} {...props} />\n);\nTableBody.displayName = "TableBody";\n\nexport const TableFooter = React.forwardRef<\n  HTMLTableSectionElement,\n  React.HTMLAttributes<HTMLTableSectionElement>\n>(\n  ({ className, ...props }, ref) => <tfoot ref={ref} className={className} {...props} />\n);\nTableFooter.displayName = "TableFooter";\n\nexport const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTMLTableRowElement>>(\n  ({ className, ...props }, ref) => <tr ref={ref} className={className} {...props} />\n);\nTableRow.displayName = "TableRow";\n\nexport const TableHead = React.forwardRef<\n  HTMLTableCellElement,\n  React.ThHTMLAttributes<HTMLTableCellElement>\n>(\n  ({ className, ...props }, ref) => <th ref={ref} className={className} {...props} />\n);\nTableHead.displayName = "TableHead";\n\nexport const TableCell = React.forwardRef<\n  HTMLTableCellElement,\n  React.TdHTMLAttributes<HTMLTableCellElement>\n>(\n  ({ className, ...props }, ref) => <td ref={ref} className={className} {...props} />\n);\nTableCell.displayName = "TableCell";\n\nexport const TableCaption = React.forwardRef<\n  HTMLTableCaptionElement,\n  React.HTMLAttributes<HTMLTableCaptionElement>\n>(\n  ({ className, ...props }, ref) => <caption ref={ref} className={className} {...props} />\n);\nTableCaption.displayName = "TableCaption";\n`;
+}
+
+/** Minimal shadcn-style tabs (context + TabsList / TabsTrigger / TabsContent); no Radix. */
+function tabsExtendedSource(useClient: boolean): string {
+    const head = useClient ? '"use client";\n\n' : '';
+    const body = [
+        'import * as React from "react";',
+        '',
+        'type TabsCtx = { value: string; setValue: (v: string) => void };',
+        'const TabsContext = React.createContext<TabsCtx | null>(null);',
+        '',
+        'function useTabsContext(): TabsCtx {',
+        '  const ctx = React.useContext(TabsContext);',
+        '  if (!ctx) throw new Error("Tabs components must be used within <Tabs>");',
+        '  return ctx;',
+        '}',
+        '',
+        'export function Tabs({',
+        '  defaultValue = "",',
+        '  value,',
+        '  onValueChange,',
+        '  className,',
+        '  children,',
+        '  ...props',
+        '}: React.HTMLAttributes<HTMLDivElement> & {',
+        '  defaultValue?: string;',
+        '  value?: string;',
+        '  onValueChange?: (v: string) => void;',
+        '}) {',
+        '  const [inner, setInner] = React.useState(defaultValue);',
+        '  const controlled = value !== undefined;',
+        '  const active = controlled ? value : inner;',
+        '  const setValue = React.useCallback(',
+        '    (v: string) => {',
+        '      if (!controlled) setInner(v);',
+        '      onValueChange?.(v);',
+        '    },',
+        '    [controlled, onValueChange]',
+        '  );',
+        '  return (',
+        '    <TabsContext.Provider value={{ value: active, setValue }}>',
+        '      <div className={className} {...props}>',
+        '        {children}',
+        '      </div>',
+        '    </TabsContext.Provider>',
+        '  );',
+        '}',
+        '',
+        'export const TabsList = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(',
+        '  ({ className, ...props }, ref) => (',
+        '    <div ref={ref} role="tablist" className={className} {...props} />',
+        '  )',
+        ');',
+        'TabsList.displayName = "TabsList";',
+        '',
+        'export interface TabsTriggerProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {',
+        '  value: string;',
+        '}',
+        '',
+        'export const TabsTrigger = React.forwardRef<HTMLButtonElement, TabsTriggerProps>(',
+        '  ({ className, value: triggerValue, type = "button", ...props }, ref) => {',
+        '    const { value, setValue } = useTabsContext();',
+        '    const selected = value === triggerValue;',
+        '    return (',
+        '      <button',
+        '        ref={ref}',
+        '        type={type}',
+        '        role="tab"',
+        '        aria-selected={selected}',
+        '        data-state={selected ? "active" : "inactive"}',
+        '        className={className}',
+        '        onClick={() => setValue(triggerValue)}',
+        '        {...props}',
+        '      />',
+        '    );',
+        '  }',
+        ');',
+        'TabsTrigger.displayName = "TabsTrigger";',
+        '',
+        'export interface TabsContentProps extends React.HTMLAttributes<HTMLDivElement> {',
+        '  value: string;',
+        '}',
+        '',
+        'export const TabsContent = React.forwardRef<HTMLDivElement, TabsContentProps>(',
+        '  ({ className, value: contentValue, ...props }, ref) => {',
+        '    const { value } = useTabsContext();',
+        '    if (value !== contentValue) return null;',
+        '    return <div ref={ref} role="tabpanel" data-state="active" className={className} {...props} />;',
+        '  }',
+        ');',
+        'TabsContent.displayName = "TabsContent";',
+    ].join('\n');
+    return head + body;
+}
+
 function genericUiWrapperSource(componentPascal: string, useClient: boolean): string {
     const head = useClient ? '"use client";\n\n' : '';
     return `${head}import * as React from "react";\n\nexport interface ${componentPascal}Props extends React.HTMLAttributes<HTMLDivElement> {}\n\nexport const ${componentPascal} = React.forwardRef<HTMLDivElement, ${componentPascal}Props>(\n  ({ className, ...props }, ref) => (\n    <div ref={ref} className={className} {...props} />\n  ),\n);\n${componentPascal}.displayName = "${componentPascal}";\n`;
@@ -238,6 +337,8 @@ const EXTENDED_UI_TEMPLATES: Record<string, (useClient: boolean) => string> = {
     select: selectExtendedSource,
     dialog: dialogExtendedSource,
     card: cardExtendedSource,
+    table: tableExtendedSource,
+    tabs: tabsExtendedSource,
 };
 
 function resolveExtendedUiSource(basename: string, useClient: boolean): string {

@@ -28,6 +28,10 @@ Basalt의 LLM 호출은 `lib/llm.ts`에서 공통 처리됩니다.
   - `lib/llm.ts`의 백틱 템플릿 내 사용자 정의 문자열에서 백틱 중첩이 생기지 않도록 escape 규칙을 적용.
   - 프롬프트 수정 시 `CODE_GENERATION_SYSTEM_RULES` 빌드 실패(파싱 오류) 예방을 코드 리뷰 체크포인트로 추가.
 
+## 코드 생성 시각 기본값
+
+`CODE_GENERATION_SYSTEM_RULES`에 **DEFAULT VISUAL TONE (clean dark-first baseline)** 이 있다. 대상 저장소에 확립된 테마·DESIGN HINTS·기존 페이지 스타일이 없고 태스크가 반대로 요구하지 않을 때, 페이지 **구조는** 레이아웃 카탈로그·태스크에 따르되 **분위기**는 다크 셸·밝은 전경·인디고 primary·블루 링크·얇은 보더·여백 위주로 통일한다. Tailwind 미설치 시 동일 느낌을 인라인/CSS 모듈로 구현하도록 명시되어 있다. 저장소에 이미 토큰/스타일이 있으면 **EXECUTION UI** 우선순위로 그것을 따른다.
+
 ## 호출 모드
 
 - 스트리밍 모드(`generateCodeStream`, `generateJSONStream`) 지원

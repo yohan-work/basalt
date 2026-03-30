@@ -8,7 +8,7 @@ import { AgentDefinition, AgentLoader } from '../agent-loader';
 import { resolveRouteExportStyle } from '../component-export-style';
 import * as llm from '../llm';
 import { MODEL_CONFIG } from '../model-config';
-import { ProjectProfiler } from '../profiler';
+import { isDefaultPrismaGeneratedClientPresent, ProjectProfiler } from '../profiler';
 import { mergeCompilerPathsFromConfigs } from '../tsconfig-paths';
 import { getAgentBrowserExecutable } from '../browser/agent-browser';
 
@@ -141,6 +141,30 @@ function validatePrismaClientIdentifierUsage(
         valid: false,
         message:
             'Prisma: this file uses `prisma.` but `prisma` is not imported or declared. Import the project singleton (e.g. `import { prisma } from \'@/lib/prisma\'`) or add `import { PrismaClient } from \'@prisma/client\'` and `const prisma = new PrismaClient()`. Use `read_codebase` to match the target repo.',
+    };
+}
+
+/** `import … from '@prisma/client'` requires `prisma generate` (default output under `node_modules/.prisma/client`). */
+const PRISMA_CLIENT_MODULE_IMPORT_RE = /\bfrom\s+['"](@prisma\/client(?:\/[^'"]*)?)['"]/gm;
+
+function validatePrismaClientGeneratedForImports(
+    content: string,
+    projectRoot: string
+): { valid: true } | { valid: false; message: string } {
+    if (!getInstalledPackages(projectRoot).has('@prisma/client')) {
+        return { valid: true };
+    }
+    if (isDefaultPrismaGeneratedClientPresent(projectRoot)) {
+        return { valid: true };
+    }
+    PRISMA_CLIENT_MODULE_IMPORT_RE.lastIndex = 0;
+    if (!PRISMA_CLIENT_MODULE_IMPORT_RE.test(content)) {
+        return { valid: true };
+    }
+    return {
+        valid: false,
+        message:
+            'Prisma: this file imports from `@prisma/client`, but the default generated client directory (`node_modules/.prisma/client`) is missing. **For UI-only pages (boards, lists, etc.), remove all `@prisma/client` / `PrismaClient` imports and use typed mock/sample data in the file instead — Prisma is not required for front-end layout.** If you truly need the database, run `npx prisma generate` in the target project root (or use your schema’s custom `generator client { output = ... }` path). TypeScript often reports TS2305 until generate runs. When a singleton exists and you need DB, prefer `import { prisma } from \'@/lib/prisma\'`.',
     };
 }
 
@@ -1339,6 +1363,15 @@ export async function write_code(filePath: string, content: string, baseDir: str
             return {
                 success: false,
                 message: prismaId.message,
+                filePath,
+            };
+        }
+
+        const prismaGen = validatePrismaClientGeneratedForImports(sanitizedContent, baseDir);
+        if (!prismaGen.valid) {
+            return {
+                success: false,
+                message: prismaGen.message,
                 filePath,
             };
         }

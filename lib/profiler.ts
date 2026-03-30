@@ -39,6 +39,33 @@ function findExistingPrismaSingletonRelPaths(projectRoot: string): string[] {
     return found;
 }
 
+/** Default Prisma client output: `node_modules/.prisma/client`. Custom `generator client { output = ... }` may omit this. */
+export function isDefaultPrismaGeneratedClientPresent(projectRoot: string): boolean {
+    const marker = path.join(projectRoot, 'node_modules', '.prisma', 'client');
+    try {
+        return fs.existsSync(marker) && fs.statSync(marker).isDirectory();
+    } catch {
+        return false;
+    }
+}
+
+const CN_UTILS_CANDIDATES = ['lib/utils.ts', 'lib/utils.tsx', 'src/lib/utils.ts', 'src/lib/utils.tsx'] as const;
+
+/** Returns a project-root-relative POSIX path when a typical `cn()` utils file exists. */
+export function findExistingCnUtilsRelPath(projectRoot: string): string | null {
+    for (const rel of CN_UTILS_CANDIDATES) {
+        const full = path.join(projectRoot, ...rel.split('/'));
+        try {
+            if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+                return rel;
+            }
+        } catch {
+            /* skip */
+        }
+    }
+    return null;
+}
+
 /**
  * Scans the project to identify the tech stack and available UI components.
  * This prevents LLM hallucinations by providing factual context.
@@ -404,7 +431,20 @@ export class ProjectProfiler {
 
         const nextLinkInfo =
             data.stackProfile.primary === 'next' && data.structure.includes('app-router')
-                ? '\n- Next.js `Link`: Use `<Link href="...">Label</Link>` directly. Do NOT use `legacyBehavior` or nest `<a>` tags. For buttons, use `<Button asChild><Link ...>...</Link></Button>` to ensure valid HTML (avoids nested interactive elements).'
+                ? '\n- Next.js `Link`: Use `<Link href="...">Label</Link>` directly. Do NOT use `legacyBehavior` or nest `<a>` tags. For link-styled navigation, use `<Link href="..." className="...">` (reuse button-like classes) or a plain `<button type="button">` for actions. **Do not** use `<Button asChild><Link>…</Link></Button>` unless this project’s `Button` actually implements `asChild` (Radix-style); Basalt’s **minimal scaffold `Button` does not** — it causes **TS2322**.'
+                : '';
+
+        const cnUtilsRel = findExistingCnUtilsRelPath(this.projectRoot);
+        const cnUtilsHint =
+            data.stackProfile.primary === 'next'
+                ? cnUtilsRel
+                    ? `\n- **\`cn\`**: Utility file found at \`${cnUtilsRel}\` (map with tsconfig \`@/*\`, often \`@/lib/utils\`).`
+                    : '\n- **\`cn\` / \`@/lib/utils\`**: No \`lib/utils\` or \`src/lib/utils\` found at profile time — **avoid** \`import { cn } from \'@/lib/utils\'\` unless you add that file; use string templates or \`[a, b].filter(Boolean).join(\' \')\` for \`className\`.'
+                : '';
+
+        const uiScaffoldContractHint =
+            data.stackProfile.primary === 'next'
+                ? '\n- **UI auto-scaffold (Basalt)**: Extended templates provide **named exports** for some basenames (e.g. \`table\`, \`card\`, \`tabs\`). Others may auto-create a **single wrapper div** only. **Do not** paste full shadcn compound APIs (\`DialogTrigger\`, \`DropdownMenuItem\`, …) unless those exports exist in the on-disk file or are listed under Available UI — prefer semantic HTML or only import symbols that exist.'
                 : '';
 
         const lucideIconHint = '\n- **Lucide Icons**: If an icon import fails (e.g., `CheckCircle`), check for alternative names like `Check` or `CircleCheck`. Standard names: `Check`, `X`, `AlertCircle`, `Info`, `Settings`.'
@@ -416,16 +456,24 @@ export class ProjectProfiler {
 
         const hasPrismaClientDep = data.dependencies.includes('@prisma/client');
         const prismaSingletonOnDisk = hasPrismaClientDep ? findExistingPrismaSingletonRelPaths(this.projectRoot) : [];
+        const prismaGeneratedOk = hasPrismaClientDep ? isDefaultPrismaGeneratedClientPresent(this.projectRoot) : true;
+        const prismaGenerateWarning = hasPrismaClientDep && !prismaGeneratedOk
+            ? ' **[WARNING]** Default generated client missing (\`node_modules/.prisma/client\` not found at profile time). For **UI-only** tasks, **skip Prisma entirely** (mock data) instead of importing \`@prisma/client\`. For **real DB** code, run \`npx prisma generate\` before importing \`PrismaClient\` or model types — otherwise TypeScript often fails with **TS2305**. Custom \`generator client { output = ... }\` may bypass this path; follow that output instead.'
+            : '';
         const prismaClientHint = hasPrismaClientDep
-            ? `\n- **Prisma (\`@prisma/client\`)**: Never use an undeclared global \`prisma\`. Import the app’s exported client (e.g. \`import { prisma } from '@/lib/prisma'\`) or, in the same file, \`import { PrismaClient } from '@prisma/client'\` plus \`const prisma = new PrismaClient()\`. Use \`read_codebase\` to match this repo’s pattern.${
+            ? `\n- **Prisma (\`@prisma/client\` listed in deps)**: **Default:** many tasks (boards, lists, dashboards, marketing) need **only UI** — **do not** import \`@prisma/client\` or \`prisma\` unless the user explicitly asked for real DB/persistence; use **typed mock/sample rows** in the page or a small \`lib/mock-*.ts\`. **When the task explicitly requires DB access:** never use an undeclared global \`prisma\`; import the app’s exported client (e.g. \`import { prisma } from '@/lib/prisma'\`) or \`import { PrismaClient } from '@prisma/client'\` plus \`const prisma = new PrismaClient()\`. For \`app/**/page.tsx\` with real queries, prefer the singleton when it exists (still requires \`prisma generate\`).${prismaGenerateWarning}${
                   prismaSingletonOnDisk.length > 0
                       ? ` On-disk singleton candidate(s): \`${prismaSingletonOnDisk.join('`, `')}\` — map via tsconfig \`paths\` (often \`@/lib/prisma\`).`
-                      : ' No \`lib/prisma.ts\` / \`src/lib/prisma.ts\` detected at profile time; locate or add a singleton before \`prisma.*\` in route handlers.'
+                      : ' No \`lib/prisma.ts\` / \`src/lib/prisma.ts\` detected at profile time; locate or add a singleton before \`prisma.*\` in route handlers when you implement real DB code.'
               }`
             : '';
 
+        const tanstackTableDepHint = data.dependencies.includes('@tanstack/react-table')
+            ? '\n- **TanStack Table (v8)**: Use `useReactTable` + `getCoreRowModel` — **not** `useTable`. Import `ColumnDef`, `flexRender`, `useReactTable`, row models **only** from `@tanstack/react-table`. Import `Table`, `TableRow`, `TableCell`, `TableHead`, `TableHeader`, `TableBody`, etc. **only** from `@/components/ui/table` — **never** `flexRender` from UI. Type `headerGroup` / `row` / `cell` in `.map` callbacks to avoid implicit `any`. **Minimal `Button`** (Basalt scaffold): **no** `asChild` — use `<Link className="...">` or `<button>`.'
+            : '';
+
         const tableComponentHint = data.availableUIComponents.includes('table')
-            ? '\n- **TanStack Table**: Visual table from `@/components/ui/table`; `ColumnDef`, `flexRender`, `useReactTable` from `@tanstack/react-table` (in package.json). Always render headers and cells with `flexRender(..., context)` — never use `columnDef.header` or `columnDef.cell` as raw JSX. Do not access `columnDef.accessorKey` without narrowing; use `column.id` or `\'accessorKey\' in column.columnDef`.'
+            ? '\n- **TanStack Table + UI**: When `table` is on disk, extended scaffold exports full shadcn-style names from `@/components/ui/table`. Still: logic only from `@tanstack/react-table`; always `flexRender` for header/cell; narrow `accessorKey`; avoid `asChild` on minimal `Button`.'
             : '';
 
         const nextGuardrails =
@@ -463,7 +511,7 @@ export class ProjectProfiler {
 - VERSION_CONSTRAINTS (package.json → 파싱 메이저): ${formatVersionConstraintsLine(data.stackProfile)}
 - KEY_DEPENDENCY_VERSIONS (semver; 플랜 summary에 인용 가능):
 ${formatKeyDependencyVersionsBlock(data.depsWithVersions)}${majorSyntaxSection}
-- Router Type: ${data.structure}${routerConflictWarning}${clientDirectiveInfo}${nextMetadataRscInfo}${nextLinkInfo}${tsCodegenHint}${prismaClientHint}${tableComponentHint}${nextGuardrails}
+- Router Type: ${data.structure}${routerConflictWarning}${clientDirectiveInfo}${nextMetadataRscInfo}${nextLinkInfo}${cnUtilsHint}${uiScaffoldContractHint}${tsCodegenHint}${prismaClientHint}${tanstackTableDepHint}${tableComponentHint}${nextGuardrails}
 - Styling: ${data.hasTailwind ? 'Tailwind CSS IS installed. Use Tailwind classes.' : 'Tailwind CSS IS NOT installed. Do NOT use tailwind classes. Use standard CSS or inline styles.'}${shadcnWarning}
 ${uiPolicySection}
 - UI Component Import Style: ${importStyleInfo}${barrelInfo}
