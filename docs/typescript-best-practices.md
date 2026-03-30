@@ -97,7 +97,7 @@ const fetchData = async () => {
 ### Table Component & Data Tables
 A common source of errors is mixing up the visual Table component with the data table logic library.
 
-- **Visual Components**: Import `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableCell`, `TableHead`, `TableCaption` from `@/components/ui/table`.
+- **Visual Components**: Import `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableCell`, `TableHead`, `TableCaption` as **named imports** from `@/components/ui/table` — that module typically has **no default export** (**TS2613** if you use `import Table from '…'`).
 - **Logic & Types**: Import `ColumnDef`, `useReactTable`, `getCoreRowModel`, `flexRender` from `@tanstack/react-table`.
 
 #### Constraint
@@ -108,6 +108,8 @@ This project lists `@tanstack/react-table` in `package.json`. If you work in ano
 - **`ColumnDef<T>` is a union** (accessor key, accessor function, group columns, etc.). Do **not** read `column.columnDef.accessorKey` without narrowing — TypeScript will error (`Property 'accessorKey' does not exist on type 'ColumnDef<...>'`). Prefer `header.column.id` / `cell.column.id` from the table API, or narrow: `'accessorKey' in column.columnDef && column.columnDef.accessorKey`.
 - **`header` and `cell` are not always `ReactNode`**. They may be render functions. Do **not** put `column.columnDef.header` or `column.columnDef.cell` directly in JSX. Always use `flexRender` for both.
 - **v8 `Header` vs `Column`**: In `headerGroup.headers.map((header) => …)`, `header` is a **`Header`** — it does **not** have `header.columnDef` (**TS2551**). Use **`header.column.columnDef`** (same as in `flexRender(header.column.columnDef.header, header.getContext())`).
+- **`Row` vs `Cell`**: A **`Row`** from `table.getRowModel().rows` has **no** `row.column` (**TS2339**). Use **`row.getVisibleCells().map((cell) => …)`** and only then **`cell.column`** / `flexRender(cell.column.columnDef.cell, cell.getContext())`.
+- **`getCoreRowModel`**: In `useReactTable({ … })`, set **`getCoreRowModel: getCoreRowModel()`** — the factory must be **called** (**TS2322** if you pass `getCoreRowModel` without `()`).
 
 #### Correct Usage Pattern
 ```typescript
@@ -128,7 +130,14 @@ import {
 } from "@/components/ui/table"
 
 // 2. Define Columns (explicitly typed)
-export const columns: ColumnDef<Payment>[] = [ ... ]
+const columns: ColumnDef<Payment>[] = [ ... ]
+
+// 2b. Table instance — must exist before JSX that references `table`
+const table = useReactTable({
+  data,
+  columns,
+  getCoreRowModel: getCoreRowModel(),
+})
 
 // 3. Render header row — flexRender for header (not raw columnDef.header)
 <TableHeader>
@@ -145,10 +154,16 @@ export const columns: ColumnDef<Payment>[] = [ ... ]
   ))}
 </TableHeader>
 
-// 4. Render body — flexRender for cell
-<TableCell key={cell.id}>
-  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-</TableCell>
+// 4. Render body — cells live on Row via getVisibleCells(), not row.column
+{table.getRowModel().rows.map((row) => (
+  <TableRow key={row.id}>
+    {row.getVisibleCells().map((cell) => (
+      <TableCell key={cell.id}>
+        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+      </TableCell>
+    ))}
+  </TableRow>
+))}
 ```
 
 #### Anti-Patterns (DO NOT DO THIS)
@@ -161,6 +176,9 @@ export const columns: ColumnDef<Payment>[] = [ ... ]
 - `someColumn.columnDef.accessorKey` on an untyped `ColumnDef` -> **TS2339**. Use `column.id` or narrow with `'accessorKey' in column.columnDef`.
 - Using `flexRender` in JSX without importing it -> **TS2552** (“Cannot find name 'flexRender'”). Add `import { flexRender, … } from "@tanstack/react-table"` in **that** file.
 - `header.columnDef` on a value from `headers.map((header) => …)` -> **TS2551** (`Property 'columnDef' does not exist on type 'Header<…>'`). Use **`header.column.columnDef`** only.
+- `row.column` on a TanStack **`Row`** -> **TS2339**. Use **`row.getVisibleCells()`** and **`cell.column`** inside that loop.
+- `import Table from "@/components/ui/table"` (or any default import from that path) -> **TS2613**. Use **`import { Table, TableHeader, … } from "@/components/ui/table"`**.
+- `getCoreRowModel: getCoreRowModel` without `()` in `useReactTable` -> **TS2322**. Use **`getCoreRowModel: getCoreRowModel()`**.
 - `(cell)` or `(header)` implicitly `any` in `.map` -> **TS7006**. Add `import type { Cell, Header } from "@tanstack/react-table"` and e.g. `(cell: Cell<YourRow, unknown>)`, or ensure `useReactTable<YourRow>({ … })` so inference fills the callback types.
 - `column.columnDef.meta.width` (or any custom `meta` field) without a module augmentation -> **TS2339** (`Property 'width' does not exist on type 'ColumnMeta<…>'`). Either use **`size` / `minSize` / `maxSize`** on the column definition and **`header.getSize()`** / **`column.getSize()`** for layout ([column sizing](https://tanstack.com/table/latest/docs/guide/column-sizing)), or extend types:
 
