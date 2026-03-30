@@ -88,6 +88,31 @@ const SERVER_ONLY_APP_ROUTER_EXPORT_RE =
 const GENERATE_METADATA_DOC =
     'https://nextjs.org/docs/app/api-reference/functions/generate-metadata#why-generatemetadata-is-server-component-only';
 
+const TANSTACK_TABLE_INTRO_DOC = 'https://tanstack.com/table/latest/docs/introduction';
+
+/**
+ * Using TanStack APIs without importing from `@tanstack/react-table` causes TS2552 (e.g. "Cannot find name 'flexRender'").
+ */
+function validateTanStackReactTableImports(relativePath: string, content: string): { valid: true } | { valid: false; message: string } {
+    const norm = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!/\.(tsx|ts|jsx|js)$/i.test(norm)) return { valid: true };
+
+    const usesTanStackApi =
+        /\bflexRender\b/.test(content) ||
+        /\buseReactTable\b/.test(content) ||
+        /\bgetCoreRowModel\b/.test(content);
+    if (!usesTanStackApi) return { valid: true };
+
+    if (!/@tanstack\/react-table/.test(content)) {
+        return {
+            valid: false,
+            message:
+                `TanStack Table: this file uses flexRender, useReactTable, or getCoreRowModel but has no import from '@tanstack/react-table'. Add e.g. import { flexRender, useReactTable, getCoreRowModel, type ColumnDef } from '@tanstack/react-table'. Do not import those from @/components/ui/table. Docs: ${TANSTACK_TABLE_INTRO_DOC}`,
+        };
+    }
+    return { valid: true };
+}
+
 const MAX_IMPORT_VALIDATION_UI_HINT = 12;
 const IMPORT_VALIDATION_FILE_SUFFIXES = ['.ts', '.tsx', '.js', '.jsx', '.d.ts', '.mjs', '.cjs', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
 
@@ -1340,6 +1365,15 @@ export async function write_code(filePath: string, content: string, baseDir: str
                 message: importedBoundary.message,
                 filePath,
                 rscBoundaryViolation: true,
+            };
+        }
+
+        const tanstackImports = validateTanStackReactTableImports(relativePath, sanitizedContent);
+        if (!tanstackImports.valid) {
+            return {
+                success: false,
+                message: tanstackImports.message,
+                filePath,
             };
         }
 
