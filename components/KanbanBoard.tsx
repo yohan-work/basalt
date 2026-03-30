@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3, AlertTriangle, ThumbsUp, CheckCircle2, Monitor } from 'lucide-react';
+import { Plus, Play, CheckCircle, Search, AlertCircle, Loader2, RotateCcw, XCircle, Trash2, BarChart3, AlertTriangle, ThumbsUp, CheckCircle2, Monitor, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { CreateTaskModal } from './CreateTaskModal';
 import { TaskDetailsModal } from './TaskDetailsModal';
@@ -227,11 +227,16 @@ export function KanbanBoard() {
         setSelectedTask(task);
         setIsDetailsOpen(true);
         // Start SSE stream
-        stream.start(task.id, action, action === 'execute' ? executeOptions : undefined);
+        stream.start(task.id, action, action === 'execute' || action === 'ralph' ? executeOptions : undefined);
     };
 
     const handleConfirmPlan = (e: React.MouseEvent, task: Task) => {
         startStreamAction(e, task, 'plan');
+    };
+
+    const handleRalphEvent = (e: React.MouseEvent, task: Task) => {
+        const options = getTaskExecutionOptions(task);
+        startStreamAction(e, task, 'ralph', options);
     };
 
     const taskNeedsImpactAck = (task: Task): boolean => {
@@ -370,9 +375,20 @@ export function KanbanBoard() {
         switch (task.status) {
             case 'pending':
                 return (
-                    <Button size="sm" onClick={(e) => handleConfirmPlan(e, task)} className="w-full text-xs h-7 bg-blue-600 hover:bg-blue-700">
-                        <Search className="mr-2 h-3 w-3" /> Confirm & Plan
-                    </Button>
+                    <div className="flex flex-col gap-1 w-full">
+                        <Button size="sm" onClick={(e) => handleConfirmPlan(e, task)} className="w-full text-xs h-7 bg-blue-600 hover:bg-blue-700">
+                            <Search className="mr-2 h-3 w-3" /> Confirm & Plan
+                        </Button>
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={(e) => handleRalphEvent(e, task)}
+                            className="w-full text-xs h-7 border-violet-400/80 text-violet-800 dark:text-violet-200 hover:bg-violet-500/10"
+                            title="플랜→실행→검증을 자동 반복하는 이벤트 모드(토큰 많이 사용)"
+                        >
+                            <Sparkles className="mr-2 h-3 w-3" /> Ralph 이벤트
+                        </Button>
+                    </div>
                 );
             case 'planning': {
                 const blocked = taskNeedsImpactAck(task);

@@ -80,6 +80,16 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - UI: 태스크 상세 모달 **「검수 완료」** 탭에서 위 문구와 스크린샷을 확인합니다. 이미지는 `GET /api/project/qa-artifact?taskId=&slot=main|mobile|tablet|desktop`으로 제공됩니다.
 - **스크린샷이 생략**되고 로그에 `agent-browser 미사용`이 보일 때 확인 순서: (1) `AGENT_BROWSER_ENABLED=false`가 설정돼 있지 않은지, (2) Basalt 서버 프로세스에서 `agent-browser --version`이 되는지(터미널과 PATH가 다를 수 있음), (3) 필요 시 `.env.local`에 `AGENT_BROWSER_BIN`에 `which agent-browser`로 얻은 **절대 경로** 지정, (4) Dev 종료 QA 직전에 가용성 캐시를 비우므로 설정 변경 후 **재시작** 또는 다음 태스크 실행에서 재탐지됨. 구현: `lib/browser/agent-browser.ts`, `Orchestrator.runDevExitQaPipeline`. 상세는 [`setup.md`](./setup.md).
 
+
+
+## 5d) Ralph 이벤트 모드 (옵트인)
+
+- **목적**: Huntley식 외부 루프로 `plan` → 영향 범위 자동 승인 → `execute` → `verify`를 최대 N회 반복하며, 대상 프로젝트 `.basalt/ralph/<taskId>/guardrails.md`에 실패 요약을 누적해 다음 라운드 플랜에 반영합니다.
+- **UI**: Request 칸반 카드에서 **Ralph 이벤트**, 태스크 상세(`pending`)에서 **Ralph 이벤트 시작**. 배너 이미지는 `public/ralph-hero.svg`(교체 가능).
+- **SSE**: `GET /api/agent/stream?taskId=&action=ralph` — 기존 `plan`/`execute`/`verify`와 동일 엔드포인트, `Orchestrator` 본문은 변경하지 않고 `lib/agents/ralph-runner.ts`만 루프를 돌립니다.
+- **환경 변수**: `BASALT_RALPH_MAX_ROUNDS`(기본 3, 최대 12).
+- **메타데이터**: `metadata.ralphSession`에 라운드·결과(`completed`/`max_rounds`/`error`)가 기록됩니다.
+
 ## 6) 승인 워크플로우(HITL)
 
 - `approve` API로 `review` 상태 태스크를 완료 상태로 반영

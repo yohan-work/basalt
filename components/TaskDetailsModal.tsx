@@ -758,6 +758,17 @@ export function TaskDetailsModal({
         setView('live');
     };
 
+    /** Ralph 이벤트: 영향 범위는 러너가 자동 승인(메타데이터)합니다. */
+    const handleRalphEventFromModal = () => {
+        if (!task) return;
+        if (onExecute) {
+            setActionError('Ralph 이벤트는 스트림 모드에서만 사용할 수 있습니다.');
+            return;
+        }
+        stream?.start(task.id, 'ralph', draftExecutionOptions);
+        setView('live');
+    };
+
     const handleGenerateClarify = async () => {
         if (!task) return;
         setIsGeneratingClarify(true);
@@ -1317,6 +1328,53 @@ export function TaskDetailsModal({
                                         </div>
                                     )}
                                 </div>
+
+                                {task.status === 'pending' && (
+                                    <div className="rounded-lg border border-violet-300/60 bg-gradient-to-br from-violet-50/90 to-background dark:from-violet-950/40 dark:to-background p-4 space-y-3">
+                                        <div className="flex gap-3 items-start">
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img
+                                                src="/ralph-hero.svg"
+                                                alt=""
+                                                width={64}
+                                                height={64}
+                                                className="w-16 h-16 shrink-0 rounded-md border bg-background object-cover"
+                                            />
+                                            <div className="space-y-1 min-w-0">
+                                                <h4 className="text-sm font-semibold flex items-center gap-2">
+                                                    <Sparkles className="h-4 w-4 text-violet-600" />
+                                                    Ralph 이벤트 모드
+                                                </h4>
+                                                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                                    플랜 → 자동 영향 승인 → 개발 → 검증을 최대 여러 라운드 반복합니다. 대상 프로젝트에{' '}
+                                                    <code className="text-[10px]">.basalt/ralph/&lt;taskId&gt;/guardrails.md</code>에 학습 메모가
+                                                    쌓입니다. 토큰을 많이 씁니다.
+                                                </p>
+                                                <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    variant="secondary"
+                                                    className="h-8 bg-violet-600 text-white hover:bg-violet-700"
+                                                    onClick={handleRalphEventFromModal}
+                                                    disabled={!stream || stream.isActive}
+                                                >
+                                                    <Sparkles className="h-3 w-3 mr-1" />
+                                                    Ralph 이벤트 시작
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {(task.metadata as { ralphSession?: { active?: boolean; currentRound?: number; maxRounds?: number } } | undefined)
+                                    ?.ralphSession?.active && (
+                                    <div className="rounded-md border border-violet-400/70 bg-violet-100/50 dark:bg-violet-950/50 px-3 py-2 text-xs text-violet-900 dark:text-violet-100">
+                                        Ralph 루프 진행 중… 라운드{' '}
+                                        {(task.metadata as { ralphSession?: { currentRound?: number } }).ralphSession?.currentRound ?? '?'}{' '}
+                                        /{' '}
+                                        {(task.metadata as { ralphSession?: { maxRounds?: number } }).ralphSession?.maxRounds ?? '?'}
+                                    </div>
+                                )}
 
                                 {(task.status === 'pending' || task.status === 'planning') && (
                                     <div className="space-y-2 rounded-md border border-dashed p-3 bg-muted/15">

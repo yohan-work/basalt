@@ -2,6 +2,7 @@
 import { NextRequest } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { Orchestrator } from '@/lib/agents/Orchestrator';
+import { runRalphSession } from '@/lib/agents/ralph-runner';
 import { StreamEmitter } from '@/lib/stream-emitter';
 
 export const dynamic = 'force-dynamic';
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Validate action
-    const validActions = ['plan', 'execute', 'verify', 'retry'];
+    const validActions = ['plan', 'execute', 'verify', 'retry', 'ralph'];
     if (!validActions.includes(action)) {
         return new Response(
             JSON.stringify({ error: `Invalid action. Must be one of: ${validActions.join(', ')}` }),
@@ -101,6 +102,10 @@ export async function GET(req: NextRequest) {
                     }
                     case 'retry': {
                         await orchestrator.retry();
+                        break;
+                    }
+                    case 'ralph': {
+                        await runRalphSession(taskId, emitter, executionOptions);
                         break;
                     }
                 }
