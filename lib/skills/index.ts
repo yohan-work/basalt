@@ -113,6 +113,32 @@ function validateTanStackReactTableImports(relativePath: string, content: string
     return { valid: true };
 }
 
+/**
+ * Basalt/shadcn `components/ui/table` is named-export only; default import causes TS2613.
+ * When TanStack is used, models often wrongly `import Table from '@/components/ui/table'`.
+ */
+function validateTanStackUiTableNoDefaultImport(relativePath: string, content: string): { valid: true } | { valid: false; message: string } {
+    const norm = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!/\.(tsx|ts|jsx|js)$/i.test(norm)) return { valid: true };
+
+    const usesTanStackApi =
+        /\bflexRender\b/.test(content) ||
+        /\buseReactTable\b/.test(content) ||
+        /\bgetCoreRowModel\b/.test(content);
+    if (!usesTanStackApi) return { valid: true };
+
+    const defaultImportUiTable =
+        /import\s+[A-Za-z_$][\w$]*\s+from\s+['"](?:@\/components\/ui\/table|[^'"]*\/components\/ui\/table)['"]/.test(content);
+    if (defaultImportUiTable) {
+        return {
+            valid: false,
+            message:
+                `TanStack Table: \`@/components/ui/table\` (and paths ending in \`components/ui/table\`) have **no default export** — use **named imports** (e.g. \`import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'\`). Default \`import Table from ...\` causes **TS2613**.`,
+        };
+    }
+    return { valid: true };
+}
+
 const MAX_IMPORT_VALIDATION_UI_HINT = 12;
 const IMPORT_VALIDATION_FILE_SUFFIXES = ['.ts', '.tsx', '.js', '.jsx', '.d.ts', '.mjs', '.cjs', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
 
@@ -1373,6 +1399,15 @@ export async function write_code(filePath: string, content: string, baseDir: str
             return {
                 success: false,
                 message: tanstackImports.message,
+                filePath,
+            };
+        }
+
+        const tanstackUiTableImport = validateTanStackUiTableNoDefaultImport(relativePath, sanitizedContent);
+        if (!tanstackUiTableImport.valid) {
+            return {
+                success: false,
+                message: tanstackUiTableImport.message,
                 filePath,
             };
         }
