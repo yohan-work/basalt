@@ -8,7 +8,7 @@ import path from 'path';
 import { AgentLoader, AgentDefinition } from '../agent-loader';
 import { ContextManager } from '../context-manager';
 import { StreamEmitter } from '../stream-emitter';
-import { ProjectProfiler } from '../profiler';
+import { isDefaultPrismaGeneratedClientPresent, ProjectProfiler } from '../profiler';
 import { MODEL_CONFIG } from '../model-config';
 import { isAgentBrowserAvailable, resetAvailabilityCache } from '../browser/agent-browser';
 import { resolveQaPageUrl, resolveQaPageUrlWithDiagnostics } from '../project-dev-server';
@@ -1351,6 +1351,32 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
     private static readonly MAX_UI_IMPORT_REPAIR_ATTEMPTS = 2;
     private static readonly MAX_UNINSTALLED_NPM_LLM_REPAIRS = 2;
     private static readonly MAX_TYPESCRIPT_DIAGNOSTIC_REPAIRS = 5;
+    private static readonly MAX_PRISMA_IMPORT_REPAIR_ATTEMPTS = 3;
+    /** When `write_code` rejects `page`/`layout` for metadata/viewport + `"use client"` (or hooks without split), rewrite into server + `*Client.tsx`. */
+    private static readonly MAX_RSC_BOUNDARY_REPAIR_ATTEMPTS = 3;
+    private static readonly NEXT_METADATA_SERVER_ONLY_DOC =
+        'https://nextjs.org/docs/app/api-reference/functions/generate-metadata#why-generatemetadata-is-server-component-only';
+
+    /** True when package.json lists @prisma/client (deps / devDeps / peerDeps). */
+    private projectListsPrismaClientDependency(projectPath: string): boolean {
+        try {
+            const pkgPath = path.join(projectPath, 'package.json');
+            if (!fs.existsSync(pkgPath)) return false;
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8')) as {
+                dependencies?: Record<string, string>;
+                devDependencies?: Record<string, string>;
+                peerDependencies?: Record<string, string>;
+            };
+            const names = new Set([
+                ...Object.keys(pkg.dependencies || {}),
+                ...Object.keys(pkg.devDependencies || {}),
+                ...Object.keys(pkg.peerDependencies || {}),
+            ]);
+            return names.has('@prisma/client');
+        } catch {
+            return false;
+        }
+    }
 
     /** 미설치 npm import: 제거 후 시맨틱 HTML·이미 설치된 패키지만 사용 */
     private async repairWriteCodeUninstalledNpmImports(options: {
@@ -1542,9 +1568,16 @@ Fix ONE file. TypeScript validation failed after write (tsc diagnostics):
 ${validationMessage}
 
 Hard rules:
-- **TanStack Table (@tanstack/react-table)**: Import visual parts (\`Table\`, \`TableRow\`, etc.) from \`@/components/ui/table\`. Import \`ColumnDef\`, \`flexRender\`, etc. from \`@tanstack/react-table\` (listed in this project's package.json). For **headers and cells**, always use \`flexRender(column.columnDef.header, header.getContext())\` and \`flexRender(cell.column.columnDef.cell, cell.getContext())\` — never put \`columnDef.header\` or \`columnDef.cell\` directly in JSX (TS2322). Do not read \`columnDef.accessorKey\` on a bare \`ColumnDef\` without narrowing — use \`column.id\` from the header/cell instance or \`'accessorKey' in column.columnDef\` (TS2339).
+- **TanStack Table v8 (@tanstack/react-table)**: Use \`useReactTable\` + \`getCoreRowModel()\` — **never** \`useTable\` (not exported in v8). Import \`ColumnDef\`, \`flexRender\`, \`useReactTable\`, row models **only** from \`@tanstack/react-table\` — **never** import \`flexRender\` or \`useReactTable\` from \`@/components/ui/table\`. Import visual parts (\`Table\`, \`TableHeader\`, \`TableBody\`, \`TableRow\`, \`TableHead\`, \`TableCell\`, etc.) from \`@/components/ui/table\`. For **headers and cells**, always use \`flexRender(header.column.columnDef.header, header.getContext())\` and \`flexRender(cell.column.columnDef.cell, cell.getContext())\` — never put \`columnDef.header\` or \`columnDef.cell\` directly in JSX (TS2322). **TS2551**: \`Header\` has **no** top-level \`columnDef\` — use \`header.column.columnDef\`, **never** \`header.columnDef\`. **TS7006** on \`cell\`/\`header\`: add \`import type { Cell, Header } from '@tanstack/react-table'\` and annotate \`(cell: Cell<Row, unknown>)\`, \`(header: Header<Row, unknown>)\`, or type \`useReactTable<Row>(…)\` so callbacks are not implicit \`any\`. Type \`headerGroup\` / \`row\` / \`cell\` in \`.map\` callbacks when inference fails. Do not read \`columnDef.accessorKey\` on a bare \`ColumnDef\` without narrowing — use \`column.id\` or \`'accessorKey' in column.columnDef\` (TS2339). **TS2552 \`flexRender\` / “Cannot find name”**: add \`import { flexRender, … } from '@tanstack/react-table'\` at the top of the same file. **TS2339 \`meta.width\` / \`ColumnMeta\`**: do not use custom \`meta\` fields without \`declare module '@tanstack/react-table' { interface ColumnMeta<…> { … } }\`; prefer \`size\` on \`ColumnDef\` and \`header.getSize()\` / \`column.getSize()\` (see TanStack column sizing docs).
+- **React Rules of Hooks / \`useReactTable\`**: If the file uses \`useReactTable\` or the validation/runtime text mentions **“Rendered more hooks”**, **“Rules of Hooks”**, or **hook order**, fix **unconditional hook order**: move every \`useState\` / \`useEffect\` / \`useMemo\` (columns) / \`useReactTable\` **above** any \`if (loading) return …\` or other early \`return\`. Use \`useReactTable({ data: rows ?? [], … })\`; render loading/error UI **after** all hooks (e.g. final \`return\` with a ternary). Never call hooks inside loops, conditions, or after a return.
+- **Minimal UI \`Button\`**: If \`Button\` from \`@/components/ui/button\` has no \`asChild\` in its props, **remove** \`asChild\` and use \`<Link className="...">\` or a plain \`<button>\` instead (TS2322).
+- **Next.js App Router**: Replace \`import { useRouter, usePathname, useSearchParams, useParams } from 'next/router'\` (or any \`next/router\` usage in \`app/\` client code) with \`from 'next/navigation'\` (fixes **TS2305** / runtime mismatch).
+- **lucide-react**: If **TS2305** says an icon is not exported, rename to a valid export (\`Check\`, \`X\`, \`CircleCheck\`, \`AlertCircle\`, etc.) — do not invent names.
+- **\`cn\` / \`@/lib/utils\`**: If the module or \`cn\` is missing (**TS2307** / **TS2305**), remove the import and merge classes with string concatenation or a template literal.
+- **Compound UI imports**: If **TS2305** on \`@/components/ui/*\` subcomponents (\`DialogTrigger\`, \`TabsList\`, …), replace with semantic HTML or only use exports that match the actual file; do not assume full shadcn kits.
 - **Intl API**: Remove ANY \`import … from 'intl'\` or \`require('intl')\`. Do NOT add the npm \`intl\` polyfill. Use the **global \`Intl\` object** only (\`Intl.DateTimeFormat\`, \`Intl.NumberFormat\`, \`Intl.RelativeTimeFormat\`, etc.).
 - **Prisma / TS2304 \`prisma\`**: If diagnostics say \`Cannot find name 'prisma'\`, add the correct import from this project’s Prisma singleton (e.g. \`import { prisma } from '@/lib/prisma'\`) or \`import { PrismaClient } from '@prisma/client'\` plus \`const prisma = new PrismaClient()\` in the same file. Never leave bare \`prisma.\` calls without a binding.
+- **Prisma / TS2305 \`PrismaClient\` / \`@prisma/client\`**: If diagnostics say the module has **no exported member** \`PrismaClient\` (or similar), either run \`npx prisma generate\` (default client under \`node_modules/.prisma/client\`) **or**, for **UI-only** work (lists/boards with no explicit DB requirement), **remove all \`@prisma/client\` / Prisma usage** and drive the UI with **typed mock/sample data** in the same file. Do not patch with \`any\` or bogus imports. When real DB is required, prefer the app singleton (\`import { prisma } from '@/lib/prisma'\`) when it exists. If the file is a Client Component (\`"use client"\`), remove Prisma usage and move DB access to a Route Handler, Server Action, or server-only module.
 - **Syntax**: Fix syntax errors (e.g. TS1005, TS1003) so the file is valid TypeScript/TSX — especially broken \`import\` / \`import type\` lines.
 - **Packages**: Do NOT add new npm packages or \`@types/*\` unless already in the project's package.json; prefer built-ins and existing deps. (\`@tanstack/react-table\` is expected to already be present when using data tables.)
 - **Directives**: Preserve "use client" / "use server" if present at the top (when valid for that file).
@@ -1591,6 +1624,185 @@ File: ${relativePath}
             resp.files.find((f) => want.endsWith(norm(f.path)) || norm(f.path).endsWith(want));
         const picked = hit || resp.files[0];
         return picked?.content?.trim() ? picked.content : null;
+    }
+
+    /**
+     * `write_code` rejected the file because `@prisma/client` was imported but the default
+     * generated client (`node_modules/.prisma/client`) is missing — steer to mock-driven UI.
+     */
+    private async repairWriteCodePrismaImportBlocked(options: {
+        relativePath: string;
+        content: string;
+        validationMessage: string;
+        projectPath: string;
+        techStack: string;
+        agentName: string;
+    }): Promise<string | null> {
+        const { relativePath, content, validationMessage, projectPath, techStack, agentName } = options;
+        const prof = await this.profiler.getProfileData();
+        const tailNote = prof.hasTailwind
+            ? 'Tailwind is installed; you may use className with utility classes where appropriate.'
+            : 'Tailwind is NOT installed; do NOT use Tailwind classes—use semantic HTML, inline style, or existing CSS patterns from the repo.';
+
+        const userPrompt = `
+Fix ONE file. Basalt blocked the write because Prisma Client is not generated for the default output path, but the source imports \`@prisma/client\`:
+
+${validationMessage}
+
+Hard rules:
+- **Remove** every \`import\` from \`@prisma/client\` (any subpath), every \`import type\` from it, and any \`PrismaClient\` usage tied to DB access.
+- **Remove** bare \`prisma.\` calls unless you replace the whole data layer with **typed mock/sample data in this same file** (e.g. \`const rows = [{ id: '1', title: '…' }, …] as const\` or a local type + array). The page/list/board/table must **render without** calling a database.
+- Do **not** add \`npx prisma generate\` as a code workaround — produce a **self-contained** file that passes \`write_code\` validation.
+- Preserve \`"use client"\` / \`"use server"\` / Next.js \`metadata\` / \`viewport\` rules that already apply to this path.
+- **Packages**: Do NOT add new npm packages; prefer built-ins and existing deps.
+- **Design**: Keep readable contrast for text vs backgrounds.
+
+${tailNote}
+
+Original file path: ${relativePath}
+
+Original source:
+\`\`\`tsx
+${content}
+\`\`\`
+
+Return ONLY:
+File: ${relativePath}
+\`\`\`tsx
+...full corrected file...
+\`\`\`
+`.trim();
+
+        const context = `[PROJECT CONTEXT — Prisma import blocked repair]\n${tailNote}\n- Target project root: ${projectPath}`;
+
+        const resp = await llm.generateCodeStream(
+            userPrompt,
+            context,
+            this.emitter,
+            MODEL_CONFIG.CODING_MODEL,
+            techStack,
+            () => this.refreshLock(),
+            this.llmTelemetry({ action: 'write_code_prisma_import_repair', agent: agentName })
+        );
+
+        if (resp?.tokens) {
+            await this.accumulateTokens(resp.tokens.prompt_eval_count, resp.tokens.eval_count);
+        }
+
+        if (resp?.error || !resp.files?.length) return null;
+
+        const want = relativePath.replace(/\\/g, '/');
+        const norm = (p: string) => p.replace(/\\/g, '/');
+        const hit =
+            resp.files.find((f) => norm(f.path) === want) ||
+            resp.files.find((f) => want.endsWith(norm(f.path)) || norm(f.path).endsWith(want));
+        const picked = hit || resp.files[0];
+        return picked?.content?.trim() ? picked.content : null;
+    }
+
+    /**
+     * `write_code` returned `rscBoundaryViolation` — split server `page`/`layout` (metadata/viewport, no `"use client"`)
+     * from interactive UI (`*Client.tsx` with `"use client"`). May return extra files to write before retrying the page.
+     */
+    private async repairWriteCodeRscMetadataClientSplit(options: {
+        relativePath: string;
+        content: string;
+        validationMessage: string;
+        projectPath: string;
+        techStack: string;
+        agentName: string;
+        taskDescription: string;
+        stepDescription: string;
+        stepGoalWithDiscussion: string;
+    }): Promise<{ serverContent: string; companionFiles: Array<{ path: string; content: string }> } | null> {
+        const {
+            relativePath,
+            content,
+            validationMessage,
+            projectPath,
+            techStack,
+            agentName,
+            taskDescription,
+            stepDescription,
+            stepGoalWithDiscussion,
+        } = options;
+        const prof = await this.profiler.getProfileData();
+        const tailNote = prof.hasTailwind
+            ? 'Tailwind is installed; you may use className with utility classes where appropriate.'
+            : 'Tailwind is NOT installed; do NOT use Tailwind classes—use semantic HTML, inline style, or existing CSS patterns from the repo.';
+        const profilerBlock = await this.profiler.getContextString();
+
+        const userPrompt = `
+Fix Next.js App Router RSC boundary. Basalt rejected the write:
+
+${validationMessage}
+
+Official reference (metadata/viewport are server-only): ${Orchestrator.NEXT_METADATA_SERVER_ONLY_DOC}
+
+${tailNote}
+
+**Target server file path (exact)** — File 1 MUST use this path line: \`${relativePath.replace(/\\/g, '/')}\`
+- This file must remain a **Server Component**: **NO** \`"use client"\` directive.
+- Keep any of \`export const metadata\`, \`export async function generateMetadata\`, \`export const viewport\`, \`generateViewport\` that belong on this route **only here** (not in the client file).
+- The default export should be thin: import the client piece and render \`<YourNameClient />\` (pass only serializable props if needed).
+- **Do not** use React hooks, \`useRouter\`/\`useSearchParams\` from \`next/navigation\`, or event handlers (\`onClick\`, etc.) in this file.
+
+**Client file** — File 2+:
+- New path under the project’s components tree matching [PROJECT CONTEXT] (e.g. \`src/components/.../FooClient.tsx\` when Router Base is \`src/app\`, else \`components/.../FooClient.tsx\`).
+- First code line after any comments: \`"use client";\`
+- Move all hooks, browser APIs in effects, interactivity, and client-only imports here.
+- Export a default or named component; the server file imports it with \`@/\` (or correct relative) paths that match the repo.
+
+Original server route source:
+\`\`\`tsx
+${content}
+\`\`\`
+
+Return **two or more** files in the standard multi-file format (each \`File: ...\` + fenced block). Include at least File 1 (path above) and one \`*Client.tsx\`.
+`.trim();
+
+        const context = `[PROJECT CONTEXT — RSC metadata / client split repair]\n${profilerBlock}\n- Target project root: ${projectPath}\n- Task: ${taskDescription}\n- Step: ${stepDescription}\n- Step goal: ${stepGoalWithDiscussion}`;
+
+        const resp = await llm.generateCodeStream(
+            userPrompt,
+            context,
+            this.emitter,
+            MODEL_CONFIG.CODING_MODEL,
+            techStack,
+            () => this.refreshLock(),
+            this.llmTelemetry({ action: 'write_code_rsc_boundary_repair', agent: agentName })
+        );
+
+        if (resp?.tokens) {
+            await this.accumulateTokens(resp.tokens.prompt_eval_count, resp.tokens.eval_count);
+        }
+
+        if (resp?.error || !resp.files?.length) return null;
+
+        const want = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+        const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\/+/, '');
+        const nonempty = resp.files.filter((f) => f.content?.trim());
+        if (nonempty.length === 0) return null;
+
+        const exact = nonempty.find((f) => norm(f.path) === want);
+        let serverEntry = exact;
+        if (!serverEntry) {
+            if (nonempty.length === 1) {
+                serverEntry = nonempty[0]!;
+            } else {
+                const partial = nonempty.filter(
+                    (f) => want.endsWith(norm(f.path)) || norm(f.path).endsWith(want)
+                );
+                serverEntry = partial[0] ?? null;
+            }
+        }
+        if (!serverEntry?.content?.trim()) return null;
+
+        const companions = nonempty.filter((f) => norm(f.path) !== norm(serverEntry!.path));
+        return {
+            serverContent: serverEntry.content,
+            companionFiles: companions.map((f) => ({ path: f.path, content: f.content })),
+        };
     }
 
     private async accumulateTokens(promptTokens: number, evalTokens: number) {
@@ -1975,7 +2187,13 @@ File: ${relativePath}
                                                 `토큰을 줄이려면 discussionMode를 off로 두세요.`
                                         );
                                     }
-                                    const codePrompt = `${stepGoalWithDiscussion}\n\nOverall task: ${task.description}`;
+                                    let codePrompt = `${stepGoalWithDiscussion}\n\nOverall task: ${task.description}`;
+                                    if (
+                                        this.projectListsPrismaClientDependency(projectPath) &&
+                                        !isDefaultPrismaGeneratedClientPresent(projectPath)
+                                    ) {
+                                        codePrompt += `\n\n[BASALT HARD CONSTRAINT] This target project lists @prisma/client in package.json but Prisma Client is not generated (no default node_modules/.prisma/client). Do NOT import from @prisma/client or use PrismaClient in any file you output. Use typed mock/sample data in the page (or a small lib/mock-*.ts) so lists, boards, and tables render without database access.`;
+                                    }
 
                                     await this.log(stepAgentDef.name, `Generating code with CODING model for: ${step.description || task.description}`, { type: 'ACTION' });
                                     this.emitter?.emit({ type: 'skill_execute', skill: action, args: step.description });
@@ -2065,6 +2283,8 @@ File: ${relativePath}
                                             let uiMissingScaffoldAttempted = false;
                                             let npmAutoInstallAttempted = false;
                                             let uninstalledLlmRepairs = 0;
+                                            let prismaImportRepairs = 0;
+                                            let rscBoundaryRepairs = 0;
                                             let typescriptDiagnosticRepairs = 0;
                                             for (
                                                 let repairRound = 0;
@@ -2216,10 +2436,131 @@ File: ${relativePath}
                                                     }
                                                 }
 
+                                                const isPrismaImportWithoutGeneratedClient =
+                                                    detail.includes('Prisma:') &&
+                                                    detail.includes('node_modules/.prisma/client') &&
+                                                    detail.includes('@prisma/client');
+
+                                                if (
+                                                    isPrismaImportWithoutGeneratedClient &&
+                                                    prismaImportRepairs < Orchestrator.MAX_PRISMA_IMPORT_REPAIR_ATTEMPTS
+                                                ) {
+                                                    prismaImportRepairs += 1;
+                                                    const repairedPrisma = await this.repairWriteCodePrismaImportBlocked({
+                                                        relativePath: normalizedPath.path,
+                                                        content: contentToWrite,
+                                                        validationMessage: detail,
+                                                        projectPath,
+                                                        techStack,
+                                                        agentName: stepAgentDef.name,
+                                                    });
+                                                    if (repairedPrisma) {
+                                                        contentToWrite = repairedPrisma;
+                                                        skills.reset_runtime_caches();
+                                                        existingRepairs.push(
+                                                            this.buildExecutionRepairRecord(
+                                                                stepIndex,
+                                                                action,
+                                                                `prisma_import_repair round ${prismaImportRepairs} for ${normalizedPath.path}`
+                                                            )
+                                                        );
+                                                        await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                        await this.log(
+                                                            stepAgentDef.name,
+                                                            `Prisma import repair round ${prismaImportRepairs} for ${normalizedPath.path}`,
+                                                            { type: 'WARNING' }
+                                                        );
+                                                        repairRound--;
+                                                        continue;
+                                                    }
+                                                }
+
+                                                if (
+                                                    writeResult?.rscBoundaryViolation &&
+                                                    rscBoundaryRepairs < Orchestrator.MAX_RSC_BOUNDARY_REPAIR_ATTEMPTS
+                                                ) {
+                                                    rscBoundaryRepairs += 1;
+                                                    const rscSplit = await this.repairWriteCodeRscMetadataClientSplit({
+                                                        relativePath: normalizedPath.path,
+                                                        content: contentToWrite,
+                                                        validationMessage: detail,
+                                                        projectPath,
+                                                        techStack,
+                                                        agentName: stepAgentDef.name,
+                                                        taskDescription: task.description || '',
+                                                        stepDescription: step.description || '',
+                                                        stepGoalWithDiscussion,
+                                                    });
+                                                    if (rscSplit) {
+                                                        const sortedCompanions = [...rscSplit.companionFiles].sort((a, b) =>
+                                                            a.path.localeCompare(b.path)
+                                                        );
+                                                        let companionsOk = true;
+                                                        for (const c of sortedCompanions) {
+                                                            const npComp = await this.normalizeWriteTargetPath(
+                                                                c.path,
+                                                                task.description || '',
+                                                                step.description || '',
+                                                                stepGoalWithDiscussion
+                                                            );
+                                                            if (npComp.failed) {
+                                                                companionsOk = false;
+                                                                existingRepairs.push(
+                                                                    this.buildExecutionRepairRecord(
+                                                                        stepIndex,
+                                                                        action,
+                                                                        `rsc_boundary_repair invalid companion path: ${c.path} — ${npComp.message}`
+                                                                    )
+                                                                );
+                                                                await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                                break;
+                                                            }
+                                                            const wComp = await skillFunc(npComp.path, c.content, projectPath);
+                                                            if (!wComp?.success) {
+                                                                companionsOk = false;
+                                                                existingRepairs.push(
+                                                                    this.buildExecutionRepairRecord(
+                                                                        stepIndex,
+                                                                        action,
+                                                                        `rsc_boundary_repair companion write failed ${npComp.path}: ${wComp?.message || 'unknown'}`
+                                                                    )
+                                                                );
+                                                                await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                                break;
+                                                            }
+                                                            skills.reset_runtime_caches();
+                                                        }
+                                                        if (companionsOk) {
+                                                            contentToWrite = rscSplit.serverContent;
+                                                            skills.reset_runtime_caches();
+                                                            existingRepairs.push(
+                                                                this.buildExecutionRepairRecord(
+                                                                    stepIndex,
+                                                                    action,
+                                                                    `rsc_boundary_repair round ${rscBoundaryRepairs} for ${normalizedPath.path}` +
+                                                                        (sortedCompanions.length
+                                                                            ? ` + ${sortedCompanions.length} client file(s)`
+                                                                            : '')
+                                                                )
+                                                            );
+                                                            await this.updateMetadata({ executionRepairs: existingRepairs });
+                                                            await this.log(
+                                                                stepAgentDef.name,
+                                                                `RSC server/client split repair round ${rscBoundaryRepairs} for ${normalizedPath.path}`,
+                                                                { type: 'WARNING' }
+                                                            );
+                                                            repairRound--;
+                                                            continue;
+                                                        }
+                                                    }
+                                                }
+
                                                 const isTypeScriptDiagnosticFailure =
                                                     (detail.includes('TypeScript errors') ||
                                                         detail.includes('Type validation failed') ||
-                                                        detail.includes('Failed to validate TypeScript')) &&
+                                                        detail.includes('Failed to validate TypeScript') ||
+                                                        (detail.includes('TanStack Table:') &&
+                                                            detail.includes("no import from '@tanstack/react-table'"))) &&
                                                     !writeResult?.rscBoundaryViolation;
 
                                                 if (

@@ -37,6 +37,34 @@ export interface BrowserCommandResult {
     error?: string;
 }
 
+/** agent-browser `console --json` message entry */
+export type AgentBrowserConsoleMessage = { type?: string; text?: string; [k: string]: unknown };
+
+/** agent-browser `errors --json` entry */
+export type AgentBrowserPageErrorEntry = {
+    text?: string;
+    line?: number;
+    column?: number;
+    url?: string | null;
+    [k: string]: unknown;
+};
+
+/** agent-browser `network requests --json` entry (xhr/fetch; shape from agent-browser 0.23+) */
+export type AgentBrowserNetworkRequestEntry = {
+    url?: string;
+    status?: number;
+    method?: string;
+    resourceType?: string;
+    mimeType?: string;
+    [k: string]: unknown;
+};
+
+export type AgentBrowserQaDiagnostics = {
+    consoleMessages: AgentBrowserConsoleMessage[];
+    pageErrors: AgentBrowserPageErrorEntry[];
+    networkRequests: AgentBrowserNetworkRequestEntry[];
+};
+
 let _agentBrowserAvailable: boolean | null = null;
 
 /**
@@ -290,5 +318,47 @@ export class AgentBrowser {
 
     async pdf(outputPath: string): Promise<BrowserCommandResult> {
         return this.run(['pdf', outputPath]);
+    }
+
+    /**
+     * After `open` + `waitForLoad`, read console / page errors / xhr+fetch network log (JSON CLI).
+     * Network capture is reliable on agent-browser **0.23+**; older CLIs may return an empty `requests` array.
+     */
+    async collectQaDiagnostics(): Promise<AgentBrowserQaDiagnostics> {
+        const empty: AgentBrowserQaDiagnostics = {
+            consoleMessages: [],
+            pageErrors: [],
+            networkRequests: [],
+        };
+
+        const pullArray = (result: BrowserCommandResult, key: 'messages' | 'errors' | 'requests'): unknown[] => {
+            const d = result.data;
+            if (d && typeof d === 'object' && key in d) {
+                const arr = (d as Record<string, unknown>)[key];
+                return Array.isArray(arr) ? arr : [];
+            }
+            if (result.raw) {
+                try {
+                    const p = JSON.parse(result.raw.trim()) as { data?: Record<string, unknown> };
+                    const inner = p.data?.[key];
+                    return Array.isArray(inner) ? inner : [];
+                } catch {
+                    return [];
+                }
+            }
+            return [];
+        };
+
+        const [cRes, eRes, nRes] = await Promise.all([
+            this.run(['console'], true),
+            this.run(['errors'], true),
+            this.run(['network', 'requests', '--type', 'xhr,fetch'], true),
+        ]);
+
+        empty.consoleMessages = pullArray(cRes, 'messages') as AgentBrowserConsoleMessage[];
+        empty.pageErrors = pullArray(eRes, 'errors') as AgentBrowserPageErrorEntry[];
+        empty.networkRequests = pullArray(nRes, 'requests') as AgentBrowserNetworkRequestEntry[];
+
+        return empty;
     }
 }
