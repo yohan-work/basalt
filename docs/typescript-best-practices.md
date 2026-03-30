@@ -107,6 +107,7 @@ This project lists `@tanstack/react-table` in `package.json`. If you work in ano
 
 - **`ColumnDef<T>` is a union** (accessor key, accessor function, group columns, etc.). Do **not** read `column.columnDef.accessorKey` without narrowing — TypeScript will error (`Property 'accessorKey' does not exist on type 'ColumnDef<...>'`). Prefer `header.column.id` / `cell.column.id` from the table API, or narrow: `'accessorKey' in column.columnDef && column.columnDef.accessorKey`.
 - **`header` and `cell` are not always `ReactNode`**. They may be render functions. Do **not** put `column.columnDef.header` or `column.columnDef.cell` directly in JSX. Always use `flexRender` for both.
+- **v8 `Header` vs `Column`**: In `headerGroup.headers.map((header) => …)`, `header` is a **`Header`** — it does **not** have `header.columnDef` (**TS2551**). Use **`header.column.columnDef`** (same as in `flexRender(header.column.columnDef.header, header.getContext())`).
 
 #### Correct Usage Pattern
 ```typescript
@@ -158,6 +159,47 @@ export const columns: ColumnDef<Payment>[] = [ ... ]
 - Using `row` without types in `map` -> **Error: Binding element 'row' implicitly has an 'any' type.** Always type your data.
 - `{column.columnDef.header}` or `{column.columnDef.cell}` as JSX children -> **TS2322** (template may be a function). Use `flexRender` with `header.getContext()` / `cell.getContext()`.
 - `someColumn.columnDef.accessorKey` on an untyped `ColumnDef` -> **TS2339**. Use `column.id` or narrow with `'accessorKey' in column.columnDef`.
+- Using `flexRender` in JSX without importing it -> **TS2552** (“Cannot find name 'flexRender'”). Add `import { flexRender, … } from "@tanstack/react-table"` in **that** file.
+- `header.columnDef` on a value from `headers.map((header) => …)` -> **TS2551** (`Property 'columnDef' does not exist on type 'Header<…>'`). Use **`header.column.columnDef`** only.
+- `(cell)` or `(header)` implicitly `any` in `.map` -> **TS7006**. Add `import type { Cell, Header } from "@tanstack/react-table"` and e.g. `(cell: Cell<YourRow, unknown>)`, or ensure `useReactTable<YourRow>({ … })` so inference fills the callback types.
+- `column.columnDef.meta.width` (or any custom `meta` field) without a module augmentation -> **TS2339** (`Property 'width' does not exist on type 'ColumnMeta<…>'`). Either use **`size` / `minSize` / `maxSize`** on the column definition and **`header.getSize()`** / **`column.getSize()`** for layout ([column sizing](https://tanstack.com/table/latest/docs/guide/column-sizing)), or extend types:
+
+```ts
+declare module '@tanstack/react-table' {
+  interface ColumnMeta<TData extends object, TValue> {
+    width?: number;
+  }
+}
+```
+
+(Prefer built-in `size` / `getSize()` unless you truly need custom `meta`; match `ColumnMeta`’s generic constraints to your installed `@tanstack/react-table` types if the compiler complains.)
+
+#### Rules of Hooks + `useReactTable` (runtime: hook order mismatch)
+
+TanStack’s `useReactTable` is a hook. If the first render returns early (e.g. `if (loading) return <Spinner />`) **before** `useReactTable` runs, and a later render runs `useReactTable`, React reports **“Rendered more hooks than during the previous render”** and a diff like `useState`, `useEffect`, then `undefined` vs `useState` for the next slot.
+
+**Do not:**
+
+```tsx
+if (loading) return <div>Loading…</div>;
+const columns = useMemo(() => [...], []);
+const table = useReactTable({ data, columns, getCoreRowModel: getCoreRowModel() });
+```
+
+**Do:**
+
+```tsx
+const columns = useMemo(() => [...], []);
+const table = useReactTable({
+  data: rows ?? [],
+  columns,
+  getCoreRowModel: getCoreRowModel(),
+});
+if (loading) return <div>Loading…</div>;
+// or: return loading ? <Skeleton /> : <Table>…</Table>
+```
+
+See [Rules of Hooks](https://react.dev/reference/rules/rules-of-components-and-hooks).
 
 ### 5.1 Basalt extended UI scaffold contract (avoid `components/ui/*` TS2305)
 

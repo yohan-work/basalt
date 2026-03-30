@@ -58,11 +58,13 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 
 ## 5b) testing 단계: 대상 앱 페이지 QA 스모크
 
-- `verify()`(testing)에서 대상 프로젝트의 dev URL에 대해 `runQaPageSmokeCheck`를 실행합니다: HTTP 연결·상태 코드 확인, **응답 HTML 앞부분(최대 약 12만 자)** 을 항상 스캔해 `PAGE_ERROR_SIGNALS`와 매칭하므로 `agent-browser`가 없어도 **문자열이 HTML에 포함된 오류**(예: 일부 빌드/오버레이 문구)는 탐지할 수 있습니다. `agent-browser`가 있으면 추가로 스냅샷·본문·Next 개발 오버레이/포털 DOM에서 텍스트를 모읍니다. 매칭된 신호 주변 텍스트는 `errorExcerpt`로 잘라 `metadata.qaPageCheck`에 넣고, Dev QA 자동 수정 프롬프트에도 실립니다. 공식 문서 링크 힌트는 `lib/qa/qa-repair-hints.ts`가 신호별로 붙입니다.
-- **한계**: 브라우저 콘솔만에 있는 오류·스크립트가 잡지 못한 DOM·프로덕션 최소화 메시지는 놓칠 수 있습니다. `next build`와 불일치(개발 서버만 통과)하는 문제는 선택 환경 변수 `DEV_QA_RUN_NEXT_BUILD=1`로 빌드 로그를 메타·수정 프롬프트에 넣어 보완합니다(느림). `DEV_QA_FAIL_ON_NEXT_BUILD=1`이면 빌드 실패 시 Dev QA를 즉시 실패 처리합니다.
+- `verify()`(testing)에서 대상 프로젝트의 dev URL에 대해 `runQaPageSmokeCheck`를 실행합니다: HTTP 연결·**문서** 상태 코드 확인, **응답 HTML 앞부분(최대 약 12만 자)** 스캔, `PAGE_ERROR_SIGNALS` 매칭. **문서는 200이어도** 같은 페이지에서 `fetch`/`XHR`로 호출한 **`/api/...`가 404**이면 예전에는 스모크가 통과할 수 있었습니다. 이제 `agent-browser`가 있으면 `networkidle` 직후 짧은 대기 뒤 **`console` / `errors` / `network requests --type xhr,fetch`** 결과를 합쳐 (1) **동일 오리진** fetch/XHR **4xx/5xx**, (2) 콘솔 **error**·리소스 실패 문구, (3) 페이지 **uncaught** 오류를 실패로 처리합니다. 구조화 요약은 `metadata.qaPageCheck.browserDiagnostics`에 남깁니다. **`agent-browser` 0.23 미만**에서는 네트워크 요청 배열이 비어 있을 수 있어, 동일 오리진 API 실패 탐지가 약해질 수 있습니다 — `npx agent-browser@latest --version`으로 업그레이드를 권장합니다([`setup.md`](./setup.md)의 `AGENT_BROWSER_BIN`).
+- `agent-browser`가 **없거나** `AGENT_BROWSER_ENABLED=false`이면 HTML·HTTP 스모크와 `PAGE_ERROR_SIGNALS`만으로 동작합니다. 이때 **DOM/innerText에 “failed to fetch” 등이 노출될 때만** 보조 신호가 잡히고, **콘솔만의 404**는 여전히 놓칠 수 있습니다.
+- 매칭된 신호 주변 텍스트는 `errorExcerpt`로 잘라 `metadata.qaPageCheck`에 넣고, Dev QA 자동 수정 프롬프트에도 실립니다. 공식 문서 링크 힌트는 `lib/qa/qa-repair-hints.ts`가 신호별로 붙입니다.
+- **한계**: 서드파티 도메인 API 실패는 기본적으로 무시합니다(동일 오리진만 엄격). `next build`와 불일치(개발 서버만 통과)하는 문제는 선택 환경 변수 `DEV_QA_RUN_NEXT_BUILD=1`로 빌드 로그를 메타·수정 프롬프트에 넣어 보완합니다(느림). `DEV_QA_FAIL_ON_NEXT_BUILD=1`이면 빌드 실패 시 Dev QA를 즉시 실패 처리합니다.
 - 스모크는 본문·스냅샷·HTML 스니펫 텍스트를 소문자로 두고 `PAGE_ERROR_SIGNALS`(`lib/qa/page-smoke-check.ts`)와 매칭하며, **빌드/Next 관련**으로는 예를 들어 module not found, metadata·`use client` 충돌, Link 중첩, hydration, `next/image` 호스트, prerender, RSC payload, `metadataBase`/viewport 관련 문구 등이 포함된다(전체 목록은 소스 기준).
 - **페이지 URL**은 `resolveQaPageUrl`(내부적으로 `resolveQaPageUrlWithDiagnostics`)로 결정합니다. (1) `metadata.qaDevServerUrl`에 경로가 포함된 전체 URL이면 그대로 사용합니다. (2) 아니면 위와 동일한 우선순위로 **origin**(호스트·포트)을 정한 뒤, `metadata.qaDevServerPath`(예: `/test`)를 붙이거나, `metadata.fileChanges`에서 Next `app/.../page.tsx`·`pages/...` 경로를 휴리스틱으로 추론합니다(최근 변경 파일부터). App Router는 **`page.tsx`** 만 URL로 매핑되므로 변경 목록에 **`.../index.tsx`만** 있고 `page.tsx`가 없으면 추론이 실패해 **루트 `/`만** 열릴 수 있습니다. 이 경우 `metadata.qaRouteInferenceWarning`에 안내가 남고 Dev 종료 QA·`verify()` 로그에 WARNING이 찍힙니다(`lib/qa/infer-route-from-files.ts`, `lib/project-dev-server.ts`).
-- 결과는 `metadata.qaPageCheck`에 저장됩니다. `QA_FAIL_ON_PAGE_ERRORS=true`이면 스모크 실패 시 `verify_final_output` 결과와 무관하게 검증 단계를 실패 처리합니다.
+- 결과는 `metadata.qaPageCheck`에 저장됩니다. **`QA_FAIL_ON_PAGE_ERRORS=true`**(또는 `1`/`yes`)일 때만 스모크 실패가 `verify()`의 최종 검증(`verified: false`)과 연동됩니다. 설정하지 않으면 스모크는 로그·메타(`qaPageCheck`, `qaSignoff`)에만 남고 워크플로는 계속 진행될 수 있으므로, 엄격히 막으려면 해당 환경 변수를 켜세요.
 - 이후 스크린샷·반응형 점검도 동일 URL을 사용합니다.
 
 ### Dev 종료 시 자동 QA (Test 칸반 진입 전)
@@ -132,6 +134,7 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 
 - `app/.../page.tsx`·`app/.../layout.tsx`(및 `src/app/...` 동일)에 대해, **`export const metadata` / `generateMetadata` / `viewport` / `generateViewport`** 와 **`"use client"`** 또는 **훅만 있고 클라이언트 분리 없음**인 조합은 **디스크에 쓰기 전에 거부**합니다. 메시지에 [generate-metadata — server component only](https://nextjs.org/docs/app/api-reference/functions/generate-metadata#why-generatemetadata-is-server-component-only) 링크를 포함하고, 반환 객체에 `rscBoundaryViolation: true`를 붙일 수 있습니다.
 - 훅이 있는데 서버 전용 export도 있으면, 예전처럼 **`ensureClientDirectiveForReactHooks`가 맨 위에 `use client`를 자동 삽입하지 않도록** 가드되어 동일 충돌을 만들지 않습니다(`lib/skills/index.ts`).
+- **오케스트레이터 자동 수리**: 위 조합으로 `write_code`가 실패하면 `lib/agents/Orchestrator.ts`가 **RSC 분리 수리**(최대 3회)를 호출해 서버 `page`/`layout`과 `*Client.tsx`를 나누고, 클라이언트 파일을 먼저 기록한 뒤 라우트 파일을 다시 씁니다.
 
 ### 11e) 플랜 단계 스킬·`scan_project`
 
