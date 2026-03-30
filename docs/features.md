@@ -85,7 +85,7 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 ## 5d) Ralph 이벤트 모드 (옵트인)
 
 - **목적**: Huntley식 외부 루프로 `plan` → 영향 범위 자동 승인 → `execute` → `verify`를 최대 N회 반복하며, 대상 프로젝트 `.basalt/ralph/<taskId>/guardrails.md`에 실패 요약을 누적해 다음 라운드 플랜에 반영합니다.
-- **UI**: Request 칸반 카드에서 **Ralph 이벤트**, 태스크 상세(`pending`)에서 **Ralph 이벤트 시작**. 배너 이미지는 `public/ralph-hero.svg`(교체 가능).
+- **UI**: Request 칸반 카드에서 **Ralph 이벤트**, 태스크 상세(`pending`)에서 **Ralph 이벤트 시작**. 실행 중 전용 오버레이(`RalphModeDialog`)에서 `public/ralph.mp4`를 루프 재생(무음)하고 하단에 SSE 이벤트 요약 로그를 표시합니다. 영상 파일은 저장소 `public/ralph.mp4`에 두면 됩니다.
 - **SSE**: `GET /api/agent/stream?taskId=&action=ralph` — 기존 `plan`/`execute`/`verify`와 동일 엔드포인트, `Orchestrator` 본문은 변경하지 않고 `lib/agents/ralph-runner.ts`만 루프를 돌립니다.
 - **환경 변수**: `BASALT_RALPH_MAX_ROUNDS`(기본 3, 최대 12).
 - **메타데이터**: `metadata.ralphSession`에 라운드·결과(`completed`/`max_rounds`/`error`)가 기록됩니다.

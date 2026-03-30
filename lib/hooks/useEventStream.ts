@@ -32,6 +32,10 @@ export interface EventStreamState {
     errorMessage: string | null;
     /** Final status from the done event */
     doneStatus: string | null;
+    /** Last `start()` action (e.g. `ralph` for Ralph 이벤트 팝업) */
+    streamAction: string | null;
+    /** Task id for the active stream */
+    streamTaskId: string | null;
 }
 
 interface UseEventStreamOptions {
@@ -52,18 +56,22 @@ interface UseEventStreamOptions {
  * Call start(taskId, action, executeOptions?) to begin streaming.
  * The stream auto-closes on 'done' event or error.
  */
+const emptyStreamState = (): EventStreamState => ({
+    events: [],
+    currentStep: null,
+    completedSteps: [],
+    eta: null,
+    percent: 0,
+    llmBuffer: '',
+    status: 'idle',
+    errorMessage: null,
+    doneStatus: null,
+    streamAction: null,
+    streamTaskId: null,
+});
+
 export function useEventStream(options: UseEventStreamOptions = {}) {
-    const [state, setState] = useState<EventStreamState>({
-        events: [],
-        currentStep: null,
-        completedSteps: [],
-        eta: null,
-        percent: 0,
-        llmBuffer: '',
-        status: 'idle',
-        errorMessage: null,
-        doneStatus: null,
-    });
+    const [state, setState] = useState<EventStreamState>(emptyStreamState);
 
     const abortRef = useRef<AbortController | null>(null);
     const optionsRef = useRef(options);
@@ -72,29 +80,25 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
         optionsRef.current = options;
     }, [options]);
 
-    const stop = useCallback(() => {
+    const clearStreamSession = useCallback(() => {
         abortRef.current?.abort();
         abortRef.current = null;
+        setState(emptyStreamState());
     }, []);
 
     const start = useCallback((taskId: string, action: string, executeOptions?: ExecuteStreamOptions) => {
         // Cancel any existing stream
-        stop();
+        clearStreamSession();
 
         const controller = new AbortController();
         abortRef.current = controller;
 
-        // Reset state
+        // Reset state (keep streamAction / streamTaskId for Ralph 등 UI)
         setState({
-            events: [],
-            currentStep: null,
-            completedSteps: [],
-            eta: null,
-            percent: 0,
-            llmBuffer: '',
+            ...emptyStreamState(),
             status: 'connecting',
-            errorMessage: null,
-            doneStatus: null,
+            streamAction: action,
+            streamTaskId: taskId,
         });
 
         // Use fetch instead of EventSource for better abort control
@@ -126,6 +130,8 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
                         ...prev,
                         status: 'error',
                         errorMessage: `HTTP ${response.status}: ${errBody}`,
+                        streamAction: action,
+                        streamTaskId: taskId,
                     }));
                     optionsRef.current.onError?.(`HTTP ${response.status}`);
                     return;
@@ -182,6 +188,8 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
                     ...prev,
                     status: 'error',
                     errorMessage: message,
+                    streamAction: action,
+                    streamTaskId: taskId,
                 }));
                 optionsRef.current.onError?.(message);
             }
@@ -241,17 +249,18 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
                 return newState;
             });
         }
-    }, [stop]);
+    }, [clearStreamSession]);
 
     // Cleanup on unmount
     useEffect(() => {
-        return () => stop();
-    }, [stop]);
+        return () => clearStreamSession();
+    }, [clearStreamSession]);
 
     return {
         ...state,
         start,
-        stop,
+        stop: clearStreamSession,
+        clearStreamSession,
         isActive: state.status === 'connecting' || state.status === 'streaming',
     };
 }

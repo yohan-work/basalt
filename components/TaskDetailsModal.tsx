@@ -70,6 +70,7 @@ interface TaskDetailsModalProps {
     stream?: EventStreamState & {
         start: (taskId: string, action: string, executeOptions?: ExecuteStreamOptions) => void;
         stop: () => void;
+        clearStreamSession?: () => void;
         isActive: boolean;
     };
     executionOptions?: ExecuteStreamOptions;
@@ -1332,21 +1333,17 @@ export function TaskDetailsModal({
                                 {task.status === 'pending' && (
                                     <div className="rounded-lg border border-violet-300/60 bg-gradient-to-br from-violet-50/90 to-background dark:from-violet-950/40 dark:to-background p-4 space-y-3">
                                         <div className="flex gap-3 items-start">
-                                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                                            <img
-                                                src="/ralph-hero.svg"
-                                                alt=""
-                                                width={64}
-                                                height={64}
-                                                className="w-16 h-16 shrink-0 rounded-md border bg-background object-cover"
-                                            />
+                                            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md border bg-violet-500/10">
+                                                <Sparkles className="h-8 w-8 text-violet-600" aria-hidden />
+                                            </div>
                                             <div className="space-y-1 min-w-0">
                                                 <h4 className="text-sm font-semibold flex items-center gap-2">
                                                     <Sparkles className="h-4 w-4 text-violet-600" />
                                                     Ralph 이벤트 모드
                                                 </h4>
                                                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                                    플랜 → 자동 영향 승인 → 개발 → 검증을 최대 여러 라운드 반복합니다. 대상 프로젝트에{' '}
+                                                    플랜 → 자동 영향 승인 → 개발 → 검증을 최대 여러 라운드 반복합니다. 실행 시 전용 팝업에서{' '}
+                                                    <code className="text-[10px]">public/ralph.mp4</code> 영상이 재생됩니다. 대상 프로젝트에{' '}
                                                     <code className="text-[10px]">.basalt/ralph/&lt;taskId&gt;/guardrails.md</code>에 학습 메모가
                                                     쌓입니다. 토큰을 많이 씁니다.
                                                 </p>
