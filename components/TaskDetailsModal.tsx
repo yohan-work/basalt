@@ -762,10 +762,6 @@ export function TaskDetailsModal({
     /** Ralph 이벤트: 영향 범위는 러너가 자동 승인(메타데이터)합니다. */
     const handleRalphEventFromModal = () => {
         if (!task) return;
-        if (onExecute) {
-            setActionError('Ralph 이벤트는 스트림 모드에서만 사용할 수 있습니다.');
-            return;
-        }
         stream?.start(task.id, 'ralph', draftExecutionOptions);
         setView('live');
     };

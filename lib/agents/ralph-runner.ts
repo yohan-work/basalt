@@ -11,12 +11,12 @@ import type { StreamEmitter, StreamEvent } from '@/lib/stream-emitter';
 
 /** Ralph 루프 중에는 내부 Orchestrator의 done 이벤트가 스트림을 끊지 않도록 억제 */
 function wrapEmitterSuppressInnerDone(emitter: StreamEmitter): StreamEmitter {
-    const orig = emitter.emit.bind(emitter);
-    emitter.emit = (e: StreamEvent) => {
+    const proxy = Object.create(emitter) as StreamEmitter;
+    proxy.emit = (e: StreamEvent) => {
         if (e.type === 'done') return;
-        orig(e);
+        emitter.emit(e);
     };
-    return emitter;
+    return proxy;
 }
 
 /** Orchestrator.execute와 동일한 옵션 형태 */
