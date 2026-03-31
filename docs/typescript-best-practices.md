@@ -94,11 +94,15 @@ const fetchData = async () => {
 
 ## 5. UI Component Imports (Shadcn UI)
 
+### `Input` and other field primitives
+
+- **`Input`**: Import **only** from `@/components/ui/input`. **`import { …, Input } from '@/components/ui/button'`** (or any `…/ui/button` path) causes **TS2305** — *Module has no exported member 'Input'*. See [TypeScript Modules](https://www.typescriptlang.org/docs/handbook/modules.html).
+
 ### Table Component & Data Tables
 A common source of errors is mixing up the visual Table component with the data table logic library.
 
-- **Visual Components**: Import `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableCell`, `TableHead`, `TableCaption` as **named imports** from `@/components/ui/table` — that module typically has **no default export** (**TS2613** if you use `import Table from '…'`).
-- **Logic & Types**: Import `ColumnDef`, `useReactTable`, `getCoreRowModel`, `flexRender` from `@tanstack/react-table`.
+- **Visual Components**: Import `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableCell`, `TableHead`, `TableCaption` as **named imports** from `@/components/ui/table` — that module typically has **no default export** (**TS2613** if you use `import Table from '…'`). The `Table` component is a **DOM `<table>` wrapper**: it accepts **only** normal HTML/table attributes — **not** TanStack’s `columns` or `data` props (**TS2322** if you write `<Table columns={…} data={…}>`).
+- **Logic & Types**: Import `ColumnDef`, `useReactTable`, `getCoreRowModel`, `flexRender` from `@tanstack/react-table`. Pass **`data`** and **`columns`** to **`useReactTable({ … })`**, then render with `getHeaderGroups()` / `getRowModel()` + `flexRender`.
 
 #### Constraint
 This project lists `@tanstack/react-table` in `package.json`. If you work in another repo, add it with `npm install @tanstack/react-table`.
@@ -167,6 +171,8 @@ const table = useReactTable({
 ```
 
 #### Anti-Patterns (DO NOT DO THIS)
+- `import { Input } from "@/components/ui/button"` (or mixing `Input` into a `button` module import) -> **TS2305**. Use `@/components/ui/input` only.
+- `<Table columns={columns} data={data}>` (or any `columns=` / `data=` on shadcn `Table`) -> **TS2322**. Those props belong on `useReactTable`, not on the visual `Table`.
 - `import { ColumnDef } from "@/components/ui/table"` -> **Error: Module has no exported member 'ColumnDef'.**
 - `import { useTable } from "@tanstack/react-table"` or `useTable(...)` -> **TS2305** in v8. Use **`useReactTable`** and **`getCoreRowModel`** from `@tanstack/react-table`.
 - `import { flexRender } from "@/components/ui/table"` -> **TS2305**. **`flexRender` is only exported from `@tanstack/react-table`**; `@/components/ui/table` is for visual wrappers (`Table`, `TableRow`, …). Basalt’s extended UI scaffold creates those wrappers when `table.tsx` is auto-generated.

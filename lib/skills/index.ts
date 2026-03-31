@@ -139,6 +139,55 @@ function validateTanStackUiTableNoDefaultImport(relativePath: string, content: s
     return { valid: true };
 }
 
+const TS_HANDBOOK_MODULES_DOC = 'https://www.typescriptlang.org/docs/handbook/modules.html';
+
+/**
+ * `Input` is exported from `@/components/ui/input`, not from `button` — TS2305.
+ */
+function validateShadcnInputNotImportedFromButton(
+    relativePath: string,
+    content: string
+): { valid: true } | { valid: false; message: string } {
+    const norm = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!/\.(tsx|ts|jsx|js)$/i.test(norm)) return { valid: true };
+
+    const importFromButtonRe =
+        /import\s*\{[^}]*\bInput\b[^}]*}\s*from\s*['"](?:@\/components\/ui\/button|[^'"]*\/components\/ui\/button)['"]/;
+    if (importFromButtonRe.test(content)) {
+        return {
+            valid: false,
+            message:
+                `Shadcn UI: **Input** must be imported from \`@/components/ui/input\`, not from \`button\` (**TS2305** — module has no exported member 'Input'). Example: \`import { Input } from '@/components/ui/input'\`. TypeScript modules: ${TS_HANDBOOK_MODULES_DOC}`,
+        };
+    }
+    return { valid: true };
+}
+
+/**
+ * shadcn `Table` is an HTML table wrapper — it does not accept TanStack's `columns` / `data` props (TS2322).
+ */
+function validateShadcnTableNotTanStackProps(
+    relativePath: string,
+    content: string
+): { valid: true } | { valid: false; message: string } {
+    const norm = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!/\.(tsx|jsx)$/i.test(norm)) return { valid: true };
+
+    const usesTanStackApi =
+        /\buseReactTable\b/.test(content) || /\bgetCoreRowModel\b/.test(content);
+    if (!usesTanStackApi) return { valid: true };
+
+    const tableWithColumnsProp = /<Table[\s\S]*?\bcolumns\s*=/;
+    if (tableWithColumnsProp.test(content)) {
+        return {
+            valid: false,
+            message:
+                `TanStack + shadcn: \`<Table>\` from \`@/components/ui/table\` is a **visual wrapper** (DOM \`<table>\` props only). Pass \`data\` and \`columns\` to **\`useReactTable({ data, columns, getCoreRowModel: getCoreRowModel() })\`**, then render rows with \`table.getHeaderGroups()\` / \`table.getRowModel().rows\` and \`flexRender\` — **not** \`<Table columns={...} data={...}>\` (**TS2322**). See project docs: docs/typescript-best-practices.md. TanStack: ${TANSTACK_TABLE_INTRO_DOC}`,
+        };
+    }
+    return { valid: true };
+}
+
 const MAX_IMPORT_VALIDATION_UI_HINT = 12;
 const IMPORT_VALIDATION_FILE_SUFFIXES = ['.ts', '.tsx', '.js', '.jsx', '.d.ts', '.mjs', '.cjs', '/index.ts', '/index.tsx', '/index.js', '/index.jsx'];
 
@@ -770,7 +819,15 @@ function analyzeContentForClientBoundary(content: string, pathForLabel: string):
 }
 
 function needsClientDirectiveHeuristic(content: string, normalizedPath: string): boolean {
-    return analyzeContentForClientBoundary(content, normalizedPath).needsClientDirective;
+    const base = analyzeContentForClientBoundary(content, normalizedPath).needsClientDirective;
+    if (base) return true;
+    if (
+        /\.(tsx|jsx)$/i.test(normalizedPath) &&
+        /\buseReactTable\s*\(/.test(stripCommentsAndStringsForHookScan(content))
+    ) {
+        return true;
+    }
+    return false;
 }
 
 function resolveSpecifierToFirstExistingFile(
@@ -1408,6 +1465,24 @@ export async function write_code(filePath: string, content: string, baseDir: str
             return {
                 success: false,
                 message: tanstackUiTableImport.message,
+                filePath,
+            };
+        }
+
+        const shadcnInputFromButton = validateShadcnInputNotImportedFromButton(relativePath, sanitizedContent);
+        if (!shadcnInputFromButton.valid) {
+            return {
+                success: false,
+                message: shadcnInputFromButton.message,
+                filePath,
+            };
+        }
+
+        const shadcnTableTanStackProps = validateShadcnTableNotTanStackProps(relativePath, sanitizedContent);
+        if (!shadcnTableTanStackProps.valid) {
+            return {
+                success: false,
+                message: shadcnTableTanStackProps.message,
                 filePath,
             };
         }
