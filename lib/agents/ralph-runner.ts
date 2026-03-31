@@ -9,14 +9,24 @@ import { supabase } from '@/lib/supabase';
 import { Orchestrator } from '@/lib/agents/Orchestrator';
 import type { StreamEmitter, StreamEvent } from '@/lib/stream-emitter';
 
-/** Ralph 루프 중에는 내부 Orchestrator의 done 이벤트가 스트림을 끊지 않도록 억제 */
+/**
+ * Orchestrator에만 넘길 래퍼: 내부 `done`은 억제하되 원본 emitter는 수정하지 않는다.
+ * (인스턴스의 emit을 덮어쓰면 runRalphSession이 보내는 최종 `done`까지 삼켜진다.)
+ */
 function wrapEmitterSuppressInnerDone(emitter: StreamEmitter): StreamEmitter {
-    const orig = emitter.emit.bind(emitter);
-    emitter.emit = (e: StreamEvent) => {
-        if (e.type === 'done') return;
-        orig(e);
-    };
-    return emitter;
+    const realEmit = emitter.emit.bind(emitter);
+    return new Proxy(emitter, {
+        get(target, prop, receiver) {
+            if (prop === 'emit') {
+                return (e: StreamEvent) => {
+                    if (e.type === 'done') return;
+                    return realEmit(e);
+                };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+        },
+    }) as StreamEmitter;
 }
 
 /** Orchestrator.execute와 동일한 옵션 형태 */
@@ -154,7 +164,7 @@ export async function runRalphSession(
 
             await acknowledgeImpactPreflight(taskId);
 
-            await orchestrator.execute(undefined, executionOptions);
+            await orchestrator.execute(0, executionOptions);
 
             let t = await getTaskRow(taskId);
             const status = (t as { status: string }).status;
@@ -248,6 +258,5 @@ export async function runRalphSession(
         });
         emitter?.emit({ type: 'error', message });
         emitter?.emit({ type: 'done', status: 'ralph_error' });
-        throw e;
     }
 }
