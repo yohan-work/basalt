@@ -8,6 +8,7 @@ import { MODEL_CONFIG } from '@/lib/model-config';
 import { AgentBrowser, isAgentBrowserAvailable } from '@/lib/browser/agent-browser';
 import { sampleProjectDirectoryTree } from '@/lib/qa/project-tree-sample';
 import { collectAppRoutePageSanityIssues, isAppRouterPagePath } from '@/lib/qa/app-route-page-sanity';
+import { collectRootLayoutSanityIssues } from '@/lib/qa/app-root-layout-sanity';
 
 interface VisualVerification {
     snapshotSummary?: string;
@@ -143,7 +144,10 @@ export async function verify_final_output(
 
     try {
         const changePaths = extractFileChangePaths(taskMetadata);
-        sanityIssues = collectAppRoutePageSanityIssues(root, changePaths);
+        sanityIssues = [
+            ...collectAppRoutePageSanityIssues(root, changePaths),
+            ...collectRootLayoutSanityIssues(root, changePaths),
+        ];
 
         const files = await list_directory('.', projectPath);
         const fileListStr = Array.isArray(files) ? files.join('\n') : String(files);

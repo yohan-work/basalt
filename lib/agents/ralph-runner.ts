@@ -10,6 +10,12 @@ import { Orchestrator } from '@/lib/agents/Orchestrator';
 import { getTokenBudgetAbsoluteCeiling, resolveExecutionTokenCap } from '@/lib/orchestration/policy';
 import type { StrategyPreset } from '@/lib/orchestration/metrics';
 import type { StreamEmitter, StreamEvent } from '@/lib/stream-emitter';
+import {
+    appendRalphProgress,
+    buildRalphPlanInput,
+    formatRalphProgressBlock,
+} from '@/lib/agents/ralph-artifacts';
+import { runRalphFeedbackGate } from '@/lib/agents/ralph-feedback-gate';
 
 /**
  * Orchestrator에만 넘길 래퍼: 내부 `done`은 억제하되 원본 emitter는 수정하지 않는다.
@@ -105,6 +111,44 @@ async function getTaskRow(taskId: string) {
     const { data, error } = await supabase.from('Tasks').select('*').eq('id', taskId).single();
     if (error) throw new Error(error.message);
     return data;
+}
+
+async function setTaskFailedWithMetadata(taskId: string, lastError: string, failedAction: string): Promise<void> {
+    const { data, error } = await supabase.from('Tasks').select('metadata').eq('id', taskId).single();
+    if (error) throw new Error(error.message);
+    const meta = { ...(data?.metadata || {}), lastError, failedAction, failedAt: new Date().toISOString() };
+    const { error: u } = await supabase.from('Tasks').update({ status: 'failed', metadata: meta }).eq('id', taskId);
+    if (u) throw new Error(u.message);
+}
+
+async function recordRalphRoundProgress(
+    projectPath: string,
+    taskId: string,
+    round: number,
+    note?: string
+): Promise<void> {
+    const t = await getTaskRow(taskId);
+    const meta = ((t as { metadata?: Record<string, unknown> }).metadata || {}) as Record<string, unknown>;
+    const fc = meta.fileChanges;
+    const paths: string[] = [];
+    if (Array.isArray(fc)) {
+        for (const e of fc) {
+            if (e && typeof e === 'object' && typeof (e as { filePath?: string }).filePath === 'string') {
+                paths.push((e as { filePath: string }).filePath);
+            }
+        }
+    }
+    const status = (t as { status: string }).status;
+    appendRalphProgress(
+        projectPath,
+        taskId,
+        formatRalphProgressBlock({
+            round,
+            taskStatus: status,
+            filePaths: paths,
+            note,
+        })
+    );
 }
 
 function resolveMaxRounds(): number {
@@ -211,10 +255,7 @@ export async function runRalphSession(
                 (taskRow as { title?: string }).title ||
                 'No description provided';
             const guardrails = readGuardrailsFile(projectPath, taskId);
-            const effectiveDescription =
-                guardrails.length > 0
-                    ? `${description}\n\n---\n[Ralph 가드레일 — 라운드 ${round}]\n${guardrails}`
-                    : description;
+            const effectiveDescription = buildRalphPlanInput(description, projectPath, taskId, round, guardrails);
 
             const orchestrator = new Orchestrator(taskId, emitter ? wrapEmitterSuppressInnerDone(emitter) : undefined);
             await orchestrator.plan(effectiveDescription);
@@ -233,10 +274,19 @@ export async function runRalphSession(
                     (t as { metadata?: { lastError?: string } }).metadata?.lastError || 'unknown'
                 );
                 appendRalphGuardrail(projectPath, taskId, `실행 실패: ${lastError.slice(0, 500)}`);
+                await recordRalphRoundProgress(projectPath, taskId, round, `execute 실패: ${lastError.slice(0, 300)}`);
                 continue;
             }
 
             if (status === 'testing') {
+                const gate = await runRalphFeedbackGate(projectPath);
+                if (!gate.ok && gate.failure) {
+                    appendRalphGuardrail(projectPath, taskId, `피드백 게이트: ${gate.failure.slice(0, 900)}`);
+                    await setTaskFailedWithMetadata(taskId, gate.failure.slice(0, 2000), 'ralph_feedback_gate');
+                    await recordRalphRoundProgress(projectPath, taskId, round, 'BASALT_RALPH_FEEDBACK_GATE: npm 스크립트 실패');
+                    continue;
+                }
+
                 await orchestrator.verify();
                 t = await getTaskRow(taskId);
             }
@@ -246,6 +296,7 @@ export async function runRalphSession(
             const verification = meta.verification as { verified?: boolean } | undefined;
 
             if (finalStatus === 'review') {
+                await recordRalphRoundProgress(projectPath, taskId, round, '검증·Git 완료 → review');
                 await mergeTaskMetadata(taskId, {
                     ralphSession: {
                         active: false,
@@ -264,10 +315,12 @@ export async function runRalphSession(
             if (finalStatus === 'failed' && meta.failedAction === 'verify') {
                 const err = String(meta.lastError || 'verify failed');
                 appendRalphGuardrail(projectPath, taskId, `검증 실패: ${err.slice(0, 500)}`);
+                await recordRalphRoundProgress(projectPath, taskId, round, `verify 실패: ${err.slice(0, 300)}`);
                 continue;
             }
 
             if (verification?.verified === true && finalStatus === 'testing') {
+                await recordRalphRoundProgress(projectPath, taskId, round, '검증 통과(testing), 리뷰 전 종료');
                 await mergeTaskMetadata(taskId, {
                     ralphSession: {
                         active: false,
@@ -288,6 +341,7 @@ export async function runRalphSession(
                     ? '검증 스킬이 통과하지 못함'
                     : `상태 ${finalStatus}에서 목표 미달`;
             appendRalphGuardrail(projectPath, taskId, note);
+            await recordRalphRoundProgress(projectPath, taskId, round, note);
         }
 
         await mergeTaskMetadata(taskId, {
