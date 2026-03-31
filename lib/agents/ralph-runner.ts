@@ -7,6 +7,8 @@ import fs from 'fs';
 import path from 'path';
 import { supabase } from '@/lib/supabase';
 import { Orchestrator } from '@/lib/agents/Orchestrator';
+import { getTokenBudgetAbsoluteCeiling, resolveExecutionTokenCap } from '@/lib/orchestration/policy';
+import type { StrategyPreset } from '@/lib/orchestration/metrics';
 import type { StreamEmitter, StreamEvent } from '@/lib/stream-emitter';
 
 /**
@@ -112,6 +114,61 @@ function resolveMaxRounds(): number {
     return Math.min(12, Math.max(1, Math.round(n)));
 }
 
+/** Orchestrator.resolveExecutionOptions과 동일한 프리셋 우선순위 */
+function resolveRalphStrategyPreset(
+    taskMetadata: Record<string, unknown>,
+    executionOptions?: RalphExecutionOptions
+): StrategyPreset {
+    const saved = (taskMetadata.executionOptions || {}) as Record<string, unknown>;
+    const raw = (executionOptions?.strategyPreset ?? saved.strategyPreset ?? 'balanced') as string;
+    return ['quality_first', 'balanced', 'speed_first', 'cost_saver'].includes(raw)
+        ? (raw as StrategyPreset)
+        : 'balanced';
+}
+
+function resolveRalphTokenBudgetMult(): number {
+    const raw = process.env.BASALT_RALPH_TOKEN_BUDGET_MULT;
+    if (raw === undefined || raw === '') return 1;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return 1;
+    return n;
+}
+
+/**
+ * plan 직후 워크플로 스텝 수가 정해졌을 때, Ralph 다라운드·반복 플랜에 맞게 토큰 상한을 올린다.
+ * 사용자가 metadata.budgetPolicy.maxTokensPerTask에 더 큰 값을 두었으면 유지한다.
+ */
+async function ensureRalphTokenBudgetAfterPlan(
+    taskId: string,
+    maxRounds: number,
+    executionOptions?: RalphExecutionOptions
+): Promise<void> {
+    const task = await getTaskRow(taskId);
+    const meta = ((task as { metadata?: Record<string, unknown> }).metadata || {}) as Record<string, unknown>;
+    const workflow = meta.workflow as { steps?: unknown[] } | undefined;
+    const stepCount = Array.isArray(workflow?.steps) ? workflow!.steps!.length : 0;
+
+    const preset = resolveRalphStrategyPreset(meta, executionOptions);
+    const singleRunCap = resolveExecutionTokenCap(meta, preset, stepCount);
+    const mult = resolveRalphTokenBudgetMult();
+    const ceiling = getTokenBudgetAbsoluteCeiling();
+    const proposed = Math.round(singleRunCap * maxRounds * mult);
+
+    const prevBp = { ...((meta.budgetPolicy || {}) as Record<string, unknown>) };
+    const existing = Number(prevBp.maxTokensPerTask);
+    const fromExplicit = Number.isFinite(existing) && existing > 0 ? existing : 0;
+    const newMax = Math.min(ceiling, Math.max(fromExplicit, proposed));
+
+    if (newMax <= fromExplicit) return;
+
+    await mergeTaskMetadata(taskId, {
+        budgetPolicy: {
+            ...prevBp,
+            maxTokensPerTask: newMax,
+        },
+    });
+}
+
 /**
  * Ralph 세션: plan → impact 자동 승인 → execute → (testing이면) verify → 성공 시 종료, 실패 시 가드레일 후 재기획.
  */
@@ -161,6 +218,8 @@ export async function runRalphSession(
 
             const orchestrator = new Orchestrator(taskId, emitter ? wrapEmitterSuppressInnerDone(emitter) : undefined);
             await orchestrator.plan(effectiveDescription);
+
+            await ensureRalphTokenBudgetAfterPlan(taskId, maxRounds, executionOptions);
 
             await acknowledgeImpactPreflight(taskId);
 

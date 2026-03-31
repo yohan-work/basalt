@@ -85,10 +85,11 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 ## 5d) Ralph 이벤트 모드 (옵트인)
 
 - **목적**: Huntley식 외부 루프로 `plan` → 영향 범위 자동 승인 → `execute` → `verify`를 최대 N회 반복하며, 대상 프로젝트 `.basalt/ralph/<taskId>/guardrails.md`에 실패 요약을 누적해 다음 라운드 플랜에 반영합니다.
-- **UI**: Request 칸반 카드에서 **Ralph 이벤트**, 태스크 상세(`pending`)에서 **Ralph 이벤트 시작**. 실행 중 전용 오버레이(`RalphModeDialog`)에서 `public/ralph.mp4`를 루프 재생(무음)하고 하단에 SSE 이벤트 요약 로그를 표시합니다. 영상 파일은 저장소 `public/ralph.mp4`에 두면 됩니다.
+- **UI**: Request 칸반 카드에서 **Ralph 이벤트**, 태스크 상세(`pending`)에서 **Ralph 이벤트 시작**. 실행 중 전용 오버레이(`RalphModeDialog`)에서 `public/ralph.mp4`를 루프 재생(무음)하고 하단에 SSE 이벤트 요약 로그를 표시합니다. 영상 파일은 저장소 `public/ralph.mp4`에 두면 됩니다. 진행 중 **숨기기**는 오버레이만 접고 SSE는 유지하며, 칸반 우하단 **Ralph 이벤트 열기**로 다시 띄울 수 있습니다(서버 루프는 **중단**으로만 끊음). 완료/오류 후 **닫기**는 세션을 비웁니다.
 - **SSE**: `GET /api/agent/stream?taskId=&action=ralph` — 기존 `plan`/`execute`/`verify`와 동일 엔드포인트, `Orchestrator` 본문은 변경하지 않고 `lib/agents/ralph-runner.ts`만 루프를 돌립니다.
-- **환경 변수**: `BASALT_RALPH_MAX_ROUNDS`(기본 3, 최대 12).
+- **환경 변수**: `BASALT_RALPH_MAX_ROUNDS`(기본 3, 최대 12), `BASALT_RALPH_TOKEN_BUDGET_MULT`(기본 1, Ralph가 올리는 토큰 상한에 곱함).
 - **메타데이터**: `metadata.ralphSession`에 라운드·결과(`completed`/`max_rounds`/`error`)가 기록됩니다.
+- **토큰 예산**: 한 태스크에 `executionMetrics.totalTokens`가 누적되고, 라운드마다 `plan`이 반복되므로 일반 실행보다 빨리 `write_code` 직전 상한에 도달할 수 있습니다. 세션 시작 후 각 라운드의 `plan` 직후, 워크플로 스텝 수를 반영해 `metadata.budgetPolicy.maxTokensPerTask`를 **한 번에 실행 가능한 상한 × 최대 라운드(× `BASALT_RALPH_TOKEN_BUDGET_MULT`)** 이상으로 올립니다(사용자가 이미 더 큰 값을 두었으면 유지). 그래도 부족하면 태스크 메타에 `budgetPolicy.maxTokensPerTask`를 직접 키우거나 `discussionMode`를 `off`로 줄이는 것을 권장합니다.
 
 ## 6) 승인 워크플로우(HITL)
 

@@ -65,6 +65,7 @@ export function KanbanBoard() {
     const [isLoading, setIsLoading] = useState(true);
     const [actionError, setActionError] = useState<string | null>(null);
     const [executionOptionsByTask, setExecutionOptionsByTask] = useState<Record<string, ExecuteStreamOptions>>({});
+    const [ralphOverlayMinimized, setRalphOverlayMinimized] = useState(false);
 
     const upsertTask = (prevTasks: Task[], nextTask: Task): Task[] => {
         const index = prevTasks.findIndex((task) => task.id === nextTask.id);
@@ -84,6 +85,18 @@ export function KanbanBoard() {
             void fetchTasks(false);
         },
     });
+
+    useEffect(() => {
+        if (stream.status === 'idle') {
+            setRalphOverlayMinimized(false);
+        }
+    }, [stream.status]);
+
+    useEffect(() => {
+        if (stream.streamAction === 'ralph' && stream.status === 'connecting') {
+            setRalphOverlayMinimized(false);
+        }
+    }, [stream.streamAction, stream.status]);
 
     // Realtime 구독 — 마운트 시 1회만 생성, selectedTask 변경과 무관
     useEffect(() => {
@@ -435,6 +448,8 @@ export function KanbanBoard() {
         }
     };
 
+    const ralphStreamLive = stream.streamAction === 'ralph' && stream.status !== 'idle';
+
     return (
         <div className="flex flex-col h-full bg-background text-foreground">
             {/* Action Error Toast */}
@@ -512,7 +527,29 @@ export function KanbanBoard() {
                 onExecute={handleExecuteFromModal}
             />
 
-            <RalphModeDialog stream={stream} task={selectedTask} tasks={tasks} />
+            <RalphModeDialog
+                stream={stream}
+                task={selectedTask}
+                tasks={tasks}
+                open={ralphStreamLive && !ralphOverlayMinimized}
+                onMinimize={() => setRalphOverlayMinimized(true)}
+                onCloseEndSession={() => {
+                    stream.clearStreamSession();
+                    setRalphOverlayMinimized(false);
+                }}
+            />
+            {ralphStreamLive && ralphOverlayMinimized ? (
+                <Button
+                    type="button"
+                    size="sm"
+                    className="fixed bottom-4 right-4 z-[280] shadow-lg border border-violet-500/40 bg-violet-600 text-white hover:bg-violet-700"
+                    onClick={() => setRalphOverlayMinimized(false)}
+                    aria-label="Ralph 팝업 다시 열기"
+                >
+                    <Sparkles className="mr-2 h-4 w-4" aria-hidden />
+                    Open Ralph
+                </Button>
+            ) : null}
 
             <ProjectPreviewPanel
                 projectId={selectedProjectId}

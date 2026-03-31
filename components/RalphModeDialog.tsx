@@ -50,16 +50,21 @@ export interface RalphModeDialogProps {
     stream: RalphStream;
     task: TaskLike | null;
     tasks: TaskLike[];
+    /** 부모가 스트림 살린 채 오버레이만 켤지 끌지 제어 */
+    open: boolean;
+    /** 진행 중 닫기: SSE 유지, 오버레이만 숨김 */
+    onMinimize: () => void;
+    /** 완료/오류 후 닫기: 스트림 세션 정리 */
+    onCloseEndSession: () => void;
 }
 
 /**
  * Ralph 이벤트 전용 오버레이: 루프 영상 + 하단 요약 로그.
  */
-export function RalphModeDialog({ stream, task, tasks }: RalphModeDialogProps) {
+export function RalphModeDialog({ stream, task, tasks, open, onMinimize, onCloseEndSession }: RalphModeDialogProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const logScrollRef = useRef<HTMLDivElement>(null);
     const [videoLoadError, setVideoLoadError] = useState(false);
-    const open = stream.streamAction === 'ralph' && stream.status !== 'idle';
 
     const resolvedTask = useMemo(() => {
         if (task && stream.streamTaskId && task.id === stream.streamTaskId) return task;
@@ -201,9 +206,9 @@ export function RalphModeDialog({ stream, task, tasks }: RalphModeDialogProps) {
                                 size="sm"
                                 className="h-7 text-[10px]"
                                 variant="secondary"
-                                onClick={() => stream.clearStreamSession()}
+                                onClick={() => (busy ? onMinimize() : onCloseEndSession())}
                             >
-                                닫기
+                                {busy ? '숨기기' : '닫기'}
                             </Button>
                         </div>
                     </div>
