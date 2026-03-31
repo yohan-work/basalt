@@ -3039,6 +3039,14 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
             summary: verification.verified ? 'Verified' : 'Failed',
         });
 
+        const devQaStrictVerify =
+            ['true', '1', 'yes'].includes(String(process.env.DEV_QA_FAIL_ON_VERIFY || '').toLowerCase()) ||
+            ['true', '1', 'yes'].includes(String(process.env.BASALT_STRICT_VERIFY || '').toLowerCase());
+        if (!verification.verified && devQaStrictVerify) {
+            const detail = String((verification as { notes?: string }).notes || 'verify_final_output rejected output').slice(0, 4000);
+            throw new Error(`Dev QA: 검증 실패(엄격 모드: DEV_QA_FAIL_ON_VERIFY 또는 BASALT_STRICT_VERIFY). ${detail}`);
+        }
+
         let qaArtifactSlots: QaArtifactSlot[] = [];
         const browserAvailable = await isAgentBrowserAvailable();
         if (browserAvailable) {

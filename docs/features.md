@@ -65,12 +65,15 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - 스모크는 본문·스냅샷·HTML 스니펫 텍스트를 소문자로 두고 `PAGE_ERROR_SIGNALS`(`lib/qa/page-smoke-check.ts`)와 매칭하며, **빌드/Next 관련**으로는 예를 들어 module not found, metadata·`use client` 충돌, Link 중첩, hydration, `next/image` 호스트, prerender, RSC payload, `metadataBase`/viewport 관련 문구 등이 포함된다(전체 목록은 소스 기준).
 - **페이지 URL**은 `resolveQaPageUrl`(내부적으로 `resolveQaPageUrlWithDiagnostics`)로 결정합니다. (1) `metadata.qaDevServerUrl`에 경로가 포함된 전체 URL이면 그대로 사용합니다. (2) 아니면 위와 동일한 우선순위로 **origin**(호스트·포트)을 정한 뒤, `metadata.qaDevServerPath`(예: `/test`)를 붙이거나, `metadata.fileChanges`에서 Next `app/.../page.tsx`·`pages/...` 경로를 휴리스틱으로 추론합니다(최근 변경 파일부터). App Router는 **`page.tsx`** 만 URL로 매핑되므로 변경 목록에 **`.../index.tsx`만** 있고 `page.tsx`가 없으면 추론이 실패해 **루트 `/`만** 열릴 수 있습니다. 이 경우 `metadata.qaRouteInferenceWarning`에 안내가 남고 Dev 종료 QA·`verify()` 로그에 WARNING이 찍힙니다(`lib/qa/infer-route-from-files.ts`, `lib/project-dev-server.ts`).
 - 결과는 `metadata.qaPageCheck`에 저장됩니다. **`QA_FAIL_ON_PAGE_ERRORS=true`**(또는 `1`/`yes`)일 때만 스모크 실패가 `verify()`의 최종 검증(`verified: false`)과 연동됩니다. 설정하지 않으면 스모크는 로그·메타(`qaPageCheck`, `qaSignoff`)에만 남고 워크플로는 계속 진행될 수 있으므로, 엄격히 막으려면 해당 환경 변수를 켜세요.
+- **`verify_final_output`**(`lib/skills/verify_final_output/execute.ts`)는 LLM 판단 외에, `metadata.fileChanges`에 있는 App Router **`app/**/page.*`(및 `src/app/...`)** 경로에 대해 **결정적 sanity 검사**를 수행합니다(`lib/qa/app-route-page-sanity.ts`). 예: 기본보내기가 배열·객체 리터럴이거나 mock 전용 바인딩이면 `verified: false`로 **강제**합니다. 프롬프트에는 루트 한 단계 목록 외에 **깊이 제한 디렉터리 트리 샘플**과 **변경 파일 내용 스니펫**이 포함됩니다.
+- **`VERIFY_FAIL_OPEN`**: 기본 `true`(미설정과 동일). LLM JSON 검증 호출이 예외로 끝날 때 기존처럼 통과 처리하려면 그대로 두고, **`false`** / **`0`** / **`no`**이면 예외 시 **`verified: false`**로 둡니다(sanity 이슈가 이미 있으면 그때도 실패).
 - 이후 스크린샷·반응형 점검도 동일 URL을 사용합니다.
 
 ### Dev 종료 시 자동 QA (Test 칸반 진입 전)
 
 - `execute()`가 워크플로 스텝을 모두 마치면 **상태를 `testing`으로 바꾸기 전에** `runDevExitQaPipeline`이 실행됩니다: 선택적으로 `DEV_QA_RUN_NEXT_BUILD`가 켜져 있으면 먼저 대상 저장소에서 `next build`를 돌려 로그 일부를 `metadata.devQaNextBuild`에 남기고, 자동 수정 프롬프트에 포함합니다. 이후 대상 dev URL에 대해 `runQaPageSmokeCheck`를 반복합니다. 스모크 실패 시 **`maybeScaffoldMinimalUiKit`**으로 `components/ui` 갭 필(비 LLM)을 **먼저** 시도하고, 새 파일이 생기면 그 라운드에서는 LLM 자동 수정을 건너뛴 뒤 재스모크합니다. 그다음 필요 시 코딩 모델로 `write_code` 자동 수정을 시도합니다(기본 최대 5회, 환경 변수 `DEV_QA_MAX_REPAIR_ROUNDS`로 1–12 조정). 수정 요청에는 스모크 `errorExcerpt`·오버레이 발췌·(있으면) 빌드 로그 발췌·신호별 문서 힌트가 붙습니다. 스모크가 통과할 때까지(또는 상한 초과 시 실행 실패)입니다.
 - 이어서 `verify_final_output`, `screenshot_page`·`check_responsive`, `metadata.qaSignoff`까지 같은 흐름에서 기록합니다. 따라서 Test 칸반에 도착했을 때 검수 완료 탭에 데이터가 채워져 있는 것이 정상입니다.
+- **`DEV_QA_FAIL_ON_VERIFY=true`** 또는 **`BASALT_STRICT_VERIFY=true`**(또는 `1`/`yes`)이면, Dev 종료 단계에서 `verify_final_output`이 **`verified: false`**일 때 **즉시 오류를 throw**해 `execute`가 `failed`로 끝납니다. Ralph 이벤트 모드에서는 이 실패가 가드레일에 남아 다음 라운드 플랜에 반영될 수 있습니다. 기본은 꺼져 있어, 검증 실패는 메타·로그에만 남고 실행은 `testing`으로 이어질 수 있습니다.
 - 수동 **「Verify & Request PR」**(`verify()`)은 PR/Git 자동화용으로 그대로 두며, Dev 종료 파이프라인과 겹치면 메타·캡처를 다시 갱신할 수 있습니다.
 
 ## 5c) 검수 완료 탭 · QA 아티팩트
@@ -87,7 +90,7 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - **목적**: Huntley식 외부 루프로 `plan` → 영향 범위 자동 승인 → `execute` → `verify`를 최대 N회 반복하며, 대상 프로젝트 `.basalt/ralph/<taskId>/guardrails.md`에 실패 요약을 누적해 다음 라운드 플랜에 반영합니다.
 - **UI**: Request 칸반 카드에서 **Ralph 이벤트**, 태스크 상세(`pending`)에서 **Ralph 이벤트 시작**. 실행 중 전용 오버레이(`RalphModeDialog`)에서 `public/ralph.mp4`를 루프 재생(무음)하고 하단에 SSE 이벤트 요약 로그를 표시합니다. 영상 파일은 저장소 `public/ralph.mp4`에 두면 됩니다. 진행 중 **숨기기**는 오버레이만 접고 SSE는 유지하며, 칸반 우하단 **Ralph 이벤트 열기**로 다시 띄울 수 있습니다(서버 루프는 **중단**으로만 끊음). 완료/오류 후 **닫기**는 세션을 비웁니다.
 - **SSE**: `GET /api/agent/stream?taskId=&action=ralph` — 기존 `plan`/`execute`/`verify`와 동일 엔드포인트, `Orchestrator` 본문은 변경하지 않고 `lib/agents/ralph-runner.ts`만 루프를 돌립니다.
-- **환경 변수**: `BASALT_RALPH_MAX_ROUNDS`(기본 3, 최대 12), `BASALT_RALPH_TOKEN_BUDGET_MULT`(기본 1, Ralph가 올리는 토큰 상한에 곱함).
+- **환경 변수**: `BASALT_RALPH_MAX_ROUNDS`(기본 3, 최대 12), `BASALT_RALPH_TOKEN_BUDGET_MULT`(기본 1, Ralph가 올리는 토큰 상한에 곱함). 잘못된 `page.tsx` 등을 **실행 단계에서 끊고** 다음 라운드로 넘기려면 `DEV_QA_FAIL_ON_VERIFY` 또는 `BASALT_STRICT_VERIFY`를 켜는 것을 권장합니다(위 §5b).
 - **메타데이터**: `metadata.ralphSession`에 라운드·결과(`completed`/`max_rounds`/`error`)가 기록됩니다.
 - **토큰 예산**: 한 태스크에 `executionMetrics.totalTokens`가 누적되고, 라운드마다 `plan`이 반복되므로 일반 실행보다 빨리 `write_code` 직전 상한에 도달할 수 있습니다. 세션 시작 후 각 라운드의 `plan` 직후, 워크플로 스텝 수를 반영해 `metadata.budgetPolicy.maxTokensPerTask`를 **한 번에 실행 가능한 상한 × 최대 라운드(× `BASALT_RALPH_TOKEN_BUDGET_MULT`)** 이상으로 올립니다(사용자가 이미 더 큰 값을 두었으면 유지). 그래도 부족하면 태스크 메타에 `budgetPolicy.maxTokensPerTask`를 직접 키우거나 `discussionMode`를 `off`로 줄이는 것을 권장합니다.
 
