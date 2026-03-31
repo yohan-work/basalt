@@ -8,6 +8,7 @@ import path from 'path';
 import { AgentLoader, AgentDefinition } from '../agent-loader';
 import { ContextManager } from '../context-manager';
 import { StreamEmitter } from '../stream-emitter';
+import { checkoutOrCreateLocalBranch } from '@/lib/git/checkout-feature-branch';
 import { isDefaultPrismaGeneratedClientPresent, ProjectProfiler } from '../profiler';
 import { MODEL_CONFIG } from '../model-config';
 import { isAgentBrowserAvailable, resetAvailabilityCache } from '../browser/agent-browser';
@@ -22,6 +23,12 @@ import {
 } from '../qa/dev-qa-next-build';
 import { formatRepairDocHints } from '../qa/qa-repair-hints';
 import { buildQaSignoffReport } from '../qa/signoff-report';
+import {
+    runProjectTypecheck,
+    isProjectTypecheckWriteGateEnabled,
+    shouldRunProjectTypecheckForPath,
+    pickWrittenPathMatchingDiagnostics,
+} from '../qa/project-typecheck';
 import {
     BudgetEvent,
     DEFAULT_BUDGET_POLICY,
@@ -1351,6 +1358,8 @@ IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST
     private static readonly MAX_UI_IMPORT_REPAIR_ATTEMPTS = 2;
     private static readonly MAX_UNINSTALLED_NPM_LLM_REPAIRS = 2;
     private static readonly MAX_TYPESCRIPT_DIAGNOSTIC_REPAIRS = 5;
+    /** write_code 배치 후 `npm run typecheck` / `tsc --noEmit` 실패 시 LLM 수리 라운드 상한 */
+    private static readonly MAX_PROJECT_TYPECHECK_REPAIRS = 5;
     private static readonly MAX_PRISMA_IMPORT_REPAIR_ATTEMPTS = 3;
     /** When `write_code` rejects `page`/`layout` for metadata/viewport + `"use client"` (or hooks without split), rewrite into server + `*Client.tsx`. */
     private static readonly MAX_RSC_BOUNDARY_REPAIR_ATTEMPTS = 3;
@@ -1561,11 +1570,15 @@ File: ${relativePath}
         const tailNote = prof.hasTailwind
             ? 'Tailwind is installed; you may use className with utility classes where appropriate.'
             : 'Tailwind is NOT installed; do NOT use Tailwind classes—use semantic HTML, inline style, or existing CSS patterns from the repo.';
+        const projectWideHint =
+            validationMessage.includes('Full project typecheck') || validationMessage.includes('full-project')
+                ? '\n\nNote: The log may be from **full-project** `tsc`. Fix errors that reference this file first; if another file from the same change is implicated, adjust exports/imports in **this** file so the project passes.'
+                : '';
 
         const userPrompt = `
 Fix ONE file. TypeScript validation failed after write (tsc diagnostics):
 
-${validationMessage}
+${validationMessage}${projectWideHint}
 
 Hard rules:
 - **TS2305 — \`Input\` from \`@/components/ui/button\`**: That module does not export \`Input\`. Use \`import { Input } from '@/components/ui/input'\` only.
@@ -1626,6 +1639,127 @@ File: ${relativePath}
             resp.files.find((f) => want.endsWith(norm(f.path)) || norm(f.path).endsWith(want));
         const picked = hit || resp.files[0];
         return picked?.content?.trim() ? picked.content : null;
+    }
+
+    /**
+     * 단일 파일 검증을 통과한 write_code 배치 직후, 프로젝트 전체 typecheck로 교차 파일 오류를 잡는다.
+     * 실패 시 진단 로그로 `repairWriteCodeTypeScriptDiagnostics` 후 동일 파일을 다시 쓴다.
+     */
+    private async runProjectTypecheckAfterWriteBatch(options: {
+        projectPath: string;
+        writtenPaths: string[];
+        skillFunc: (relativePath: string, content: string, baseDir: string) => Promise<any>;
+        stepIndex: number;
+        action: string;
+        agentName: string;
+        techStack: string;
+        existingRepairs: any[];
+        existingChanges: any[];
+    }): Promise<void> {
+        const { projectPath, writtenPaths, skillFunc, stepIndex, action, agentName, techStack, existingRepairs, existingChanges } =
+            options;
+        if (!isProjectTypecheckWriteGateEnabled()) return;
+        const tsTargets = writtenPaths.filter((p) => shouldRunProjectTypecheckForPath(p));
+        if (tsTargets.length === 0) return;
+
+        let attempts = 0;
+        while (true) {
+            const tc = await runProjectTypecheck(projectPath);
+            if (tc.skipped || tc.ok) break;
+            if (attempts >= Orchestrator.MAX_PROJECT_TYPECHECK_REPAIRS) {
+                throw new Error(
+                    `Project typecheck still failing after ${Orchestrator.MAX_PROJECT_TYPECHECK_REPAIRS} repair round(s).\n` +
+                        `Command: ${tc.command || 'n/a'}\n\n${tc.output.slice(0, 4000)}`
+                );
+            }
+            attempts += 1;
+            const targetPath = pickWrittenPathMatchingDiagnostics(tc.output, tsTargets) || tsTargets[tsTargets.length - 1];
+            const fullPath = path.join(projectPath, targetPath);
+            let content: string;
+            try {
+                content = fs.readFileSync(fullPath, 'utf8');
+            } catch {
+                throw new Error(
+                    `Project typecheck failed (${tc.command}) but could not read ${targetPath} for repair. Output:\n${tc.output.slice(0, 2000)}`
+                );
+            }
+            const validationMessage =
+                `Full project typecheck failed after batch write (exit error).\n` +
+                `Command: ${tc.command || 'n/a'}\n\n` +
+                `${tc.output}\n\n` +
+                `Fix imports/types so the whole project passes. Prefer editing ${targetPath} when it appears in the diagnostics; ` +
+                `if another file from this batch is named, align exports/imports accordingly.`;
+
+            let repaired = await this.repairWriteCodeTypeScriptDiagnostics({
+                relativePath: targetPath,
+                content,
+                validationMessage,
+                projectPath,
+                techStack,
+                agentName,
+            });
+            if (!repaired) {
+                existingRepairs.push(
+                    this.buildExecutionRepairRecord(
+                        stepIndex,
+                        action,
+                        `project_typecheck_repair round ${attempts}: LLM returned no file`
+                    )
+                );
+                await this.updateMetadata({ executionRepairs: existingRepairs });
+                throw new Error(
+                    `Project typecheck failed and LLM repair returned no file.\nCommand: ${tc.command || 'n/a'}\n\n${tc.output.slice(0, 2500)}`
+                );
+            }
+
+            let toWrite = repaired;
+            let writeOk = false;
+            for (let wr = 0; wr < Orchestrator.MAX_TYPESCRIPT_DIAGNOSTIC_REPAIRS; wr++) {
+                const wrResult = await skillFunc(targetPath, toWrite, projectPath);
+                if (wrResult?.success) {
+                    writeOk = true;
+                    const idx = existingChanges.findIndex((c) => c.filePath === targetPath);
+                    if (idx >= 0) {
+                        existingChanges[idx] = {
+                            ...existingChanges[idx],
+                            after: wrResult.after ?? toWrite,
+                        };
+                    }
+                    this.contextManager.addFile(targetPath, wrResult.after ?? toWrite);
+                    skills.reset_runtime_caches();
+                    existingRepairs.push(
+                        this.buildExecutionRepairRecord(
+                            stepIndex,
+                            action,
+                            `project_typecheck_repair round ${attempts} for ${targetPath}`
+                        )
+                    );
+                    await this.updateMetadata({ executionRepairs: existingRepairs });
+                    await this.log(
+                        agentName,
+                        `Project typecheck repair round ${attempts} applied for ${targetPath}`,
+                        { type: 'WARNING' }
+                    );
+                    break;
+                }
+                const again = await this.repairWriteCodeTypeScriptDiagnostics({
+                    relativePath: targetPath,
+                    content: toWrite,
+                    validationMessage: wrResult?.message || 'write failed after project typecheck repair',
+                    projectPath,
+                    techStack,
+                    agentName,
+                });
+                if (!again) break;
+                toWrite = again;
+                skills.reset_runtime_caches();
+            }
+            if (!writeOk) {
+                throw new Error(
+                    `Project typecheck repair could not write a valid file for ${targetPath} after batch typecheck failure.`
+                );
+            }
+        }
     }
 
     /**
@@ -1963,22 +2097,16 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
             skills.reset_runtime_caches();
             this.emitter?.emit({ type: 'phase_start', phase: 'execution', taskId: this.taskId });
 
-            // Create a new branch for this task BEFORE making any changes
+            // Feature branch for this task (reuse local branch if it already exists)
             const branchName = `feature/task-${this.taskId.slice(0, 8)}`;
             try {
-                await this.log(mainAgentName, `Creating feature branch: ${branchName}`);
-                await skills.manage_git('checkout', `-b ${branchName}`, projectPath);
+                await this.log(mainAgentName, `Checking out feature branch: ${branchName}`);
+                await checkoutOrCreateLocalBranch(projectPath, branchName);
                 await this.updateMetadata({ branchName });
-                await this.log(mainAgentName, `Switched to branch: ${branchName}`);
-            } catch (branchError: any) {
-                // Branch might already exist, try to switch to it
-                await this.log(mainAgentName, `Branch creation failed, attempting to switch: ${branchError.message}`);
-                try {
-                    await skills.manage_git('checkout', branchName, projectPath);
-                    await this.updateMetadata({ branchName });
-                } catch (switchError: any) {
-                    await this.log(mainAgentName, `Warning: Could not switch to feature branch: ${switchError.message}`, { type: 'WARNING' });
-                }
+                await this.log(mainAgentName, `On branch: ${branchName}`);
+            } catch (branchError: unknown) {
+                const msg = branchError instanceof Error ? branchError.message : String(branchError);
+                await this.log(mainAgentName, `Warning: Could not create/switch feature branch: ${msg}`, { type: 'WARNING' });
             }
 
             // 대상 프로젝트: UI 키트 없음 또는 배럴·primitives 누락 시 React/Next에서 갭 필
@@ -2682,6 +2810,18 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                                             this.contextManager.addLog(stepAgentDef.name, `Wrote ${reportPath}`);
                                             await this.log(stepAgentDef.name, `Wrote file: ${reportPath}`, { type: 'RESULT' });
                                         }
+
+                                        await this.runProjectTypecheckAfterWriteBatch({
+                                            projectPath,
+                                            writtenPaths,
+                                            skillFunc,
+                                            stepIndex,
+                                            action,
+                                            agentName: stepAgentDef.name,
+                                            techStack,
+                                            existingRepairs,
+                                            existingChanges,
+                                        });
 
                                         await this.updateMetadata({ fileChanges: existingChanges });
                                         const resultSummary = `Wrote ${writtenPaths.length} file(s): ${writtenPaths.join(', ')}`;
