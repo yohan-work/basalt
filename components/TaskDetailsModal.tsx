@@ -1339,13 +1339,10 @@ export function TaskDetailsModal({
                                             <div className="space-y-1 min-w-0">
                                                 <h4 className="text-sm font-semibold flex items-center gap-2">
                                                     <Sparkles className="h-4 w-4 text-violet-600" />
-                                                    Ralph 이벤트 모드
+                                                    Ralph Mode
                                                 </h4>
                                                 <p className="text-[11px] text-muted-foreground leading-relaxed">
-                                                    플랜 → 자동 영향 승인 → 개발 → 검증을 최대 여러 라운드 반복합니다. 실행 시 전용 팝업에서{' '}
-                                                    <code className="text-[10px]">public/ralph.mp4</code> 영상이 재생됩니다. 대상 프로젝트에{' '}
-                                                    <code className="text-[10px]">.basalt/ralph/&lt;taskId&gt;/guardrails.md</code>에 학습 메모가
-                                                    쌓입니다. 토큰을 많이 씁니다.
+                                                    플랜 → 자동 영향 승인 → 개발 → 검증을 최대 여러 라운드 반복합니다.
                                                 </p>
                                                 <Button
                                                     type="button"
@@ -1356,7 +1353,7 @@ export function TaskDetailsModal({
                                                     disabled={!stream || stream.isActive}
                                                 >
                                                     <Sparkles className="h-3 w-3 mr-1" />
-                                                    Ralph 이벤트 시작
+                                                    Ralph Mode Start
                                                 </Button>
                                             </div>
                                         </div>

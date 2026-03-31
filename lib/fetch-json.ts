@@ -10,7 +10,7 @@ export function apiErrorText(data: ApiJsonObject, fallback: string): string {
  * Parse fetch Response bodies as JSON with clear errors when the server returns
  * HTML, images, or other non-JSON (avoids opaque "Unexpected token … is not valid JSON" / PNG crashes).
  */
-export async function parseResponseAsJson<T extends ApiJsonObject = ApiJsonObject>(res: Response): Promise<T> {
+export async function parseResponseAsJson<T = ApiJsonObject>(res: Response): Promise<T> {
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
     const text = await res.text();
 
@@ -60,7 +60,7 @@ export async function parseResponseAsJson<T extends ApiJsonObject = ApiJsonObjec
     }
 }
 
-export async function fetchJson<T extends ApiJsonObject = ApiJsonObject>(
+export async function fetchJson<T = ApiJsonObject>(
     input: RequestInfo | URL,
     init?: RequestInit
 ): Promise<T> {

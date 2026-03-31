@@ -387,7 +387,7 @@ export function KanbanBoard() {
                             className="w-full text-xs h-7 border-violet-400/80 text-violet-800 dark:text-violet-200 hover:bg-violet-500/10"
                             title="플랜→실행→검증을 자동 반복하는 이벤트 모드(토큰 많이 사용)"
                         >
-                            <Sparkles className="mr-2 h-3 w-3" /> Ralph 이벤트
+                            <Sparkles className="mr-2 h-3 w-3" /> Ralph Mode
                         </Button>
                     </div>
                 );
