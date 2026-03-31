@@ -368,13 +368,13 @@ MANDATORY CODING RULES (ZERO-ERROR FIRST PASS):
 `.trim();
 
 const FILE_FORMAT_INSTRUCTIONS = `
-### FORMAT RULE:
-For EACH file you create or modify, you MUST use the following PRECISE format.
-1. The path MUST be on a line starting with "File: " and MUST NOT contain a leading slash. Target the correct framework directory (e.g. File: src/app/route/page.tsx).
+### FORMAT RULE (CRITICAL):
+For EACH file you create or modify, you MUST use the following PRECISE format:
+1. The path MUST be on a line starting with "File: " and MUST be **OUTSIDE** the fenced code block. (e.g., File: app/page.tsx)
 2. The code block MUST follow immediately after the file path line.
-3. DO NOT use markdown headers(###) or bolding(**) for the "File:" line.
-4. If the path is missing router context or appears to target root unintentionally, you MUST regenerate a concrete route-aware non-root path.
-5. When task intent is ambiguous, choose a best-fit feature path and proceed; do not leave placeholders.
+3. **RELATIVE IMPORTS ONLY**: When importing local files from the same project, **ALWAYS** use relative paths (e.g., \`import { data } from "./lib/mock-data"\` or \`../../lib/utils\`). 
+4. **NO ALIAS IMPORTS**: **DO NOT** use \`@/\` aliases (e.g., \`@/lib/mock-data\`) unless the task explicitly confirms it is configured. Relative paths are 100% safer.
+5. PREPEND the Router Base Path (e.g., "app/", "src/app/") explicitly.
 
     Example:
     File: path/to/file.ext

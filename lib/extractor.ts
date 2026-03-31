@@ -16,8 +16,6 @@ export class FileExtractor {
         const files: Array<{ path: string; content: string }> = [];
 
         // Primary pattern: explicit "File:" or "Path:" prefix (with optional markdown decorators)
-        // Handles: File:, **File:**, ### File:, `File:`, Path:, etc.
-        // Allows 0 or 1 blank lines between the path line and the code block.
         const fileRegex = /(?:^|\n)[ \t]*(?:[#*`_~\s]*(?:File|Path)\s*:\s*[*_`]?\s*)([^\n\r`]+?)[ \t]*(?:\n[ \t]*){1,2}```[a-z0-9]*[ \t]*\n([\s\S]*?)\n[ \t]*```/gi;
 
         let match;
@@ -33,7 +31,20 @@ export class FileExtractor {
             }
         }
 
-        // Fallback: some LLMs omit "File:" and just write the path then a code block.
+        // Fallback 1: detect file path inside the first comment of the code block if headers are missing
+        // Handles: ```tsx\n// File: app/page.tsx\n...\n```
+        if (files.length === 0) {
+            const commentPathRegex = /```[a-z0-9]*[ \t]*\n[ \t]*(?:\/\/\s*File\s*:\s*|#\s*File\s*:\s*)([^\n\r`]+?)[ \t]*\n([\s\S]*?)\n[ \t]*```/gi;
+            while ((match = commentPathRegex.exec(text)) !== null) {
+                const rawPath = match[1].trim();
+                const cleanPath = this.normalizePath(rawPath);
+                if (cleanPath) {
+                    files.push({ path: cleanPath, content: match[2].trim() });
+                }
+            }
+        }
+
+        // Fallback 2: some LLMs omit "File:" and just write the path then a code block.
         // Pattern: a standalone path-like line followed immediately by ```
         if (files.length === 0) {
             const barePathRegex = /(?:^|\n)((?:[\w.-]+\/)+[\w.-]+\.[\w]{1,6})[ \t]*\n[ \t]*```[a-z0-9]*[ \t]*\n([\s\S]*?)\n[ \t]*```/gi;
