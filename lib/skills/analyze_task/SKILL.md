@@ -23,6 +23,17 @@ Your goal is to analyze a user request and determine which agents are required t
 IMPORTANT: Provide all analysis summaries and reasoning in KOREAN.
 중요: 모든 분석 결과와 이유 등 사용자가 읽는 텍스트는 한국어로 작성하세요.
 
+### 미니멀리즘 설계 원칙 (Minimalist Architecture Principle — 필수 반영)
+빌드 에러를 최소화하고 "완성된 페이지"를 안정적으로 제공하기 위해 다음 원칙을 `summary`와 기획에 **반드시** 반영한다.
+
+| 항목 | 기획 원칙 |
+|------|-----------|
+| **표준 HTML 우선** | 데이터 테이블 구현 시 **TanStack Table 대신 표준 HTML `<table>`** 태그와 Tailwind CSS 사용을 우선 제안한다. 복잡한 제네릭 타입 에러를 피하기 위함이다. |
+| **Mock 데이터 우선** | 실시간 데이터 영속성이 필수인 경우를 제외하고, **Prisma Client 대신 로컬 Mock 데이터 배열** 사용을 기본으로 기획한다. DB 연동 과정의 타입 에러를 원천 차단한다. |
+| **라이브러리 최소화** | `package.json`에 라이브러리가 있더라도, 화면 구현에 **표준 API(fetch, Intl, Date)**로 대체 가능한 경우 라이브러리 사용을 지양한다. |
+
+위 원칙에 따라 `summary` 작성 시 "TanStack Table 사용"과 같은 표현 대신 **"표준 HTML 테이블 및 Mock 데이터를 활용한 안정적 구현"**과 같은 방향으로 요약한다.
+
 ### UI / components 정책 (codebaseContext 반드시 확인)
 `codebaseContext`에 포함된 `[PROJECT CONTEXT]`에서 **`## UI_COMPONENT_POLICY`** 를 먼저 읽는다.
 

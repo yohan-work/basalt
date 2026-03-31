@@ -1408,11 +1408,47 @@ export async function read_codebase(filePath: string, projectPath: string = proc
     }
 }
 
+/**
+ * Next.js 15/16: `params` and `searchParams` are Promises. Synchronous access (e.g. `params.slug`) causes TS2322/TS2339.
+ */
+function validateNextJs16AsyncParams(relativePath: string, content: string): { valid: true } | { valid: false; message: string } {
+    const norm = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
+    if (!isAppRouterPageOrLayoutFile(norm)) return { valid: true };
+
+    // Common patterns: function Page({ params }) { const id = params.id; }
+    // We look for property access on params/searchParams without a preceding await or destructuring from an awaited promise.
+    const syncParamsAccess = /\b(params|searchParams)\.[a-zA-Z_$][\w$]*/.test(content);
+    const syncDestructure = /const\s+\{[^}]+\}\s*=\s*(params|searchParams)\b/.test(content);
+    
+    // Check if it's already awaited (e.g., const { id } = await params)
+    const hasAwait = /\bawait\s+(params|searchParams)\b/.test(content);
+
+    if ((syncParamsAccess || syncDestructure) && !hasAwait) {
+        return {
+            valid: false,
+            message:
+                `Next.js 15/16: **params** and **searchParams** are Promises in page/layout files. You MUST \`await\` them before accessing properties. 
+Example: \`const { id } = await params;\` or \`const sp = await searchParams;\`. 
+Synchronous access like \`params.id\` or \`const { id } = params;\` is not allowed.`,
+        };
+    }
+    return { valid: true };
+}
+
 export async function write_code(filePath: string, content: string, baseDir: string = process.cwd()) {
     try {
         const relativePath = resolvePathRelativeToProject(filePath, baseDir);
         const fullPath = path.resolve(baseDir, relativePath);
         const dir = path.dirname(fullPath);
+
+        const nextParamsValidation = validateNextJs16AsyncParams(relativePath, content);
+        if (!nextParamsValidation.valid) {
+            return {
+                success: false,
+                message: nextParamsValidation.message,
+                filePath,
+            };
+        }
 
         const boundaryRaw = validateAppRouterServerExportClientBoundary(relativePath, content);
         if (!boundaryRaw.valid) {

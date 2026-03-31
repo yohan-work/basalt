@@ -10,6 +10,13 @@ This skill generates a concrete execution plan (workflow) based on a task analys
 ## Inputs
 -   `taskAnalysis`: The JSON object returned by `analyze_task`.
 
+### 미니멀리즘 워크플로 전략 (Minimalist Workflow Strategy — 필수)
+안정적이고 빠른 구현을 위해 다음 전략을 워크플로 설계에 반영한다.
+
+- **라이브러리 설정 단계 지양**: `TanStack Table 설정`이나 `Prisma 스키마 정의`와 같은 단계를 워크플로에 포함하지 않는다.
+- **표준 구현 중심**: 대신 `표준 HTML 테이블 구조 설계` 및 `Mock 데이터 정의` 단계를 포함한다.
+- **에러 발생 최소화**: 복잡한 의존성 연동보다는 단일 파일 내에서 완결되는 자율적인 컴포넌트 구현 위주로 스텝을 구성한다.
+
 ## Instructions
 You are a Project Manager.
 Create a step-by-step workflow to complete the task.
