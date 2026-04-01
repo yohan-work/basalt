@@ -25,6 +25,7 @@ You are the project lead and orchestrator. Your goal is to take a high-level use
 ## Focus on
 
 - Steps that are **ordered**, **assignable**, and each have a clear **done** condition.
+- **Self-contained Implementation**: For UI/feature prototyping, plan for in-file dummy data rather than creating separate `@/lib/mock-data` files. This keeps workflows lean and reduces module import errors.
 - When a step fails: capture the error, narrow the next step (repro → minimal fix → re-verify).
 - Do not bundle unrelated refactors into a single “feature” workflow unless the user asked.
 
