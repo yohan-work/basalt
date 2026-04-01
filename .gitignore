@@ -45,3 +45,4 @@ next-env.d.ts
 .cursor/plans
 docs/criteria.md
 docs/templates/new-agent-AGENT.md
+gguf_models

@@ -59,10 +59,19 @@
   4. `외부 패키지 검증`: npm 패키지 import가 `package.json`의 `dependencies`/`devDependencies`에 실제 존재하는지 검증. 미설치 패키지(`axios`, `lodash` 등) import 시 파일 쓰기를 거부하여 `Module not found` 빌드 에러를 사전 차단. Node.js 빌트인 모듈은 허용 리스트로 제외.
   5. `실패 기록/복구`: 실행 중 `write_code` 실패는 즉시 메타데이터 `executionRepairs`에 기록하고, 경로 정규화/검증 실패를 다음 스텝에서 보정 대상화.
 
+### 스킬 레지스트리 (`lib/skills/registry.ts`)
+
+- **목적**: 스킬별 메타데이터(위험 표면, 인자 LLM 티어, 실행 시 Orchestrator 특수 처리)를 한곳에 둡니다.
+- **주요 API**: `getSkillRegistryEntry`, `listSkillRegistryEntries`, `FAST_ARG_SKILL_NAMES`, `shouldAppendProjectPathLast`, `shouldInjectEmitterForExecution`, `hasElevatedRisk`, `resolveSkillRiskGateMode` (`lib/skills/index.ts`에서 re-export).
+- **실행**: 워크플로의 일반 스킬은 `Orchestrator.invokeSkillExecution`이 레지스트리를 읽어 경로/emitter/risk 게이트를 적용합니다. `write_code`는 별도 분기입니다.
+- **동적 스킬**: `SKILL.md`만 있고 레지스트리에 없는 이름은 기존처럼 `execute_skill` 폴백; 미등록 시 경로 마지막 인자·emitter 주입은 적용되지 않습니다(기본 false).
+- 설계·Phase 정리: [`.cursor/plans/tool-registry-design.md`](../.cursor/plans/tool-registry-design.md).
+
 ### 적용 파일(반영 위치)
 - `lib/stack-profile.ts` / `lib/profiler.ts`: 이중 `app`/`src/app` 등 라우트 루트 해석·`[PROJECT CONTEXT]` 경고
-- `lib/llm.ts`: 경로 규칙·UI 컴포넌트 규칙·프롬프트 하드닝
-- `lib/agents/Orchestrator.ts`: write_code 사전 경로 정규화(Router Base 정렬·`index`→`page` 보정)·실패 전파·QA URL 메타
+- `lib/prompts/`, `lib/llm.ts`: 코드 생성·포맷·수술 편집·(옵션) 다단계 Plan용 프롬프트 모듈 및 LLM 조립
+- `lib/agents/Orchestrator.ts`: `invokeSkillExecution`, `write_code`·다단계 코드 생성, 경로 정규화·실패 전파·QA URL 메타
+- `lib/skills/registry.ts`: 스킬 메타·risk·FAST 인자 목록
 - `lib/skills/index.ts`: import 존재성 AST 검증·RSC/metadata 경계·`scan_project`
 - `lib/project-dev-server.ts` / `lib/qa/infer-route-from-files.ts`: QA URL 추론·`qaRouteInferenceWarning`
 - `lib/tsconfig-paths.ts`: 설정 파일 간 `compilerOptions.paths` 병합(스킬 별칭 해석·`project-ui-kit` 스캐폴드 경로와 공유)
@@ -74,7 +83,7 @@
 - 품질/검증: `lint_code`, `typecheck`, `verify_final_output`
 - 협업/의사결정: `consult_agents`, `analyze_error_logs`
 - 운영/도구: `run_shell_command`, `manage_git`, `scan_project`, `find_similar_components`, `check_responsive`
-- 스타일(대상 워크스페이스): `apply_design_system`, `generate_scss` — `lib/skills/index.ts`에 구현되어 있으며, 오케스트레이터가 `read_codebase`와 같이 **마지막 인자로 `projectPath`**를 붙인다. Basalt 앱 테마가 아니라 **태스크에 연결된 저장소**의 토큰·스택에 맞춘다. `ProjectProfiler`의 **DESIGN HINTS**·역할 문서는 `lib/agents/style-architect/AGENT.md` 및 각 `SKILL.md`. 누적 요약은 [`implementation-history.md`](./implementation-history.md).
+- 스타일(대상 워크스페이스): `apply_design_system`, `generate_scss` — `lib/skills/index.ts`에 구현되어 있으며, 레지스트리에서 **`appendProjectPathLast: true`**인 스킬과 같이 오케스트레이터가 **마지막 인자로 `projectPath`**를 붙인다(`read_codebase`, `run_shell_command`, `manage_git`, `list_directory` 등). Basalt 앱 테마가 아니라 **태스크에 연결된 저장소**의 토큰·스택에 맞춘다. `ProjectProfiler`의 **DESIGN HINTS**·역할 문서는 `lib/agents/style-architect/AGENT.md` 및 각 `SKILL.md`. 누적 요약은 [`implementation-history.md`](./implementation-history.md).
 
 ## 점진적 로딩
 

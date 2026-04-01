@@ -4,6 +4,12 @@
 
 Basalt의 LLM 호출은 `lib/llm.ts`에서 공통 처리됩니다.
 
+## 프롬프트 모듈 (`lib/prompts/`)
+
+- 코드 생성·파일 포맷·수술 편집 등 **긴 시스템 규칙 문자열**은 `lib/prompts/`에 모듈로 두고 `lib/prompts/index.ts`에서 re-export 합니다(예: `code-generation-rules`, `file-format`, `surgical-edit-rules`, 다단계용 `codegen-plan`).
+- `lib/llm.ts`는 위 모듈을 import해 `generateCode` / `generateCodeStream` / `generateSurgicalFileEdit` 등에서 **조립·호출**만 담당합니다. 규칙 문구를 고칠 때는 `lib/llm.ts`가 아니라 해당 `lib/prompts/*.ts`를 편집하는 것이 맞습니다.
+- **다단계 코드 생성(옵션)**: `write_code` 경로에서 켜면 `generateJSON` + `CODEGEN_PLAN_SYSTEM_PROMPT` / `CODEGEN_PLAN_SCHEMA_DESCRIPTION`로 짧은 구현 계획(JSON)을 만든 뒤, 스트리밍 코드 생성 프롬프트에 붙입니다. UI·환경 변수·SSE는 [`features.md`](./features.md) §5e 참고.
+
 ## 모델 구성
 
 `lib/model-config.ts` 기준 기본값은 다음과 같습니다.
@@ -20,7 +26,7 @@ Basalt의 LLM 호출은 `lib/llm.ts`에서 공통 처리됩니다.
   - JSON 생성: 90초
 - JSON 파싱 방어
   - 모델 출력이 단편적으로 떨어져도 크래시가 나지 않도록 안전 파싱
-- CODE_GENERATION_SYSTEM_RULES 하드닝 체크
+- `CODE_GENERATION_SYSTEM_RULES`(소스: `lib/prompts/code-generation-rules.ts`) 하드닝 체크
   - 비루트 라우트 선호, 루트 오버라이트 금지, 경로 미지정/슬래시 접두어 보정 등 규칙을 강제.
   - `Available UI Components` 기준으로 컴포넌트 임포트 허용 범위를 제한하고, 미존재 시 대체 구현으로 전환.
   - App/Pages 라우터 타입에 맞는 경로 컨텍스트를 포함해 LLM의 컨벤션 오해를 줄임.
