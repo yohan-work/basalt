@@ -43,6 +43,7 @@ export type RalphExecutionOptions = {
     maxDiscussionThoughts?: number;
     carryDiscussionToPrompt?: boolean;
     strategyPreset?: 'quality_first' | 'balanced' | 'speed_first' | 'cost_saver';
+    multiPhaseCodegen?: boolean;
 };
 
 export type RalphSessionState = {

@@ -30,6 +30,12 @@ import {
     pickWrittenPathMatchingDiagnostics,
 } from '../qa/project-typecheck';
 import {
+    appendCodegenAttachments,
+    resolveMaxImplementPasses,
+    resolveMultiPhaseCodegenEnabled,
+} from '@/lib/codegen/multi-phase-write-code';
+import { CODEGEN_PLAN_SCHEMA_DESCRIPTION, CODEGEN_PLAN_SYSTEM_PROMPT } from '@/lib/prompts/codegen-plan';
+import {
     BudgetEvent,
     DEFAULT_BUDGET_POLICY,
     ExecutionBudgetPolicy,
@@ -81,6 +87,8 @@ interface ExecutionOptions {
     maxDiscussionThoughts?: number;
     carryDiscussionToPrompt?: boolean;
     strategyPreset?: StrategyPreset;
+    /** Plan(JSON) → stream codegen → optional second pass after project typecheck */
+    multiPhaseCodegen?: boolean;
 }
 
 type CollaborationGraph = Record<string, Record<string, {
@@ -101,6 +109,7 @@ export class Orchestrator {
         maxDiscussionThoughts: 3,
         carryDiscussionToPrompt: true,
         strategyPreset: 'balanced',
+        multiPhaseCodegen: false,
     };
     private budgetPolicy: ExecutionBudgetPolicy = { ...DEFAULT_BUDGET_POLICY };
     private executionMetrics: ExecutionMetrics = {
@@ -514,6 +523,10 @@ export class Orchestrator {
         const validModes: DiscussionMode[] = ['off', 'step_handoff', 'roundtable'];
         const discussionMode = validModes.includes(merged.discussionMode) ? merged.discussionMode : 'step_handoff';
         const maxDiscussionThoughts = Math.max(1, Math.min(8, Number(merged.maxDiscussionThoughts) || 3));
+        const multiPhaseCodegen = resolveMultiPhaseCodegenEnabled(
+            typeof saved.multiPhaseCodegen === 'boolean' ? saved.multiPhaseCodegen : undefined,
+            runtimeOptions?.multiPhaseCodegen
+        );
 
         return {
             discussionMode,
@@ -522,6 +535,7 @@ export class Orchestrator {
             strategyPreset: ['quality_first', 'balanced', 'speed_first', 'cost_saver'].includes(merged.strategyPreset)
                 ? merged.strategyPreset
                 : 'balanced',
+            multiPhaseCodegen,
         };
     }
 
@@ -2356,49 +2370,153 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                                         codePrompt += `\n\n[BASALT HARD CONSTRAINT] This target project lists @prisma/client in package.json but Prisma Client is not generated (no default node_modules/.prisma/client). Do NOT import from @prisma/client or use PrismaClient in any file you output. Use typed mock/sample data in the page (or a small lib/mock-*.ts) so lists, boards, and tables render without database access.`;
                                     }
 
-                                    await this.log(stepAgentDef.name, `Generating code with CODING model for: ${step.description || task.description}`, { type: 'ACTION' });
-                                    this.emitter?.emit({ type: 'skill_execute', skill: action, args: step.description });
-
-                                    let codeResult;
-                                    let contextSize = 3000;
-                                    let attempt = 0;
-                                    const maxAttempts = 3;
-
-                                    while (attempt < maxAttempts) {
-                                        const contextData = this.contextManager.getOptimizedContext(contextSize);
-                                        let augmentedContext = contextData;
-                                        if (this.profiler) {
-                                            const profilerData = await this.profiler.getContextString();
-                                            augmentedContext = `${profilerData}\n\n${contextData}`;
+                                    const multiPhaseCodegen = this.executionOptions.multiPhaseCodegen;
+                                    let planBlock: string | null = null;
+                                    if (multiPhaseCodegen) {
+                                        if (!this.checkBudget('tokens')) {
+                                            const used = this.executionMetrics.totalTokens;
+                                            const cap = this.budgetPolicy.maxTokensPerTask;
+                                            throw new Error(
+                                                `Token budget exceeded before codegen plan phase (${used}/${cap}).`
+                                            );
                                         }
-
-                                        codeResult = await llm.generateCodeStream(
-                                            codePrompt,
-                                            augmentedContext,
-                                            this.emitter,
-                                            MODEL_CONFIG.CODING_MODEL,
-                                            techStack,
-                                            () => this.refreshLock(),
-                                            this.llmTelemetry({ action, agent: stepAgentDef.name })
-                                        );
-
-                                        if (codeResult?.tokens) {
-                                            await this.accumulateTokens(codeResult.tokens.prompt_eval_count, codeResult.tokens.eval_count);
-                                        }
-
-                                        if (!codeResult.error) break;
-
-                                        if (codeResult.content.includes('timed out') || codeResult.content.includes('AbortError') || codeResult.content.includes('too large')) {
-                                            attempt++;
-                                            if (attempt < maxAttempts) {
-                                                contextSize = Math.floor(contextSize / 1.5);
-                                                continue;
+                                        this.emitter?.emit({
+                                            type: 'codegen_subphase',
+                                            phase: 'plan',
+                                            status: 'start',
+                                        });
+                                        try {
+                                            const planResult = await llm.generateJSON(
+                                                CODEGEN_PLAN_SYSTEM_PROMPT,
+                                                `${codePrompt}\n\nTarget tech stack for the files to generate: ${techStack}.`,
+                                                CODEGEN_PLAN_SCHEMA_DESCRIPTION,
+                                                MODEL_CONFIG.SMART_MODEL,
+                                                this.llmTelemetry({ action: 'codegen_plan', agent: stepAgentDef.name })
+                                            );
+                                            const planTok = (
+                                                planResult as {
+                                                    __tokens?: { prompt_eval_count: number; eval_count: number };
+                                                }
+                                            ).__tokens;
+                                            if (planTok) {
+                                                await this.accumulateTokens(
+                                                    planTok.prompt_eval_count,
+                                                    planTok.eval_count
+                                                );
                                             }
+                                            planBlock = JSON.stringify(planResult, null, 2);
+                                            await this.log(
+                                                stepAgentDef.name,
+                                                `Codegen plan (multi-phase): ${planBlock.slice(0, 500)}${planBlock.length > 500 ? '…' : ''}`,
+                                                { type: 'THOUGHT' }
+                                            );
+                                        } catch (planErr: unknown) {
+                                            const pm = planErr instanceof Error ? planErr.message : String(planErr);
+                                            await this.log(
+                                                stepAgentDef.name,
+                                                `Codegen plan phase failed; continuing without structured plan: ${pm}`,
+                                                { type: 'WARNING' }
+                                            );
+                                            planBlock = null;
                                         }
-                                        break;
+                                        this.emitter?.emit({
+                                            type: 'codegen_subphase',
+                                            phase: 'plan',
+                                            status: 'end',
+                                        });
                                     }
 
-                                    if (codeResult && !codeResult.error && codeResult.files.length > 0) {
+                                    const maxImplementPasses = resolveMaxImplementPasses(multiPhaseCodegen);
+                                    let typecheckFeedback: string | null = null;
+                                    let prevWrittenPaths: string[] = [];
+                                    let codegenPassSummary: string | null = null;
+
+                                    for (let implementPass = 0; implementPass < maxImplementPasses; implementPass++) {
+                                        const implementPrompt = appendCodegenAttachments(codePrompt, {
+                                            planJson: planBlock,
+                                            typecheckFeedback,
+                                            affectedPaths: prevWrittenPaths,
+                                        });
+
+                                        if (implementPass === 0) {
+                                            await this.log(
+                                                stepAgentDef.name,
+                                                `Generating code with CODING model for: ${step.description || task.description}`,
+                                                { type: 'ACTION' }
+                                            );
+                                            this.emitter?.emit({
+                                                type: 'skill_execute',
+                                                skill: action,
+                                                args: step.description,
+                                            });
+                                        } else {
+                                            if (!this.checkBudget('tokens')) {
+                                                const used = this.executionMetrics.totalTokens;
+                                                const cap = this.budgetPolicy.maxTokensPerTask;
+                                                throw new Error(
+                                                    `Token budget exceeded before multi-phase codegen retry (${used}/${cap}).`
+                                                );
+                                            }
+                                            await this.log(
+                                                stepAgentDef.name,
+                                                `Multi-phase codegen: retrying implementation after project typecheck (${implementPass + 1}/${maxImplementPasses}).`,
+                                                { type: 'WARNING' }
+                                            );
+                                            this.emitter?.emit({
+                                                type: 'codegen_subphase',
+                                                phase: 'implement',
+                                                status: 'start',
+                                                detail: 'typecheck_retry',
+                                            });
+                                        }
+
+                                        let codeResult;
+                                        let contextSize = 3000;
+                                        let attempt = 0;
+                                        const maxAttempts = 3;
+
+                                        while (attempt < maxAttempts) {
+                                            const contextData = this.contextManager.getOptimizedContext(contextSize);
+                                            let augmentedContext = contextData;
+                                            if (this.profiler) {
+                                                const profilerData = await this.profiler.getContextString();
+                                                augmentedContext = `${profilerData}\n\n${contextData}`;
+                                            }
+
+                                            codeResult = await llm.generateCodeStream(
+                                                implementPrompt,
+                                                augmentedContext,
+                                                this.emitter,
+                                                MODEL_CONFIG.CODING_MODEL,
+                                                techStack,
+                                                () => this.refreshLock(),
+                                                this.llmTelemetry({ action, agent: stepAgentDef.name })
+                                            );
+
+                                            if (codeResult?.tokens) {
+                                                await this.accumulateTokens(
+                                                    codeResult.tokens.prompt_eval_count,
+                                                    codeResult.tokens.eval_count
+                                                );
+                                            }
+
+                                            if (!codeResult.error) break;
+
+                                            if (
+                                                codeResult.content.includes('timed out') ||
+                                                codeResult.content.includes('AbortError') ||
+                                                codeResult.content.includes('too large')
+                                            ) {
+                                                attempt++;
+                                                if (attempt < maxAttempts) {
+                                                    contextSize = Math.floor(contextSize / 1.5);
+                                                    continue;
+                                                }
+                                            }
+                                            break;
+                                        }
+
+                                        if (codeResult && !codeResult.error && codeResult.files.length > 0) {
                                         const { data: metaForChanges } = await supabase.from('Tasks').select('metadata').eq('id', this.taskId).single();
                                         const existingChanges = metaForChanges?.metadata?.fileChanges || [];
                                         const existingRepairs = metaForChanges?.metadata?.executionRepairs || [];
@@ -2855,14 +2973,51 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                                         });
 
                                         await this.updateMetadata({ fileChanges: existingChanges });
-                                        const resultSummary = `Wrote ${writtenPaths.length} file(s): ${writtenPaths.join(', ')}`;
-                                        this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
+                                        codegenPassSummary = `Wrote ${writtenPaths.length} file(s): ${writtenPaths.join(', ')}`;
+
+                                        if (
+                                            multiPhaseCodegen &&
+                                            implementPass < maxImplementPasses - 1 &&
+                                            isProjectTypecheckWriteGateEnabled()
+                                        ) {
+                                            const tsTargets = writtenPaths.filter((p) =>
+                                                shouldRunProjectTypecheckForPath(p)
+                                            );
+                                            if (tsTargets.length > 0) {
+                                                this.emitter?.emit({
+                                                    type: 'codegen_subphase',
+                                                    phase: 'verify',
+                                                    status: 'start',
+                                                });
+                                                const tc = await runProjectTypecheck(projectPath);
+                                                this.emitter?.emit({
+                                                    type: 'codegen_subphase',
+                                                    phase: 'verify',
+                                                    status: 'end',
+                                                });
+                                                if (!tc.skipped && !tc.ok) {
+                                                    typecheckFeedback = tc.output.slice(0, 12000);
+                                                    prevWrittenPaths = writtenPaths;
+                                                    continue;
+                                                }
+                                            }
+                                        }
+                                        break;
                                     } else {
                                         const errMsg = codeResult?.error ? codeResult.content : 'No files generated by CODING model';
                                         if (codeResult?.content) {
                                             console.warn('[Orchestrator] Code generation failed to extract files. Raw content starts with:', codeResult.content.slice(0, 200));
                                         }
                                         throw new Error(`Code generation failed: ${errMsg}`);
+                                    }
+                                    }
+
+                                    if (codegenPassSummary) {
+                                        this.emitter?.emit({
+                                            type: 'skill_result',
+                                            skill: action,
+                                            summary: codegenPassSummary,
+                                        });
                                     }
                                 } else {
                                     let args = await this.generateSkillArguments(

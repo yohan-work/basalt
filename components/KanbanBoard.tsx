@@ -207,6 +207,7 @@ export function KanbanBoard() {
         const maxDiscussionThoughts = raw?.maxDiscussionThoughts;
         const carryDiscussionToPrompt = raw?.carryDiscussionToPrompt;
         const strategyPreset = raw?.strategyPreset;
+        const multiPhaseCodegen = raw?.multiPhaseCodegen;
 
         return {
             discussionMode:
@@ -226,6 +227,7 @@ export function KanbanBoard() {
                 || strategyPreset === 'cost_saver'
                     ? strategyPreset
                     : 'balanced',
+            multiPhaseCodegen: typeof multiPhaseCodegen === 'boolean' ? multiPhaseCodegen : false,
         };
     };
 
