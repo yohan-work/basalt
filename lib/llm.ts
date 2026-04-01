@@ -281,13 +281,13 @@ MANDATORY CODING RULES (ZERO-ERROR FIRST PASS):
   - **Password visibility toggle**: If you use \`type={showPassword ? "text" : "password"}\` or similar, you MUST output the full set in that file: \`const [showPassword, setShowPassword] = useState(false)\` (or equivalent), plus any \`onClick\`/\`onPointerDown\` that calls \`setShowPassword\`. Do not output the JSX condition without the state.
   - **Controlled inputs**: If an \`<input>\` (or textarea/select) uses \`value={…}\`, you MUST provide a matching \`onChange\` (or \`onInput\`) that updates that state. If the field is intentionally uncontrolled, use \`defaultValue\` and do not pair it with a controlled \`value\` — mixing causes broken or read-only fields.
 - **Lists & handlers (short)**: \`.map(...)\` over arrays MUST include a stable \`key\` (e.g. id, not only index when items reorder). Event props (\`onClick={handleSubmit}\`) MUST reference a function that exists in scope (define the handler or use an inline function you actually wrote).
-- MANDATORY FILE PATH RULE: Use relative paths from the project root ONLY. NO leading slashes (e.g. use "app/some-feature/page.tsx", NOT "/app/some-feature/page.tsx"). YOU MUST prepend the Router Base Path (e.g., "src/app/", "app/", "src/pages/", "pages/") explicitly mentioned in the [PROJECT CONTEXT].
-- CRITICAL FILE PATH MAPPING RULE:
-  - For NEW feature pages, choose non-root routes by default (e.g., "app/chat/page.tsx").
-  - DO NOT override the root page ("app/page.tsx", "src/app/page.tsx", "pages/index.tsx", "src/pages/index.tsx") unless the task request explicitly names root/Home/Root.
-  - If the user asks a specific route (e.g., "/chat"), place the file in the exact mapped route path.
-  - **App Router route files**: Each URL segment **must** use \`page.tsx\` (or \`page.js\` / \`page.jsx\`). Do **not** use \`app/.../index.tsx\` as the route entry — that is Pages Router convention; App Router ignores \`index.tsx\` for routing, which causes **404** and breaks QA URL inference.
-  - Use the **[PROJECT CONTEXT] Router Base** value exactly (e.g. only \`src/app/...\` when Router Base is \`src/app\`, not mixed with root \`app/\`).
+- 🚨 **FILENAME & PATH RULES (STRICT)** 🚨:
+  - **ENGLISH ONLY**: Filenames and paths MUST use **lowercase English letters, numbers, and hyphens** only (e.g., \`board-list.tsx\`).
+  - **NO KOREAN**: Never use Korean characters in filenames (FORBIDDEN: \`게시판.tsx\`).
+  - **ROUTER CONSISTENCY**: Always use the \`Router Base\` (e.g., \`app/\`) listed in [PROJECT CONTEXT]. Never invent a \`pages/\` directory if the project uses App Router.
+- 🚨 **MANDATORY FILE PATH RULE** 🚨:
+  - Use relative paths from the project root ONLY. NO leading slashes.
+  - **App Router route files**: Each URL segment **must** use \`page.tsx\`. NEVER use \`index.tsx\` for App Router.
 - PATH FORMATTING RULE:
   - If a path is missing a filename or extension, infer a best-fit file path and regenerate.
   - If a path starts with "/", remove it before writing.
@@ -670,11 +670,64 @@ export async function generateJSON(
 export function cleanJSON(text: string): string {
     if (!text) return '{}';
     let cleaned = text.trim();
+
+    // 1. Strip markdown code blocks
     if (cleaned.startsWith('```')) {
         cleaned = cleaned.replace(/^```(json)?\s*/i, '').replace(/\s*```$/i, '');
     }
 
-    // Find first and last markers for either Object or Array
+    // 2. Basic comment removal (handles // and /* */)
+    cleaned = cleaned.replace(/\/\*[\s\S]*?\*\/|([^:]|^)\/\/.*$/gm, '$1');
+
+    // 3. SMART JSON RECOVERY & STRING NORMALIZATION
+    let openBraces = 0;
+    let openBrackets = 0;
+    let inString = false;
+    let escaped = false;
+    let result = '';
+    
+    for (let i = 0; i < cleaned.length; i++) {
+        const char = cleaned[i];
+        
+        if (char === '\\' && !escaped) {
+            escaped = true;
+            result += char;
+            continue;
+        }
+
+        if (char === '"' && !escaped) {
+            inString = !inString;
+        }
+
+        if (inString) {
+            if (char === '\n') {
+                result += '\\n'; // Escape literal newlines
+            } else if (char === '\r') {
+                // skip
+            } else {
+                result += char;
+            }
+        } else {
+            if (char === '{') openBraces++;
+            if (char === '}') openBraces--;
+            if (char === '[') openBrackets++;
+            if (char === ']') openBrackets--;
+            result += char;
+        }
+        escaped = false;
+    }
+    
+    cleaned = result;
+
+    // Close open parts in reverse order
+    if (inString) cleaned += '"';
+    while (openBrackets > 0) { cleaned += ']'; openBrackets--; }
+    while (openBraces > 0) { cleaned += '}'; openBraces--; }
+
+    // 4. Remove trailing commas before closing braces/brackets
+    cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+
+    // 5. Find first and last markers for either Object or Array
     const firstBrace = cleaned.indexOf('{');
     const firstBracket = cleaned.indexOf('[');
     const lastBrace = cleaned.lastIndexOf('}');
