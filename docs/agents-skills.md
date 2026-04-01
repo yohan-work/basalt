@@ -62,7 +62,8 @@
 ### 스킬 레지스트리 (`lib/skills/registry.ts`)
 
 - **목적**: 스킬별 메타데이터(위험 표면, 인자 LLM 티어, 실행 시 Orchestrator 특수 처리)를 한곳에 둡니다.
-- **주요 API**: `getSkillRegistryEntry`, `listSkillRegistryEntries`, `FAST_ARG_SKILL_NAMES`, `shouldAppendProjectPathLast`, `shouldInjectEmitterForExecution`, `hasElevatedRisk`, `resolveSkillRiskGateMode` (`lib/skills/index.ts`에서 re-export).
+- **주요 API**: `getSkillRegistryEntry`, `listSkillRegistryEntries`, `FAST_ARG_SKILL_NAMES`, `shouldAppendProjectPathLast`, `shouldInjectEmitterForExecution`, `hasElevatedRisk`, `resolveSkillRiskGateMode`, `normalizeSkillRegistryName` (`lib/skills/index.ts`에서 re-export).
+- **Phase C 인자 검증**: `validateSkillArgsBeforeExecution`(`lib/skills/arg-schemas.ts`, `index`에서 re-export)가 일반 스킬에서 `generateSkillArguments` 직후 LLM이 낸 **원시 인자 배열**을 Zod로 검사합니다. `projectPath` 마지막 인자·emitter 주입은 그 **이후**이므로 스키마는 그 전 단계 기준입니다. 1차로 `read_codebase`, `list_directory`, `run_shell_command`, `manage_git`만 스키마가 있고, 나머지·미등록 스킬은 검증을 건너뜁니다. `write_code`는 이 경로를 타지 않습니다.
 - **실행**: 워크플로의 일반 스킬은 `Orchestrator.invokeSkillExecution`이 레지스트리를 읽어 경로/emitter/risk 게이트를 적용합니다. `write_code`는 별도 분기입니다.
 - **동적 스킬**: `SKILL.md`만 있고 레지스트리에 없는 이름은 기존처럼 `execute_skill` 폴백; 미등록 시 경로 마지막 인자·emitter 주입은 적용되지 않습니다(기본 false).
 - 설계·Phase 정리: [`.cursor/plans/tool-registry-design.md`](../.cursor/plans/tool-registry-design.md).

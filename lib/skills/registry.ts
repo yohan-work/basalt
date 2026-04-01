@@ -29,7 +29,8 @@ export type SkillRegistryEntry = {
     injectEmitterForExecution: boolean;
 };
 
-function normSkillName(skillName: string): string {
+/** Same key as `getSkillRegistryEntry` / `SKILL_ARG_SCHEMAS` lookups (`lib/skills/arg-schemas.ts`). */
+export function normalizeSkillRegistryName(skillName: string): string {
     return String(skillName || '')
         .toLowerCase()
         .replace(/[\s_]+/g, '-')
@@ -250,11 +251,11 @@ const ENTRIES: SkillRegistryEntry[] = [
 
 const byNormalizedName = new Map<string, SkillRegistryEntry>();
 for (const entry of ENTRIES) {
-    byNormalizedName.set(normSkillName(entry.name), entry);
+    byNormalizedName.set(normalizeSkillRegistryName(entry.name), entry);
 }
 
 export function getSkillRegistryEntry(skillName: string): SkillRegistryEntry | undefined {
-    return byNormalizedName.get(normSkillName(skillName));
+    return byNormalizedName.get(normalizeSkillRegistryName(skillName));
 }
 
 export function listSkillRegistryEntries(): readonly SkillRegistryEntry[] {

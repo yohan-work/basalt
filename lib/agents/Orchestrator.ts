@@ -10,6 +10,10 @@ import {
     shouldAppendProjectPathLast,
     shouldInjectEmitterForExecution,
 } from '@/lib/skills/registry';
+import { validateSkillArgsBeforeExecution } from '@/lib/skills/arg-schemas';
+import { SKILL_ARG_GENERATION_INTRO, SKILL_ARG_GENERATION_RULES } from '@/lib/prompts/skill-arg-generation';
+import { getCachedSkillArgPromptBlock } from '@/lib/skills/skill-arg-prompt-cache';
+import { formatSkillResultForExecutionLog } from '@/lib/agents/skill-result-format';
 import * as llm from '@/lib/llm';
 import fs from 'fs';
 import path from 'path';
@@ -1064,7 +1068,7 @@ export class Orchestrator {
 
         this.contextManager.addLog(
             stepAgentName,
-            `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`
+            `Executed ${action}.\n${formatSkillResultForExecutionLog(action, result)}`
         );
         await this.log(stepAgentName, `Executed ${action}`, { result, type: 'RESULT' });
         const resultSummary =
@@ -1095,11 +1099,13 @@ export class Orchestrator {
                     await this.log(mainAgentName, `Scanning project at: ${projectPath}`, { type: 'System' });
 
                     try {
-                        const profilerContext = await this.profiler.getContextString();
+                        const [profilerContext, pkgJson] = await Promise.all([
+                            this.profiler.getContextString(),
+                            skills.read_codebase('package.json', projectPath),
+                        ]);
                         codebaseContext = profilerContext;
 
                         // Also Add package.json explicitly for more depth if needed
-                        const pkgJson = await skills.read_codebase('package.json', projectPath);
                         this.contextManager.addFile('package.json', pkgJson);
                     } catch (error: any) {
                         await this.log(mainAgentName, `Initial scan failed: ${error.message}`, { type: 'WARNING' });
@@ -1340,9 +1346,6 @@ export class Orchestrator {
             return fastPath.arguments;
         }
 
-        const skillDef = AgentLoader.loadSkill(skillName);
-        const inputsDef = skillDef.inputs ? `\nInputs Definition:\n${skillDef.inputs}` : '';
-
         // Get Optimized Context
         const dynamicContext = this.contextManager.getOptimizedContext(contextBudget);
 
@@ -1367,15 +1370,10 @@ export class Orchestrator {
             : MODEL_CONFIG.SMART_MODEL;
         const model = modelTier === 'fast' ? MODEL_CONFIG.FAST_MODEL : defaultModel;
 
-        let systemPrompt = `
-You are an intelligent agent orchestrator.
-Your goal is to generate the exact arguments needed to call a TypeScript function for a specific skill.
-
+        let systemPrompt = `${SKILL_ARG_GENERATION_INTRO}
 ${projectConventions}
 
-Skill Name: ${skillName}
-Skill Instructions: ${skillDef.instructions}
-${inputsDef}
+${getCachedSkillArgPromptBlock(skillName)}
 
 Current Step Goal: ${stepDescription || taskDescription}
 Overall Task: ${taskDescription}
@@ -1386,21 +1384,7 @@ ${await this.profiler.getContextString()}
 
 ${dynamicContext}
 
-IMPORTANT RULES:
-1. MANDATORY: ALWAYS use relative paths from the project root. DO NOT start with "/".
-   GOOD: "app/some-feature/page.tsx", "components/Button.tsx", "src/utils/helpers.ts"
-   BAD: "/app/some-feature/page.tsx", "/Users/yohan/projects/...", "/pages/login"
-2. DO NOT include the Project Path in the arguments.
-3. Generate ACTUAL values — NO placeholders like "filePath", "content".
-4. Match the function signature exactly.
-5. ROUTE MAPPING: When creating a new route page "[route-name]", ensure the file is generated inside the correct subfolder (e.g., "app/[route-name]/page.tsx"). DO NOT overwrite the root app/page.tsx.
-
-Return ONLY a JSON object with a key "arguments" which is an array of actual values.
-Example for read_codebase: { "arguments": ["package.json"] }
-Example for write_code: { "arguments": ["app/some-feature/page.tsx", "export default function..."] }
-
-IMPORTANT: All reasoning, documentation summaries, and user-facing messages MUST be in KOREAN.
-중요: 모든 분석 결과와 설명, 메시지는 한국어로 작성하세요.
+${SKILL_ARG_GENERATION_RULES}
 `;
 
 
@@ -3109,9 +3093,22 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                                         stepPolicy.modelTier,
                                         stepPolicy.contextBudget
                                     );
+                                    let validatedArgs: unknown[];
+                                    try {
+                                        validatedArgs = validateSkillArgsBeforeExecution(action, args);
+                                    } catch (valErr: unknown) {
+                                        const vmsg =
+                                            valErr instanceof Error ? valErr.message : String(valErr);
+                                        await this.log(
+                                            mainAgentName,
+                                            `Skill "${action}" argument validation failed: ${vmsg}`,
+                                            { type: 'WARNING' }
+                                        );
+                                        throw valErr;
+                                    }
                                     await this.invokeSkillExecution({
                                         action,
-                                        args,
+                                        args: validatedArgs,
                                         projectPath,
                                         skillFunc,
                                         stepAgentName: stepAgentDef.name,

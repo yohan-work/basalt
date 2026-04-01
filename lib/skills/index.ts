@@ -11,6 +11,7 @@ import { MODEL_CONFIG } from '../model-config';
 import { isDefaultPrismaGeneratedClientPresent, ProjectProfiler } from '../profiler';
 import { mergeCompilerPathsFromConfigs } from '../tsconfig-paths';
 import { getAgentBrowserExecutable } from '../browser/agent-browser';
+import { assertPathInsideProjectRoot } from '../path-sandbox';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -1340,7 +1341,10 @@ export {
     type SkillRegistryEntry,
     type SkillRiskGateMode,
     type SkillRiskSurface,
+    normalizeSkillRegistryName,
 } from './registry';
+
+export { validateSkillArgsBeforeExecution } from './arg-schemas';
 
 export { analyze_task } from './analyze_task/execute';
 export { create_workflow } from './create_workflow/execute';
@@ -1407,6 +1411,7 @@ export async function read_codebase(filePath: string, projectPath: string = proc
     try {
         const relativePath = resolvePathRelativeToProject(filePath, projectPath);
         const fullPath = path.resolve(projectPath, relativePath);
+        assertPathInsideProjectRoot(projectPath, fullPath, 'read_codebase');
         const cacheKey = `${projectPath}:${relativePath}`;
         if (READ_CACHE.has(cacheKey)) {
             return READ_CACHE.get(cacheKey)!;
@@ -1454,6 +1459,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
     try {
         const relativePath = resolvePathRelativeToProject(filePath, baseDir);
         const fullPath = path.resolve(baseDir, relativePath);
+        assertPathInsideProjectRoot(baseDir, fullPath, 'write_code');
         const dir = path.dirname(fullPath);
 
         const nextParamsValidation = validateNextJs16AsyncParams(relativePath, content);
@@ -1938,8 +1944,10 @@ export async function check_environment() {
 
 export async function list_directory(dirPath: string = '.', baseDir: string = process.cwd()) {
     try {
-        const fullPath = path.resolve(baseDir, dirPath);
-        const cacheKey = `${baseDir}:${dirPath}`;
+        const relativePath = resolvePathRelativeToProject(dirPath, baseDir) || '.';
+        const fullPath = path.resolve(baseDir, relativePath);
+        assertPathInsideProjectRoot(baseDir, fullPath, 'list_directory');
+        const cacheKey = `${baseDir}:${relativePath}`;
         if (DIR_CACHE.has(cacheKey)) {
             return DIR_CACHE.get(cacheKey)!;
         }

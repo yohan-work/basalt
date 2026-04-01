@@ -10,7 +10,9 @@
     "lint:types": "node ./scripts/validate-client-boundary.mjs --types-only",
     "lint:types:changed": "node ./scripts/validate-client-boundary.mjs --types-only --changed",
     "lint": "npm run lint:rsc && npm run lint:types && eslint",
-    "test": "npm run lint:rsc && npm run lint:types && node ./scripts/smoke-check.mjs"
+    "test:arg-schemas": "tsx --test lib/skills/arg-schemas.test.ts",
+    "test": "npm run lint:rsc && npm run lint:types && node ./scripts/smoke-check.mjs && npm run test:arg-schemas && npm run test:path-sandbox",
+    "test:path-sandbox": "tsx --test lib/path-sandbox.test.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -54,6 +56,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "tw-animate-css": "^1.4.0",
     "typescript": "^5"
   }
