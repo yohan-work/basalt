@@ -1252,15 +1252,32 @@ export class Orchestrator {
         // Get Optimized Context
         const dynamicContext = this.contextManager.getOptimizedContext(contextBudget);
 
+        // --- Load PROJECT_CONVENTIONS.md for Project-Specific Rules ---
+        let projectConventions = '';
+        try {
+            const conventionsPath = path.join(projectPath, 'PROJECT_CONVENTIONS.md');
+            if (fs.existsSync(conventionsPath)) {
+                projectConventions = fs.readFileSync(conventionsPath, 'utf-8');
+                if (projectConventions.trim()) {
+                    projectConventions = `\n--- PROJECT-SPECIFIC CONVENTIONS ---\n${projectConventions.trim()}\n--- END PROJECT-SPECIFIC CONVENTIONS ---\n`;
+                }
+            }
+        } catch (error) {
+            await this.log('System', `Failed to load PROJECT_CONVENTIONS.md: ${error.message}`, { type: 'WARNING' });
+        }
+        // --- End PROJECT_CONVENTIONS.md Loading ---
+
         // Route to FAST model for skills that just need a path/simple arg
         const defaultModel = Orchestrator.FAST_ARG_SKILLS.includes(skillName)
             ? MODEL_CONFIG.FAST_MODEL
             : MODEL_CONFIG.SMART_MODEL;
         const model = modelTier === 'fast' ? MODEL_CONFIG.FAST_MODEL : defaultModel;
 
-        const systemPrompt = `
+        let systemPrompt = `
 You are an intelligent agent orchestrator.
 Your goal is to generate the exact arguments needed to call a TypeScript function for a specific skill.
+
+${projectConventions}
 
 Skill Name: ${skillName}
 Skill Instructions: ${skillDef.instructions}
