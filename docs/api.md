@@ -81,7 +81,7 @@
 
 ## 운영 참고
 
-- `execute`/`retry`/`stream`의 파라미터는 `discussionMode`, `strategyPreset`, `maxDiscussionThoughts` 등으로 제어
+- `execute`/`retry`/`stream`의 파라미터는 `discussionMode`, `strategyPreset`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`, `multiPhaseCodegen`(문자열 `true`/`false`) 등으로 제어 — `GET /api/agent/stream` 쿼리에 동일 키를 넘기면 `Orchestrator.execute` 등에 전달되는 `executionOptions`와 맞춘다
 - 라우트별 응답 스키마는 실제 호출 코드에서 고정되므로 문서 변경은 라우트 파일 기준으로 갱신
 
 ### API별 계약 빠른 참조

@@ -6,6 +6,8 @@ export interface ExecuteStreamOptions {
     maxDiscussionThoughts?: number;
     carryDiscussionToPrompt?: boolean;
     strategyPreset?: StrategyPreset;
+    /** Matches Orchestrator ExecutionOptions — env BASALT_CODEGEN_MULTI_PHASE overrides when set */
+    multiPhaseCodegen?: boolean;
 }
 
 export interface DiscussionThought {

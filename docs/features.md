@@ -97,6 +97,23 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - **메타데이터**: `metadata.ralphSession`에 라운드·결과(`completed`/`max_rounds`/`error`)가 기록됩니다.
 - **토큰 예산**: 한 태스크에 `executionMetrics.totalTokens`가 누적되고, 라운드마다 `plan`이 반복되므로 일반 실행보다 빨리 `write_code` 직전 상한에 도달할 수 있습니다. 세션 시작 후 각 라운드의 `plan` 직후, 워크플로 스텝 수를 반영해 `metadata.budgetPolicy.maxTokensPerTask`를 **한 번에 실행 가능한 상한 × 최대 라운드(× `BASALT_RALPH_TOKEN_BUDGET_MULT`)** 이상으로 올립니다(사용자가 이미 더 큰 값을 두었으면 유지). 그래도 부족하면 태스크 메타에 `budgetPolicy.maxTokensPerTask`를 직접 키우거나 `discussionMode`를 `off`로 줄이는 것을 권장합니다.
 
+## 5e) 다단계 코드 생성(옵션) · 스킬 risk 게이트
+
+### 다단계 `write_code`
+
+- **목적**: 한 번의 대형 스트리밍 생성 전에 짧은 **JSON Plan**을 고정하고, 배치 저장·프로젝트 타입체크 후에도 실패하면 **타입체크 출력을 넣어 코드 생성을 한 패스 더** 시도합니다(상한 내).
+- **켜는 방법**(우선순위): 환경 변수 `BASALT_CODEGEN_MULTI_PHASE=1`/`true`/`yes`/`on`이면 켜짐; `0`/`false`/`no`/`off`이면 끔(태스크 메타보다 우선). 그 외에는 `metadata.executionOptions.multiPhaseCodegen` 또는 실행 시 `GET /api/agent/stream?...&multiPhaseCodegen=true`. UI: 태스크 상세 **Discussion Controls**의 **Multi-phase codegen** 토글.
+- **추가 패스 수**: `BASALT_CODEGEN_MULTI_PHASE_MAX_RETRIES`(0–2, 기본 1) — 총 Implement 패스는 `1 + 해당 값`.
+- **SSE**: `codegen_subphase` 이벤트 — `phase`: `plan` | `implement` | `verify`, `status`: `start` | `end`, (선택) `detail` 예: `typecheck_retry`.
+- 설계 초안: [`.cursor/plans/multi-phase-codegen-design.md`](../.cursor/plans/multi-phase-codegen-design.md).
+
+### 스킬 risk 게이트 (`invokeSkillExecution`)
+
+- 레지스트리에서 **shell / git / network** 위험이 있는 스킬에 대해, 환경 변수 **`BASALT_SKILL_RISK_MODE`**로만 동작을 바꿉니다. **미설정·그 밖의 값**은 추가 동작 없음(기존과 동일).
+- `warn`: 실행 전 System WARNING 로그.
+- `deny`: 실행 전 예외로 차단(스텝 재시도 루프에 전달될 수 있음).
+- 상세: [`setup.md`](./setup.md), 아키텍처: [`architecture/orchestrator.md`](./architecture/orchestrator.md) §스킬 실행 경로·레지스트리.
+
 ## 6) 승인 워크플로우(HITL)
 
 - `approve` API로 `review` 상태 태스크를 완료 상태로 반영

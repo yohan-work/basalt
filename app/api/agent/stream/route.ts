@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
     const maxDiscussionThoughtsParam = req.nextUrl.searchParams.get('maxDiscussionThoughts');
     const carryDiscussionToPromptParam = req.nextUrl.searchParams.get('carryDiscussionToPrompt');
     const strategyPresetParam = req.nextUrl.searchParams.get('strategyPreset');
+    const multiPhaseCodegenParam = req.nextUrl.searchParams.get('multiPhaseCodegen');
 
     if (!taskId || !action) {
         return new Response(
@@ -50,6 +51,12 @@ export async function GET(req: NextRequest) {
                     ? carryDiscussionToPromptParam === 'true'
                     : undefined,
                 strategyPreset: (strategyPresetParam as 'quality_first' | 'balanced' | 'speed_first' | 'cost_saver' | null) || undefined,
+                multiPhaseCodegen:
+                    multiPhaseCodegenParam === 'true'
+                        ? true
+                        : multiPhaseCodegenParam === 'false'
+                          ? false
+                          : undefined,
             };
 
             // Set up heartbeat to keep connection alive

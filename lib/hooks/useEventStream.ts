@@ -118,6 +118,9 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
         if (executeOptions?.strategyPreset) {
             params.set('strategyPreset', executeOptions.strategyPreset);
         }
+        if (typeof executeOptions?.multiPhaseCodegen === 'boolean') {
+            params.set('multiPhaseCodegen', String(executeOptions.multiPhaseCodegen));
+        }
         const url = `/api/agent/stream?${params.toString()}`;
 
         (async () => {

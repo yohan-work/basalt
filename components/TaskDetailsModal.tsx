@@ -83,6 +83,7 @@ const DEFAULT_EXECUTION_OPTIONS: Required<ExecuteStreamOptions> = {
     maxDiscussionThoughts: 3,
     carryDiscussionToPrompt: true,
     strategyPreset: 'balanced',
+    multiPhaseCodegen: false,
 };
 
 type MarkdownLineView = {
@@ -273,12 +274,17 @@ function normalizeExecutionOptions(raw?: ExecuteStreamOptions): Required<Execute
             || raw?.strategyPreset === 'cost_saver'
             ? raw.strategyPreset
             : DEFAULT_EXECUTION_OPTIONS.strategyPreset;
+    const multiPhaseCodegen =
+        typeof raw?.multiPhaseCodegen === 'boolean'
+            ? raw.multiPhaseCodegen
+            : DEFAULT_EXECUTION_OPTIONS.multiPhaseCodegen;
 
     return {
         discussionMode,
         maxDiscussionThoughts,
         carryDiscussionToPrompt,
         strategyPreset,
+        multiPhaseCodegen,
     };
 }
 
@@ -1671,6 +1677,32 @@ export function TaskDetailsModal({
                                                     {draftExecutionOptions.carryDiscussionToPrompt ? 'enabled' : 'disabled'}
                                                 </button>
                                             </div>
+                                            <div className="space-y-1 md:col-span-4">
+                                                <Label className="text-xs text-muted-foreground">
+                                                    Multi-phase codegen (plan + typecheck retry)
+                                                </Label>
+                                                <button
+                                                    type="button"
+                                                    className={`h-9 w-full max-w-xs rounded-md border px-2 text-sm transition-colors ${
+                                                        draftExecutionOptions.multiPhaseCodegen
+                                                            ? 'border-sky-500/50 bg-sky-50 text-sky-800 dark:bg-sky-950/30 dark:text-sky-200'
+                                                            : 'border-input bg-background text-muted-foreground'
+                                                    }`}
+                                                    onClick={() =>
+                                                        updateExecutionOptions({
+                                                            multiPhaseCodegen: !draftExecutionOptions.multiPhaseCodegen,
+                                                        })
+                                                    }
+                                                >
+                                                    {draftExecutionOptions.multiPhaseCodegen ? 'enabled' : 'disabled'}
+                                                </button>
+                                                <p className="text-[10px] text-muted-foreground">
+                                                    Env <code className="rounded bg-muted px-0.5">BASALT_CODEGEN_MULTI_PHASE</code>{' '}
+                                                    overrides when set. Extra passes:{' '}
+                                                    <code className="rounded bg-muted px-0.5">BASALT_CODEGEN_MULTI_PHASE_MAX_RETRIES</code>{' '}
+                                                    (0–2, default 1).
+                                                </p>
+                                            </div>
                                         </div>
                                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                             <Badge variant="outline" className="text-[10px]">
@@ -1684,6 +1716,9 @@ export function TaskDetailsModal({
                                             </Badge>
                                             <Badge variant="outline" className="text-[10px]">
                                                 Saved Carry: {persistedExecutionOptions.carryDiscussionToPrompt ? 'on' : 'off'}
+                                            </Badge>
+                                            <Badge variant="outline" className="text-[10px]">
+                                                Multi-phase: {persistedExecutionOptions.multiPhaseCodegen ? 'on' : 'off'}
                                             </Badge>
                                         </div>
                                         {canRunExecuteFromModal && (

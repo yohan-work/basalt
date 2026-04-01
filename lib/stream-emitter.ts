@@ -9,6 +9,12 @@
 
 export type StreamEvent =
     | { type: 'phase_start'; phase: string; taskId: string }
+    | {
+          type: 'codegen_subphase';
+          phase: 'plan' | 'implement' | 'verify';
+          status: 'start' | 'end';
+          detail?: string;
+      }
     | { type: 'step_start'; step: number; total: number; action: string; agent: string }
     | { type: 'step_complete'; step: number; total: number; duration: number; eta: number }
     | { type: 'llm_token'; token: string; context: string }

@@ -74,13 +74,23 @@ MOCK_LLM=false
 # AGENT_BROWSER_BIN=/usr/local/bin/agent-browser
 # 명시적으로 끄기(스크린샷·브라우저 기반 스모크 보강 생략, HTML 문자열 스모크는 유지).
 # AGENT_BROWSER_ENABLED=false
+
+# --- 다단계 코드 생성(write_code): Plan(JSON) → 스트리밍 구현 → 타입체크 실패 시 재구현(옵션) ---
+# BASALT_CODEGEN_MULTI_PHASE=1
+# 추가 Implement 패스 횟수 상한(0~2, 기본 1 → 최대 1+1 패스)
+# BASALT_CODEGEN_MULTI_PHASE_MAX_RETRIES=1
+
+# --- 워크플로 일반 스킬: 레지스트리상 elevated-risk(shell|git|network) 실행 시 ---
+# 미설정 또는 warn/deny 외 값 = 추가 동작 없음
+# BASALT_SKILL_RISK_MODE=warn
+# BASALT_SKILL_RISK_MODE=deny
 ```
 
 대상 프로젝트 루트에 Basalt가 QA PNG를 쓸 때 `.basalt/basalt-qa/<taskId>/`가 생깁니다. 해당 레포를 Git에 올리지 않으려면 그 프로젝트의 `.gitignore`에 `.basalt/`를 추가하세요.
 
 ## 사용 예시
 
-- 실행 옵션: `discussionMode`, `maxDiscussionThoughts`, `strategyPreset`
+- 실행 옵션: `discussionMode`, `maxDiscussionThoughts`, `strategyPreset`, `multiPhaseCodegen`(스트림 쿼리·태스크 메타)
 - 팀 협업 실행: `/api/team/execute` + `runId` 조회
 - 리뷰 제안 적용, 파일 패치, 요소 수정은 상태 조건을 준수해야 함
 
