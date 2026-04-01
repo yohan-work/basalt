@@ -1327,6 +1327,21 @@ Please execute the skill based on the instructions above.`;
 }
 
 // --- Main Agent Skills (Migrated to Markdown & execute.ts) ---
+export {
+    FAST_ARG_SKILL_NAMES,
+    getSkillRegistryEntry,
+    hasElevatedRisk,
+    listSkillRegistryEntries,
+    resolveSkillRiskGateMode,
+    shouldAppendProjectPathLast,
+    shouldInjectEmitterForExecution,
+    type SkillArgModelTier,
+    type SkillHandlerKind,
+    type SkillRegistryEntry,
+    type SkillRiskGateMode,
+    type SkillRiskSurface,
+} from './registry';
+
 export { analyze_task } from './analyze_task/execute';
 export { create_workflow } from './create_workflow/execute';
 export { consult_agents, type ConsultAgentsOptions } from './consult_agents/execute';

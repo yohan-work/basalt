@@ -2,6 +2,14 @@
 import { supabase } from '@/lib/supabase';
 import { installMissingNpmPackages } from '@/lib/package-manager-install';
 import * as skills from '@/lib/skills';
+import {
+    FAST_ARG_SKILL_NAMES,
+    getSkillRegistryEntry,
+    hasElevatedRisk,
+    resolveSkillRiskGateMode,
+    shouldAppendProjectPathLast,
+    shouldInjectEmitterForExecution,
+} from '@/lib/skills/registry';
 import * as llm from '@/lib/llm';
 import fs from 'fs';
 import path from 'path';
@@ -980,15 +988,90 @@ export class Orchestrator {
     }
 
     private getSkillFunction(skillName: string) {
-        if ((skills as any)[skillName]) {
-            return (skills as any)[skillName];
+        const direct = (skills as any)[skillName];
+        const meta = getSkillRegistryEntry(skillName);
+        if (typeof direct === 'function') {
+            if (meta?.kind === 'dynamic') {
+                console.warn(
+                    `[Orchestrator] Skill "${skillName}" is registered as dynamic but a native export exists; using native.`
+                );
+            }
+            return direct;
         }
-        
-        // Fallback to the new Markdown-based Dynamic Skill Executor
-        // This allows seamlessly running community skills loaded from SKILL.md
+        if (meta?.kind === 'native') {
+            console.warn(
+                `[Orchestrator] Skill "${skillName}" is registered as native but not exported from skills index; trying dynamic executor.`
+            );
+        }
+
         return async (...args: any[]) => {
             return await skills.execute_skill(skillName, { args }, await this.profiler.getContextString(), this.emitter);
         };
+    }
+
+    /**
+     * Normal step skills only (not `write_code`): project path suffix, emitter injection,
+     * optional registry risk gate, invoke handler, read_codebase context, logs/SSE.
+     */
+    private async invokeSkillExecution(options: {
+        action: string;
+        args: any[];
+        projectPath: string;
+        skillFunc: (...args: any[]) => Promise<any>;
+        stepAgentName: string;
+    }): Promise<void> {
+        const { action, projectPath, skillFunc, stepAgentName } = options;
+        let args = [...options.args];
+
+        const riskMode = resolveSkillRiskGateMode();
+        if (riskMode !== 'off' && hasElevatedRisk(action)) {
+            if (riskMode === 'deny') {
+                throw new Error(
+                    `Skill "${action}" blocked: BASALT_SKILL_RISK_MODE=deny and this skill has elevated risk (shell, git, and/or network) in the registry.`
+                );
+            }
+            await this.log(
+                'System',
+                `[Skill risk] Elevated-risk skill executing: ${action} (BASALT_SKILL_RISK_MODE=warn)`,
+                { type: 'WARNING' }
+            );
+        }
+
+        if (shouldAppendProjectPathLast(action)) {
+            if (args.length === 0 || args[args.length - 1] !== projectPath) {
+                args.push(projectPath);
+            }
+        }
+
+        await this.log(stepAgentName, `Executing ${action}`, { args, type: 'ACTION' });
+        this.emitter?.emit({ type: 'skill_execute', skill: action, args: args.length > 0 ? args[0] : undefined });
+
+        if (shouldInjectEmitterForExecution(action) && this.emitter) {
+            if (args.length > 3) args = args.slice(0, 3);
+            while (args.length < 3) args.push(undefined);
+            args.push(this.emitter);
+        }
+
+        const result = await skillFunc(...args);
+
+        if (action === 'read_codebase' && typeof result === 'string') {
+            const filePath = args[0];
+            this.contextManager.addFile(filePath, result);
+        } else if (action === 'read_codebase' && typeof result === 'object' && result?.content) {
+            const filePath = args[0];
+            this.contextManager.addFile(filePath, result.content);
+        }
+
+        this.contextManager.addLog(
+            stepAgentName,
+            `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`
+        );
+        await this.log(stepAgentName, `Executed ${action}`, { result, type: 'RESULT' });
+        const resultSummary =
+            typeof result === 'string'
+                ? result.slice(0, 100)
+                : (result?.message || JSON.stringify(result).slice(0, 100));
+        this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
     }
 
     // --- Phase 1: Planning ---
@@ -1139,11 +1222,8 @@ export class Orchestrator {
 
     // --- Phase 2: Execution ---
 
-    // Skills that only need a file path or simple string — FAST model is sufficient
-    private static readonly FAST_ARG_SKILLS = [
-        'read_codebase', 'list_directory', 'check_environment', 'manage_git',
-        'lint_code', 'typecheck', 'check_responsive', 'screenshot_page'
-    ];
+    /** From lib/skills/registry (argModelTier === fast) */
+    private static readonly FAST_ARG_SKILLS = [...FAST_ARG_SKILL_NAMES];
 
     private buildArgCacheKey(
         skillName: string,
@@ -3020,7 +3100,7 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                                         });
                                     }
                                 } else {
-                                    let args = await this.generateSkillArguments(
+                                    const args = await this.generateSkillArguments(
                                         action,
                                         task.description,
                                         projectPath,
@@ -3029,49 +3109,13 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                                         stepPolicy.modelTier,
                                         stepPolicy.contextBudget
                                     );
-
-                                    const filesystemSkills = [
-                                        'read_codebase',
-                                        'run_shell_command',
-                                        'manage_git',
-                                        'list_directory',
-                                        'apply_design_system',
-                                        'generate_scss',
-                                    ];
-                                    if (filesystemSkills.includes(action)) {
-                                        if (args.length === 0 || args[args.length - 1] !== projectPath) {
-                                            args.push(projectPath);
-                                        }
-                                    }
-
-                                    await this.log(stepAgentDef.name, `Executing ${action}`, { args, type: 'ACTION' });
-                                    this.emitter?.emit({ type: 'skill_execute', skill: action, args: args.length > 0 ? args[0] : undefined });
-
-                                    // Special handling for skills that require the emitter (analyze_task, create_workflow)
-                                    const metaSkills = ['analyze_task', 'create_workflow'];
-                                    if (metaSkills.includes(action) && this.emitter) {
-                                        // analyze_task: (taskDesc, availableAgents, codebaseContext, emitter)
-                                        // Ensure we don't have too many args and append emitter at the right position (4th)
-                                        if (args.length > 3) args = args.slice(0, 3);
-                                        while (args.length < 3) args.push(undefined);
-                                        args.push(this.emitter);
-                                    }
-
-                                    const result = await skillFunc(...args);
-
-                                    if (action === 'read_codebase' && typeof result === 'string') {
-                                        const filePath = args[0];
-                                        this.contextManager.addFile(filePath, result);
-                                    }
-                                    else if (action === 'read_codebase' && typeof result === 'object' && result.content) {
-                                        const filePath = args[0];
-                                        this.contextManager.addFile(filePath, result.content);
-                                    }
-
-                                    this.contextManager.addLog(stepAgentDef.name, `Executed ${action}. Result summary: ${JSON.stringify(result).slice(0, 200)}...`);
-                                    await this.log(stepAgentDef.name, `Executed ${action}`, { result, type: 'RESULT' });
-                                    const resultSummary = typeof result === 'string' ? result.slice(0, 100) : (result?.message || JSON.stringify(result).slice(0, 100));
-                                    this.emitter?.emit({ type: 'skill_result', skill: action, summary: resultSummary });
+                                    await this.invokeSkillExecution({
+                                        action,
+                                        args,
+                                        projectPath,
+                                        skillFunc,
+                                        stepAgentName: stepAgentDef.name,
+                                    });
                                 }
                                 stepSuccess = true;
                                 const skillAttemptLatency = Date.now() - skillAttemptStartedAt;
