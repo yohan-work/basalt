@@ -1058,6 +1058,12 @@ function validateInProcessSingleFileClientBoundary(
     return { valid: true };
 }
 
+function isValidationFailure<T extends { valid: boolean; message?: string }>(
+    result: T
+): result is T & { valid: false; message: string } {
+    return result.valid === false;
+}
+
 /**
  * When `validate-client-boundary.mjs` is missing, run the same single-file `tsc` pattern in-process
  * (catches e.g. `showPassword` / TS2304 before the app runs).
@@ -1139,11 +1145,11 @@ async function validateGeneratedTypeSafety(relativePath: string, baseDir: string
             diskContent = '';
         }
         const boundary = validateInProcessSingleFileClientBoundary(relativePath, diskContent);
-        if (!boundary.valid) {
+        if (isValidationFailure(boundary)) {
             return { valid: false, message: boundary.message };
         }
         const tscResult = runInProcessTypeScriptDiagnosticsForFile(baseDir, normalizedPath, fileLabel);
-        if (!tscResult.valid) {
+        if (isValidationFailure(tscResult)) {
             return { valid: false, message: tscResult.message };
         }
         return { valid: true };
@@ -1192,6 +1198,7 @@ export function reset_runtime_caches() {
     READ_CACHE.clear();
     DIR_CACHE.clear();
     installedPackagesCache.clear();
+    AgentLoader.clearCaches();
 }
 
 function getDynamicSkillModel(skillName: string): string {
@@ -1258,12 +1265,12 @@ export async function execute_skill(
 
         const requiredParams = Array.isArray(skillDef.inputParams) ? skillDef.inputParams : [];
         const validation = validateDynamicSkillInputs(skillName, inputs, requiredParams);
-        if (!validation.valid) {
+        if (isValidationFailure(validation)) {
             return {
                 success: false,
                 error: true,
                 skill: skillName,
-                message: validation.message,
+                message: validation.message || `Skill "${skillName}" validation failed.`,
             };
         }
 
@@ -1463,7 +1470,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         const dir = path.dirname(fullPath);
 
         const nextParamsValidation = validateNextJs16AsyncParams(relativePath, content);
-        if (!nextParamsValidation.valid) {
+        if (isValidationFailure(nextParamsValidation)) {
             return {
                 success: false,
                 message: nextParamsValidation.message,
@@ -1472,7 +1479,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         }
 
         const boundaryRaw = validateAppRouterServerExportClientBoundary(relativePath, content);
-        if (!boundaryRaw.valid) {
+        if (isValidationFailure(boundaryRaw)) {
             return {
                 success: false,
                 message: boundaryRaw.message,
@@ -1485,7 +1492,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         const sanitizedContent = sanitizeMetadataImportAliases(withClientDirective, relativePath, baseDir);
 
         const boundaryFinal = validateAppRouterServerExportClientBoundary(relativePath, sanitizedContent);
-        if (!boundaryFinal.valid) {
+        if (isValidationFailure(boundaryFinal)) {
             return {
                 success: false,
                 message: boundaryFinal.message,
@@ -1499,7 +1506,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
             sanitizedContent,
             baseDir
         );
-        if (!importedBoundary.valid) {
+        if (isValidationFailure(importedBoundary)) {
             return {
                 success: false,
                 message: importedBoundary.message,
@@ -1509,7 +1516,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         }
 
         const tanstackImports = validateTanStackReactTableImports(relativePath, sanitizedContent);
-        if (!tanstackImports.valid) {
+        if (isValidationFailure(tanstackImports)) {
             return {
                 success: false,
                 message: tanstackImports.message,
@@ -1518,7 +1525,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         }
 
         const tanstackUiTableImport = validateTanStackUiTableNoDefaultImport(relativePath, sanitizedContent);
-        if (!tanstackUiTableImport.valid) {
+        if (isValidationFailure(tanstackUiTableImport)) {
             return {
                 success: false,
                 message: tanstackUiTableImport.message,
@@ -1527,7 +1534,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         }
 
         const shadcnInputFromButton = validateShadcnInputNotImportedFromButton(relativePath, sanitizedContent);
-        if (!shadcnInputFromButton.valid) {
+        if (isValidationFailure(shadcnInputFromButton)) {
             return {
                 success: false,
                 message: shadcnInputFromButton.message,
@@ -1536,7 +1543,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         }
 
         const shadcnTableTanStackProps = validateShadcnTableNotTanStackProps(relativePath, sanitizedContent);
-        if (!shadcnTableTanStackProps.valid) {
+        if (isValidationFailure(shadcnTableTanStackProps)) {
             return {
                 success: false,
                 message: shadcnTableTanStackProps.message,
@@ -1545,7 +1552,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         }
 
         const importValidation = await validateImportsExistence(sanitizedContent, relativePath, baseDir);
-        if (!importValidation.valid) {
+        if (isValidationFailure(importValidation)) {
             return {
                 success: false,
                 message: importValidation.message || `Invalid imports for ${filePath}`,
@@ -1560,7 +1567,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         }
 
         const prismaId = validatePrismaClientIdentifierUsage(sanitizedContent, baseDir);
-        if (!prismaId.valid) {
+        if (isValidationFailure(prismaId)) {
             return {
                 success: false,
                 message: prismaId.message,
@@ -1569,7 +1576,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         }
 
         const prismaGen = validatePrismaClientGeneratedForImports(sanitizedContent, baseDir);
-        if (!prismaGen.valid) {
+        if (isValidationFailure(prismaGen)) {
             return {
                 success: false,
                 message: prismaGen.message,
@@ -1588,7 +1595,7 @@ export async function write_code(filePath: string, content: string, baseDir: str
         }
         fs.writeFileSync(fullPath, sanitizedContent, 'utf-8');
         const typeSafety = await validateGeneratedTypeSafety(relativePath, baseDir, filePath);
-        if (!typeSafety.valid) {
+        if (isValidationFailure(typeSafety)) {
             // Priority: Page visibility over strict type safety. 
             // Instead of rolling back, we prepend @ts-nocheck and try once more.
             const forcedContent = `// @ts-nocheck\n${sanitizedContent}`;
@@ -1666,7 +1673,7 @@ Return the refactored code ONLY, with NO explanations.
             const relativePath = targetFilePath.startsWith('/') ? targetFilePath.substring(1) : targetFilePath;
 
             const refactorBoundary = validateAppRouterServerExportClientBoundary(relativePath, sanitizedRefactorContent);
-            if (!refactorBoundary.valid) {
+            if (isValidationFailure(refactorBoundary)) {
                 return `Error during refactoring: ${refactorBoundary.message}`;
             }
 
@@ -1675,17 +1682,17 @@ Return the refactored code ONLY, with NO explanations.
                 sanitizedRefactorContent,
                 process.cwd()
             );
-            if (!refactorImported.valid) {
+            if (isValidationFailure(refactorImported)) {
                 return `Error during refactoring: ${refactorImported.message}`;
             }
 
             const refactorImportValidation = await validateImportsExistence(sanitizedRefactorContent, relativePath, process.cwd());
-            if (!refactorImportValidation.valid) {
+            if (isValidationFailure(refactorImportValidation)) {
                 return `Error during refactoring: ${refactorImportValidation.message || `Invalid imports for ${targetFilePath}`}`;
             }
 
             const typeSafety = await validateGeneratedTypeSafety(relativePath, process.cwd(), targetFilePath);
-            if (!typeSafety.valid) {
+            if (isValidationFailure(typeSafety)) {
                 return `Error during refactoring: ${typeSafety.message}`;
             }
         }
