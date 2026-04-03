@@ -6,6 +6,7 @@ import { test } from 'node:test';
 
 import {
     projectTypecheckOutputHasErrors,
+    projectTypecheckOutputHasOnlyValidatorErrors,
     stripBenignNextValidatorTs2307,
 } from './next-validator-filter';
 
@@ -29,4 +30,19 @@ test('strip keeps TS2307 when no source file', () => {
     const out = stripBenignNextValidatorTs2307(line, root);
     assert.ok(out.includes('TS2307'));
     assert.equal(projectTypecheckOutputHasErrors(out), true);
+});
+
+test('validator-only detection recognizes .next/types/validator.ts type errors', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'basalt-nvf-'));
+    const output =
+        ".next/types/validator.ts(24,44): error TS2344: Type 'Route' does not satisfy the constraint '\"/\"'.";
+    assert.equal(projectTypecheckOutputHasOnlyValidatorErrors(output, root), true);
+});
+
+test('validator-only detection rejects mixed source-file diagnostics', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'basalt-nvf-'));
+    const output =
+        "app/signup/page.tsx(10,5): error TS2322: Type 'string' is not assignable to type 'number'.\n" +
+        ".next/types/validator.ts(24,44): error TS2344: Type 'Route' does not satisfy the constraint '\"/\"'.";
+    assert.equal(projectTypecheckOutputHasOnlyValidatorErrors(output, root), false);
 });

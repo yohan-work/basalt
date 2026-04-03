@@ -5,6 +5,7 @@ import { promisify } from 'util';
 
 import {
     projectTypecheckOutputHasErrors,
+    projectTypecheckOutputHasOnlyValidatorErrors,
     stripBenignNextValidatorTs2307,
 } from './next-validator-filter';
 
@@ -25,6 +26,10 @@ export function isProjectTypecheckWriteGateEnabled(): boolean {
 export function shouldRunProjectTypecheckForPath(relativePath: string): boolean {
     const ext = path.extname(relativePath).toLowerCase();
     return ['.ts', '.tsx', '.js', '.jsx'].includes(ext);
+}
+
+export function isValidatorOnlyProjectTypecheckFailure(output: string, projectPath: string): boolean {
+    return projectTypecheckOutputHasOnlyValidatorErrors(output, projectPath);
 }
 
 function findTsOrJsConfig(projectPath: string): string | null {

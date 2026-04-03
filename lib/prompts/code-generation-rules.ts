@@ -15,6 +15,7 @@ GENERAL PRINCIPLE:
   - **BentoGrid** — highlight many features with **uneven** tiles: CSS Grid with \`col-span\` / \`row-span\` or \`grid-template-areas\`. **No** masonry/carousel npm unless installed.
   - **SidebarContent** — docs, settings, long article, TOC: **sidebar + main** on large screens; collapse or top-stack on mobile (skip heavy off-canvas unless the task asks).
   - **Root layout file** — When creating or editing the top-level \`app/layout.tsx\` or \`src/app/layout.tsx\`, wrap \`{children}\` in \`<html lang="...">\` and \`<body>\` ([missing root layout tags](https://nextjs.org/docs/messages/missing-root-layout-tags)); never \`return children\` only. Nested segment layouts must not add another \`<html>\`/\`<body>\`.
+  - For the root layout, prefer the validator-friendly App Router props shape (for example \`LayoutProps<'/'>\` or an equivalent props type that includes \`children\`); do not narrow the type to \`{ children }\` only when the project uses strict Next route typegen.
   - **AppShell** — SaaS-style app: **side nav + top bar + content**. Do **not** add a second \`<html>\`/\`<body>\`; compose inside what the root \`layout.tsx\` already provides.
   - **DashboardGrid** — dense KPIs/widgets: use horizontal space; **avoid** shrinking the entire page inside a narrow \`max-w-*\` unless the task asks for a narrow dashboard.
   - **SingleColumnArticle** — legal, long read, single form: ~prose reading width, centered; **no** multi-column marketing grid.
@@ -38,6 +39,7 @@ MANDATORY CODING RULES (ZERO-ERROR FIRST PASS):
   - **ALWAYS** verify the import exists in [PROJECT CONTEXT]. If unsure, use standard HTML tags (\`div\`, \`button\`, \`table\`) instead of UI components.
 - 🚨 **MOCK DATA FIRST** 🚨:
   - Define your data array **locally** in the file: \`const data: any[] = [...];\`.
+  - For UI-only pages, do **not** import \`lib/mock-data.ts\` or create a separate mock-data module unless the task explicitly asks for shared data. Keep mock data inside the page/component file so the page is self-contained.
   - Use \`(data ?? []).map((item: any) => ...)\` with optional chaining everywhere.
 
 🚨 FORBIDDEN LIBRARIES 🚨:
@@ -82,6 +84,7 @@ MANDATORY CODING RULES (ZERO-ERROR FIRST PASS):
   - **ENGLISH ONLY**: Filenames and paths MUST use **lowercase English letters, numbers, and hyphens** only (e.g., \`board-list.tsx\`).
   - **NO KOREAN**: Never use Korean characters in filenames (FORBIDDEN: \`게시판.tsx\`).
   - **ROUTER CONSISTENCY**: Always use the \`Router Base\` (e.g., \`app/\`) listed in [PROJECT CONTEXT]. Never invent a \`pages/\` directory if the project uses App Router.
+  - **ROUTE FILE DISCIPLINE**: For a new page request, place the file exactly under the detected Router Base and matching segment (for example \`app/signup/page.tsx\` or \`src/app/signup/page.tsx\`). Do not create sibling route variants or rely on \`// @ts-nocheck\` to hide route/typegen issues; prefer a clean page structure that matches App Router conventions.
 - 🚨 **MANDATORY FILE PATH RULE** 🚨:
   - Use relative paths from the project root ONLY. NO leading slashes.
   - **App Router route files**: Each URL segment **must** use \`page.tsx\`. NEVER use \`index.tsx\` for App Router.

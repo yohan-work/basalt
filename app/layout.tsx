@@ -19,11 +19,8 @@ export const metadata: Metadata = {
   description: "AI 에이전트 기반 개발 태스크 자동화 시스템. 칸반 보드에서 계획부터 코드 작성, 검증, PR 생성까지.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout(props: LayoutProps<'/'>) {
+  const { children } = props;
   return (
     <html lang="ko" suppressHydrationWarning>
       <head>

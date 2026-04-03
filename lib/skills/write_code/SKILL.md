@@ -34,12 +34,14 @@ Writes string content to a specified file path.
       \`\`\`
     - **Defensive Props**: **ALWAYS** use \`(props: any)\` for components to avoid TS2322/TS2339.
     - **Safe Data**: Use \`(data ?? []).map((item: any) => ...)\` to prevent runtime crashes.
+    - **Route Discipline**: Use the exact \`Router Base\` from project context for route files, and keep \`page.tsx\` / \`layout.tsx\` aligned with the installed App Router rules. Do **not** use \`// @ts-nocheck\` to hide route/validator problems; fix the file structure instead.
 9.  **NO BROWSER APIS IN SSR**: Never access \`window\`, \`document\`, or \`localStorage\` directly in a component body. Use \`useEffect\`.
 10. **NO COMPLEX LIBRARIES (CRITICAL)**: To ensure "perfectly rendered pages" without build errors, **DO NOT** use complex libraries like **TanStack Table** or **Prisma**. Even if they are listed as installed, ignore them for UI tasks. Use standard semantic HTML tags (e.g., `<table>`, `<thead>`, `<tbody>`, `<tr>`, `<th>`, `<td>`) for all data displays.
 11. **NO <a> TAGS (Next.js internal nav)**: Use `import Link from 'next/link'` for internal navigation.
 12. **IMPORT EXISTENCE VALIDATION**: `@/components/ui/*` and other local imports must exist on disk.
 13. **NPM DEPENDENCIES (CRITICAL)**: External packages MUST already appear in the project's `package.json`. **TanStack Table and Prisma are FORBIDDEN** for UI tasks.
 14. **MOCK DATA MANDATE**: Always use local typed mock arrays defined directly inside the component or a local `lib/mock-data.ts`.
+    - For UI-only pages, prefer local mock arrays inside the page/component file. Do **not** split mock data into `lib/mock-data.ts` unless the task explicitly asks for shared mock data across multiple files.
 15. **PLACEHOLDER / DEMO IMAGE URLS (CRITICAL)**: Use `https://dummyimage.com/<W>x<H>/000/fff` only.
 16. **MOCK API / fetch**: Do not use `fetch('/api/...')` unless the route handler is also written. Default to local mock arrays.
 

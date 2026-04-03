@@ -39,6 +39,7 @@ import { buildQaSignoffReport } from '../qa/signoff-report';
 import {
     runProjectTypecheck,
     isProjectTypecheckWriteGateEnabled,
+    isValidatorOnlyProjectTypecheckFailure,
     shouldRunProjectTypecheckForPath,
     pickWrittenPathMatchingDiagnostics,
 } from '../qa/project-typecheck';
@@ -1541,7 +1542,7 @@ ${SKILL_ARG_GENERATION_RULES}
     private static readonly MAX_UNINSTALLED_NPM_LLM_REPAIRS = 2;
     private static readonly MAX_TYPESCRIPT_DIAGNOSTIC_REPAIRS = 5;
     /** write_code 배치 후 `npm run typecheck` / `tsc --noEmit` 실패 시 LLM 수리 라운드 상한 */
-    private static readonly MAX_PROJECT_TYPECHECK_REPAIRS = 5;
+    private static readonly MAX_PROJECT_TYPECHECK_REPAIRS = 2;
     private static readonly MAX_PRISMA_IMPORT_REPAIR_ATTEMPTS = 3;
     /** When `write_code` rejects `page`/`layout` for metadata/viewport + `"use client"` (or hooks without split), rewrite into server + `*Client.tsx`. */
     private static readonly MAX_RSC_BOUNDARY_REPAIR_ATTEMPTS = 3;
@@ -1775,10 +1776,10 @@ Hard rules:
 - **Intl API**: Remove ANY \`import … from 'intl'\` or \`require('intl')\`. Do NOT add the npm \`intl\` polyfill. Use the **global \`Intl\` object** only (\`Intl.DateTimeFormat\`, \`Intl.NumberFormat\`, \`Intl.RelativeTimeFormat\`, etc.).
 - **Prisma / TS2304 \`prisma\`**: If diagnostics say \`Cannot find name 'prisma'\`, add the correct import from this project’s Prisma singleton (e.g. \`import { prisma } from '@/lib/prisma'\`) or \`import { PrismaClient } from '@prisma/client'\` plus \`const prisma = new PrismaClient()\` in the same file. Never leave bare \`prisma.\` calls without a binding.
 - **Prisma / TS2305 \`PrismaClient\` / \`@prisma/client\`**: If diagnostics say the module has **no exported member** \`PrismaClient\` (or similar), either run \`npx prisma generate\` (default client under \`node_modules/.prisma/client\`) **or**, for **UI-only** work (lists/boards with no explicit DB requirement), **remove all \`@prisma/client\` / Prisma usage** and drive the UI with **typed mock/sample data** in the same file. Do not patch with \`any\` or bogus imports. When real DB is required, prefer the app singleton (\`import { prisma } from '@/lib/prisma'\`) when it exists. If the file is a Client Component (\`"use client"\`), remove Prisma usage and move DB access to a Route Handler, Server Action, or server-only module.
-- **STABILITY OVER LIBRARIES (CRITICAL)**: If type errors persist (especially with \`@tanstack/react-table\` or \`@prisma/client\`), **ABANDON THE LIBRARY** and rewrite the component using **standard HTML \`<table>\`, \`<thead>\`, \`<tbody>\`, \`<tr>\`, \`<th>\`, \`<td>\`** and local **Mock Data** arrays. A working page using standard HTML is 100x better than a broken page using advanced libraries.
+- **STABILITY OVER LIBRARIES (CRITICAL)**: If type errors persist (especially with \`@tanstack/react-table\` or \`@prisma/client\`), **ABANDON THE LIBRARY** and rewrite the component using **standard HTML \`<table>\`, \`<thead>\`, \`<tbody>\`, \`<tr>\`, \`<th>\`, \`<td>\`** and local **Mock Data** arrays. A working page using standard HTML is 100x better than a broken page using advanced libraries. Do **not** use \`// @ts-nocheck\` as a default escape hatch for page/route validation problems.
 - **Syntax**: Fix syntax errors (e.g. TS1005, TS1003) so the file is valid TypeScript/TSX — especially broken \`import\` / \`import type\` lines.
 - **Packages**: Do NOT add new npm packages or \`@types/*\` unless already in the project's package.json; prefer built-ins and existing deps.
-- **Directives**: Preserve "use client" / "use server" if present at the top. If you cannot fix all type errors after 1-2 attempts, **PREPEND \`// @ts-nocheck\`** to the top of the file to force it to render.
+- **Directives**: Preserve "use client" / "use server" if present at the top. If you cannot fix all type errors after 1-2 attempts, stop and surface the specific validation failure; do **not** add \`// @ts-nocheck\` for route/page files just to make the build pass.
 - **Design**: Keep readable contrast for text vs backgrounds.
 
 ${tailNote}
@@ -1849,6 +1850,14 @@ File: ${relativePath}
         while (true) {
             const tc = await runProjectTypecheck(projectPath);
             if (tc.skipped || tc.ok) break;
+            if (isValidatorOnlyProjectTypecheckFailure(tc.output, projectPath)) {
+                await this.log(
+                    agentName,
+                    `Project typecheck only reports Next validator errors. Stopping retries for ${writtenPaths.join(', ')} and surfacing the route/typegen mismatch instead of rewriting the same file.`,
+                    { type: 'WARNING' }
+                );
+                break;
+            }
             if (attempts >= Orchestrator.MAX_PROJECT_TYPECHECK_REPAIRS) {
                 await this.log(
                     agentName,
@@ -1941,19 +1950,10 @@ File: ${relativePath}
                 skills.reset_runtime_caches();
             }
             if (!writeOk) {
-                // If repair failed after multiple attempts, force it with @ts-nocheck
-                await this.log(
-                    agentName,
-                    `Project typecheck repair failed for ${targetPath}. Forcing write with @ts-nocheck to ensure page visibility.`,
-                    { type: 'WARNING' }
+                throw new Error(
+                    `Project typecheck repair failed for ${targetPath}. Refusing to mask the issue with @ts-nocheck. ` +
+                    `Last diagnostics:\n${tc.output.slice(0, 2500)}`
                 );
-                const forcedContent = `// @ts-nocheck: Codegen repair failure - forcing render\n${toWrite}`;
-                const finalWriteResult = await (skills as any).write_code(targetPath, forcedContent, projectPath);
-                if (!finalWriteResult.success) {
-                    throw new Error(
-                        `Project typecheck repair could not write a valid file for ${targetPath} even with @ts-nocheck: ${finalWriteResult.message}`
-                    );
-                }
             }
         }
     }

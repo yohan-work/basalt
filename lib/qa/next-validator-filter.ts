@@ -18,6 +18,11 @@ function lineIsNextValidatorTs2307(line: string): boolean {
     return n.includes('.next/types/validator.ts') && /\berror TS2307\b/i.test(line);
 }
 
+function lineIsNextValidatorError(line: string): boolean {
+    const n = line.replace(/\\/g, '/');
+    return n.includes('.next/types/validator.ts') && /\berror TS\d+:/i.test(line);
+}
+
 function resolvedImportStaysInProject(projectRoot: string, typesDir: string, relImport: string): boolean {
     const resolved = path.normalize(path.resolve(typesDir, relImport));
     const rootRes = path.resolve(projectRoot);
@@ -63,4 +68,15 @@ export function stripBenignNextValidatorTs2307(output: string, projectRoot: stri
 /** Non-empty tsc-style error lines (after strip). */
 export function projectTypecheckOutputHasErrors(output: string): boolean {
     return /\berror TS\d+:/i.test(output);
+}
+
+/**
+ * True when the remaining tsc errors all come from `.next/types/validator.ts`.
+ * This usually means route/typegen noise rather than a repairable source-file type error.
+ */
+export function projectTypecheckOutputHasOnlyValidatorErrors(output: string, projectRoot: string): boolean {
+    const stripped = stripBenignNextValidatorTs2307(output, projectRoot);
+    const errorLines = stripped.split(/\r?\n/).filter((line) => /\berror TS\d+:/i.test(line));
+    if (errorLines.length === 0) return false;
+    return errorLines.every(lineIsNextValidatorError);
 }

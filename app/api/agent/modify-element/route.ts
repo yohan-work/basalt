@@ -4,6 +4,7 @@ import * as skills from '@/lib/skills';
 import { generateSurgicalFileEdit } from '@/lib/llm';
 import { lineEditCostBetweenFiles, maxAllowedLineEditCost } from '@/lib/modify-element-line-cost';
 import {
+    type PickExtractedResult,
     normalizeFileContentForCompare,
     pickExtractedFileContent,
 } from '@/lib/modify-element-pick-extracted';
@@ -25,6 +26,10 @@ function trimBounded(s: unknown, max: number): string | undefined {
     const t = s.trim();
     if (!t) return undefined;
     return t.length > max ? `${t.slice(0, max)}\n…[truncated]` : t;
+}
+
+function isPickExtractedFailure(result: PickExtractedResult): result is Extract<PickExtractedResult, { ok: false }> {
+    return !result.ok;
 }
 
 function buildAnchorSection(
@@ -234,7 +239,7 @@ export async function POST(req: NextRequest) {
                     }
 
                     const picked = pickExtractedFileContent(codeResult.files, targetPath);
-                    if (!picked.ok) {
+                    if (isPickExtractedFailure(picked)) {
                         const listed = picked.pathsReturned.length ? picked.pathsReturned.join(', ') : '(none)';
                         const msg =
                             picked.reason === 'ambiguous'
