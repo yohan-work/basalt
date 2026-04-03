@@ -3,6 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
 
+import {
+    projectTypecheckOutputHasErrors,
+    stripBenignNextValidatorTs2307,
+} from './next-validator-filter';
+
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -108,11 +113,15 @@ export async function runProjectTypecheck(projectPath: string): Promise<ProjectT
         };
     } catch (err: unknown) {
         const e = err as { stdout?: string; stderr?: string; message?: string };
-        const combined = `${e.stdout || ''}${e.stderr || ''}`.trim() || e.message || String(err);
+        const raw = `${e.stdout || ''}${e.stderr || ''}`.trim() || e.message || String(err);
+        const stripped = stripBenignNextValidatorTs2307(raw, root);
+        const hadTscErrors = projectTypecheckOutputHasErrors(raw);
+        const ok = hadTscErrors && !projectTypecheckOutputHasErrors(stripped);
+        const out = (hadTscErrors ? stripped : raw).slice(0, MAX_OUTPUT_CHARS);
         return {
-            ok: false,
+            ok,
             skipped: false,
-            output: combined.slice(0, MAX_OUTPUT_CHARS),
+            output: out,
             command: cmdStr,
         };
     }
