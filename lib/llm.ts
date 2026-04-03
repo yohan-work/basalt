@@ -743,7 +743,15 @@ export async function generateJSONStream(
             // In the context of consult_agents or arrays, returning `{ thoughts: [] }` or empty obj
             // Since we don't know the exact schema, returning empty object is safest fallback.
             // Extractor or consumer functions should handle empty or missing properties safely.
-            result = {}; 
+            result = {};
+            Object.defineProperty(result, '__rawText', {
+                value: fullText,
+                enumerable: false,
+            });
+            Object.defineProperty(result, '__parseError', {
+                value: parseError?.message || 'JSON parse failed',
+                enumerable: false,
+            });
         }
 
         if (tokens) {

@@ -36,10 +36,14 @@ Generate a realistic dialogue between the following agents about the task at han
 - 대답 끝에 반드시 다른 사람에게 질문을 던지거나 반박을 유도하여 대화를 이어가세요.
 
 ## Schema
-```json
-{
-    "thoughts": [
-    { "agent": "exact-role-slug-from-available-agents", "thought": "메시지 내용...", "type": "idea" | "critique" | "agreement" }
-    ]
-}
-```
+출력은 **JSON이 아니라 일반 텍스트**로만 작성한다.
+
+형식:
+`role-slug | idea|critique|agreement | 한 문장 의견`
+
+규칙:
+- 1~3줄만 출력한다.
+- role-slug는 `availableAgents`에 실제 존재하는 role slug만 사용한다.
+- 각 thought는 반드시 한 줄이어야 한다.
+- 코드펜스, 목록, 추가 설명, JSON을 쓰지 않는다.
+- target role이 명시되면 딱 1줄만 출력하고, 그 role만 사용한다.
