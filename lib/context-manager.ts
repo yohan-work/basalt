@@ -14,6 +14,42 @@ interface FileContext {
     lastAccessed: number;
 }
 
+const MAX_RECENT_LOGS = 12;
+const MAX_RENDERED_FILES = 8;
+const MAX_FILE_HEAD_CHARS = 1200;
+const MAX_FILE_TAIL_CHARS = 320;
+const MAX_METADATA_CHARS = 220;
+
+function summarizeContent(content: string, maxChars: number = MAX_FILE_HEAD_CHARS): { text: string; truncated: boolean } {
+    if (!content || content.length <= maxChars) {
+        return { text: content, truncated: false };
+    }
+    const headChars = Math.max(200, Math.floor(maxChars * 0.72));
+    const tailChars = Math.max(MAX_FILE_TAIL_CHARS, Math.floor(maxChars * 0.2));
+    const head = content.slice(0, headChars);
+    const tail = content.slice(-tailChars);
+    return {
+        text: `${head}\n... (content truncated for context) ...\n${tail}`,
+        truncated: true,
+    };
+}
+
+function summarizeMetadata(metadata: unknown): string {
+    if (metadata === null || metadata === undefined) return '';
+    if (typeof metadata === 'string') {
+        const trimmed = metadata.trim();
+        if (!trimmed) return '';
+        return trimmed.length > MAX_METADATA_CHARS ? `${trimmed.slice(0, MAX_METADATA_CHARS)}…` : trimmed;
+    }
+    try {
+        const raw = JSON.stringify(metadata);
+        if (!raw) return '';
+        return raw.length > MAX_METADATA_CHARS ? `${raw.slice(0, MAX_METADATA_CHARS)}…` : raw;
+    } catch {
+        return '[unserializable metadata]';
+    }
+}
+
 export class ContextManager {
     private logs: ExecutionLog[] = [];
     private fileCache: Map<string, FileContext> = new Map();
@@ -72,56 +108,55 @@ export class ContextManager {
      * 3. Task Metadata
      */
     public getOptimizedContext(maxChars: number = 8000): string {
-        let context = '';
-
         const allFiles = Array.from(this.fileCache.values());
         const sortedFiles = [...allFiles].sort((a, b) => b.lastAccessed - a.lastAccessed);
+        const lines: string[] = [];
+        const fileBudget = Math.max(1200, Math.floor(maxChars * 0.72));
+        let currentChars = 0;
 
-        // 1. Add File List Summary
-        context += "### Available Files in Context Cache:\n";
-        for (const file of sortedFiles) {
-            context += `- ${file.path} (Last accessed: ${new Date(file.lastAccessed).toLocaleTimeString()})\n`;
+        lines.push('### Available Files in Context Cache:');
+        if (sortedFiles.length === 0) {
+            lines.push('- (none)');
+        } else {
+            for (const file of sortedFiles.slice(0, MAX_RENDERED_FILES)) {
+                const ageMs = Date.now() - file.lastAccessed;
+                lines.push(`- ${file.path} (last accessed ${Math.max(1, Math.round(ageMs / 1000))}s ago)`);
+            }
+            if (sortedFiles.length > MAX_RENDERED_FILES) {
+                lines.push(`- ... ${sortedFiles.length - MAX_RENDERED_FILES} more file(s) omitted from the summary`);
+            }
         }
-        context += "\n";
 
-        // 2. Add File Content (Prioritize recent)
-        context += "### Loaded Files Content:\n";
-        let currentChars = context.length;
-        const FILE_BUDGET = maxChars * 0.75; // 75% for files
+        lines.push('');
+        lines.push('### Loaded Files Content:');
 
         for (const file of sortedFiles) {
-            const fileHeader = `\n--- File: ${file.path} ---\n`;
-            if (currentChars + fileHeader.length + 100 > FILE_BUDGET) {
-                context += `\n--- File: ${file.path} (Omitted/Too many files) ---\n`;
+            if (currentChars >= fileBudget) {
+                lines.push(`--- File: ${file.path} (Omitted/Too many files) ---`);
                 continue;
             }
 
-            let fileContent = file.content;
-            const remainingBudget = FILE_BUDGET - (currentChars + fileHeader.length);
-
-            if (fileContent.length > remainingBudget) {
-                fileContent = fileContent.slice(0, remainingBudget) + "\n... (Content truncated due to context limits)";
-            }
-
-            const fileBlock = fileHeader + fileContent + "\n";
-            context += fileBlock;
+            const fileHeader = `--- File: ${file.path} ---`;
+            const { text } = summarizeContent(file.content, Math.min(MAX_FILE_HEAD_CHARS, Math.max(300, fileBudget - currentChars - fileHeader.length - 32)));
+            const fileBlock = `${fileHeader}\n${text}`;
             currentChars += fileBlock.length;
-
-            if (currentChars >= FILE_BUDGET) break;
+            lines.push(fileBlock);
+            lines.push('');
         }
 
-        // 3. Add Execution Logs (Must have some logs)
-        context += "\n### Recent Execution History:\n";
-        const recentLogs = this.logs.slice(-15);
+        lines.push('### Recent Execution History:');
+        const recentLogs = this.logs.slice(-MAX_RECENT_LOGS);
         if (recentLogs.length === 0) {
-            context += "(No logs recorded yet)\n";
+            lines.push('(No logs recorded yet)');
         } else {
             for (const log of recentLogs) {
-                context += `[${log.agent}] ${log.message}\n`;
+                const metadata = summarizeMetadata(log.metadata);
+                const suffix = metadata ? ` | metadata=${metadata}` : '';
+                lines.push(`[${log.agent}] ${log.message}${suffix}`);
             }
         }
 
-        return context;
+        return lines.join('\n').trim();
     }
 
     /**
@@ -156,10 +191,29 @@ export class ContextManager {
                     },
                 ])
             };
+            const contextSnapshot = {
+                generatedAt: new Date().toISOString(),
+                fileCount: this.fileCache.size,
+                recentFiles: Array.from(this.fileCache.values())
+                    .sort((a, b) => b.lastAccessed - a.lastAccessed)
+                    .slice(0, MAX_RENDERED_FILES)
+                    .map((file) => ({
+                        path: file.path,
+                        contentLength: file.content.length,
+                        lastAccessed: file.lastAccessed,
+                    })),
+                recentLogs: this.logs.slice(-MAX_RECENT_LOGS).map((log) => ({
+                    agent: log.agent,
+                    message: log.message,
+                    timestamp: log.timestamp,
+                    metadata: summarizeMetadata(log.metadata) || undefined,
+                })),
+            };
 
             const newMetadata = {
                 ...(current?.metadata || {}),
-                ...contextState
+                ...contextState,
+                contextSnapshot,
             };
 
             await supabase.from('Tasks').update({ metadata: newMetadata }).eq('id', this.taskId);
@@ -264,7 +318,8 @@ export class ContextManager {
             let currentChars = context.length;
 
             for (const file of sortedFiles) {
-                const fileBlock = `\n--- File: ${file.path} ---\n${file.content}\n`;
+                const { text } = summarizeContent(file.content, MAX_FILE_HEAD_CHARS);
+                const fileBlock = `\n--- File: ${file.path} ---\n${text}\n`;
                 // Heuristic: Reserve space for agent instructions
                 if (currentChars + fileBlock.length < maxChars * 0.9) {
                     context += fileBlock;
@@ -278,4 +333,3 @@ export class ContextManager {
         return context;
     }
 }
-
