@@ -11,7 +11,9 @@
     "lint:types:changed": "node ./scripts/validate-client-boundary.mjs --types-only --changed",
     "lint": "npm run lint:rsc && npm run lint:types && eslint",
     "test:arg-schemas": "tsx --test lib/skills/arg-schemas.test.ts",
-    "test": "npm run lint:rsc && npm run lint:types && node ./scripts/smoke-check.mjs && npm run test:arg-schemas && npm run test:path-sandbox && npm run test:next-validator",
+    "test:command-risk": "tsx --test lib/command-risk.test.ts",
+    "test:session-memory": "tsx --test lib/session-memory.test.ts",
+    "test": "npm run lint:rsc && npm run lint:types && node ./scripts/smoke-check.mjs && npm run test:arg-schemas && npm run test:command-risk && npm run test:session-memory && npm run test:path-sandbox && npm run test:next-validator",
     "test:path-sandbox": "tsx --test lib/path-sandbox.test.ts",
     "test:next-validator": "tsx --test lib/qa/next-validator-filter.test.ts"
   },

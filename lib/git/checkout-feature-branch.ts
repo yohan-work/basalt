@@ -1,7 +1,8 @@
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { classifyCommandRisk, resolveCommandRiskMode, shouldBlockByRisk } from '@/lib/command-risk';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Switches to an existing local branch or creates it from the current HEAD.
@@ -11,11 +12,16 @@ export async function checkoutOrCreateLocalBranch(cwd: string, branchName: strin
     if (!branchName || /[\s'"`;]/.test(branchName)) {
         throw new Error(`Unsafe or empty branch name: ${branchName}`);
     }
+    const risk = classifyCommandRisk(`git checkout ${branchName}`);
+    const riskMode = resolveCommandRiskMode();
+    if (shouldBlockByRisk(risk.level, riskMode)) {
+        throw new Error(`Blocked by BASALT_COMMAND_RISK_MODE=${riskMode}: ${risk.level} risk (${risk.reason}).`);
+    }
     try {
-        await execAsync(`git show-ref --verify --quiet refs/heads/${branchName}`, { cwd });
+        await execFileAsync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branchName}`], { cwd });
     } catch {
-        await execAsync(`git checkout -b ${branchName}`, { cwd });
+        await execFileAsync('git', ['checkout', '-b', branchName], { cwd });
         return;
     }
-    await execAsync(`git checkout ${branchName}`, { cwd });
+    await execFileAsync('git', ['checkout', branchName], { cwd });
 }

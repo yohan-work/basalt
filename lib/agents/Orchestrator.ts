@@ -66,6 +66,7 @@ import {
     buildDefaultImpactPreview,
     type ImpactPreviewPayload,
 } from '../pre-execution/gates';
+import { sendDebugIngest } from '@/lib/debug-ingest';
 
 interface AgentTask {
     id: string; // Supabase UUID
@@ -3298,20 +3299,13 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
             }
 
             this.executionMetrics.endedAt = new Date().toISOString();
-            // #region agent log
-            fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
-                body: JSON.stringify({
-                    sessionId: 'f89f62',
-                    hypothesisId: 'H1',
-                    location: 'Orchestrator.ts:execute:before_dev_exit_qa',
-                    message: 'execute_workflow_loop_done_before_testing',
-                    data: { taskId: this.taskId, totalSteps: workflow.steps.length },
-                    timestamp: Date.now(),
-                }),
-            }).catch(() => {});
-            // #endregion
+            void sendDebugIngest({
+                sessionId: 'f89f62',
+                hypothesisId: 'H1',
+                location: 'Orchestrator.ts:execute:before_dev_exit_qa',
+                message: 'execute_workflow_loop_done_before_testing',
+                data: { taskId: this.taskId, totalSteps: workflow.steps.length },
+            });
             await this.runDevExitQaPipeline(projectPath, task, mainAgentName, techStack, workflow.steps.length);
             await this.updateStatus('testing');
             await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
@@ -3393,20 +3387,13 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
         techStack: string,
         syntheticStepIndex: number
     ) {
-        // #region agent log
-        fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
-            body: JSON.stringify({
-                sessionId: 'f89f62',
-                hypothesisId: 'H2',
-                location: 'Orchestrator.ts:runDevExitQaPipeline:entry',
-                message: 'dev_exit_qa_pipeline_start',
-                data: { taskId: this.taskId },
-                timestamp: Date.now(),
-            }),
-        }).catch(() => {});
-        // #endregion
+        void sendDebugIngest({
+            sessionId: 'f89f62',
+            hypothesisId: 'H2',
+            location: 'Orchestrator.ts:runDevExitQaPipeline:entry',
+            message: 'dev_exit_qa_pipeline_start',
+            data: { taskId: this.taskId },
+        });
 
         this.emitter?.emit({ type: 'phase_start', phase: 'dev_exit_qa', taskId: this.taskId });
         // Dev QA 직전에만 재탐지: CLI 설치·AGENT_BROWSER_BIN 설정 후에도 이전 false 캐시가 남지 않게 함
@@ -3626,42 +3613,28 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
             } catch (memoryErr: any) {
                 await this.log('System', `QA 메모리 저장 실패: ${memoryErr.message}`, { type: 'WARNING' });
             }
-            // #region agent log
-            fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
-                body: JSON.stringify({
-                    sessionId: 'f89f62',
-                    hypothesisId: 'H3',
-                    location: 'Orchestrator.ts:runDevExitQaPipeline:signoff',
-                    message: 'dev_exit_qa_signoff_written',
-                    data: {
-                        taskId: this.taskId,
-                        artifactSlots: qaArtifactSlots.length,
-                        smokePassed: qaPageCheck.passed,
-                    },
-                    timestamp: Date.now(),
-                }),
-            }).catch(() => {});
-            // #endregion
+            void sendDebugIngest({
+                sessionId: 'f89f62',
+                hypothesisId: 'H3',
+                location: 'Orchestrator.ts:runDevExitQaPipeline:signoff',
+                message: 'dev_exit_qa_signoff_written',
+                data: {
+                    taskId: this.taskId,
+                    artifactSlots: qaArtifactSlots.length,
+                    smokePassed: qaPageCheck.passed,
+                },
+            });
         } catch (signoffErr: any) {
             await this.log('System', `Dev 종료 QA 검수 리포트 저장 실패: ${signoffErr.message}`, { type: 'WARNING' });
         }
 
-        // #region agent log
-        fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
-            body: JSON.stringify({
-                sessionId: 'f89f62',
-                hypothesisId: 'H2',
-                location: 'Orchestrator.ts:runDevExitQaPipeline:exit',
-                message: 'dev_exit_qa_pipeline_complete',
-                data: { taskId: this.taskId, smokePassed: qaPageCheck.passed },
-                timestamp: Date.now(),
-            }),
-        }).catch(() => {});
-        // #endregion
+        void sendDebugIngest({
+            sessionId: 'f89f62',
+            hypothesisId: 'H2',
+            location: 'Orchestrator.ts:runDevExitQaPipeline:exit',
+            message: 'dev_exit_qa_pipeline_complete',
+            data: { taskId: this.taskId, smokePassed: qaPageCheck.passed },
+        });
     }
 
     /** Dev QA 스모크 실패 시 한 번의 write_code 사이클로 수정 시도 */
@@ -3676,20 +3649,13 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
         syntheticStepIndex: number,
         devQaNextBuildExcerpt?: string
     ): Promise<boolean> {
-        // #region agent log
-        fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
-            body: JSON.stringify({
-                sessionId: 'f89f62',
-                hypothesisId: 'H4',
-                location: 'Orchestrator.ts:runDevQaRepairWriteCode',
-                message: 'dev_qa_repair_attempt',
-                data: { taskId: this.taskId, repairRound, passed: qaPageCheck.passed },
-                timestamp: Date.now(),
-            }),
-        }).catch(() => {});
-        // #endregion
+        void sendDebugIngest({
+            sessionId: 'f89f62',
+            hypothesisId: 'H4',
+            location: 'Orchestrator.ts:runDevQaRepairWriteCode',
+            message: 'dev_qa_repair_attempt',
+            data: { taskId: this.taskId, repairRound, passed: qaPageCheck.passed },
+        });
 
         if (!this.checkBudget('tokens')) {
             await this.log(mainAgentName, 'Dev QA 수정: 토큰 예산 부족', { type: 'ERROR' });

@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { Orchestrator } from '@/lib/agents/Orchestrator';
 import { runRalphSession } from '@/lib/agents/ralph-runner';
 import { StreamEmitter } from '@/lib/stream-emitter';
+import { sendDebugIngest } from '@/lib/debug-ingest';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,20 +88,13 @@ export async function GET(req: NextRequest) {
                     }
                     case 'execute': {
                         await orchestrator.execute(undefined, executionOptions);
-                        // #region agent log
-                        fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f89f62' },
-                            body: JSON.stringify({
-                                sessionId: 'f89f62',
-                                hypothesisId: 'H1',
-                                location: 'stream/route.ts:execute:after',
-                                message: 'sse_execute_handler_returned',
-                                data: { taskId },
-                                timestamp: Date.now(),
-                            }),
-                        }).catch(() => {});
-                        // #endregion
+                        void sendDebugIngest({
+                            sessionId: 'f89f62',
+                            hypothesisId: 'H1',
+                            location: 'stream/route.ts:execute:after',
+                            message: 'sse_execute_handler_returned',
+                            data: { taskId },
+                        });
                         break;
                     }
                     case 'verify': {

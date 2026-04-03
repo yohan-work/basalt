@@ -12,6 +12,7 @@ import { isDefaultPrismaGeneratedClientPresent, ProjectProfiler } from '../profi
 import { mergeCompilerPathsFromConfigs } from '../tsconfig-paths';
 import { getAgentBrowserExecutable } from '../browser/agent-browser';
 import { assertPathInsideProjectRoot } from '../path-sandbox';
+import { classifyCommandRisk, resolveCommandRiskMode, shouldBlockByRisk } from '../command-risk';
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -1854,11 +1855,21 @@ export { screenshot_page } from './screenshot_page/execute';
 
 // --- QA & Debugger Skills ---
 export async function run_shell_command(command: string, cwd: string = process.cwd()) {
+    const risk = classifyCommandRisk(command);
+    const riskMode = resolveCommandRiskMode();
+    if (shouldBlockByRisk(risk.level, riskMode)) {
+        return {
+            error: `Blocked by BASALT_COMMAND_RISK_MODE=${riskMode}: ${risk.level} risk (${risk.reason}).`,
+            blocked: true,
+            risk,
+        };
+    }
+
     try {
-        const { stdout, stderr } = await execAsync(command, { cwd });
-        return { stdout, stderr };
+        const { stdout, stderr } = await execFileAsync('bash', ['-lc', command], { cwd });
+        return { stdout, stderr, risk };
     } catch (error: any) {
-        return { error: error.message };
+        return { error: error.message, risk };
     }
 }
 
@@ -1894,39 +1905,91 @@ Provide a clear explanation and a specific suggested fix.
 }
 
 // --- Git & DevOps Manager Skills ---
+function splitShellLikeArgs(input: string): string[] {
+    const text = String(input || '').trim();
+    if (!text) return [];
+    const tokens: string[] = [];
+    const re = /"([^"]*)"|'([^']*)'|[^\s]+/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) {
+        tokens.push(m[1] ?? m[2] ?? m[0]);
+    }
+    return tokens;
+}
+
+function hasDangerousArgMetachar(input: string): boolean {
+    return /[;&|`$><]/.test(String(input || ''));
+}
+
 export async function manage_git(action: 'checkout' | 'commit' | 'merge' | 'add' | 'push' | 'status' | 'create_pr', args: string, cwd: string = process.cwd()) {
     // Check if 'gh' CLI is available for PR creation
     if (action === 'create_pr') {
         try {
-            await execAsync('gh --version');
+            await execFileAsync('gh', ['--version']);
         } catch (e) {
             throw new Error('GitHub CLI (gh) is not installed. Please install it and authenticate using `gh auth login` to enable automated PR creation.');
         }
     }
 
-    // Simplified git wrapper
-    const commands: Record<string, string> = {
-        checkout: `git checkout ${args}`,
-        commit: `git commit --allow-empty -m "${args}"`,
-        merge: `git merge ${args}`,
-        add: `git add ${args}`,
-        push: `git push ${args}`,
-        status: `git status`,
-        create_pr: `gh pr create ${args}`
-    };
+    const argText = String(args || '');
+    if (hasDangerousArgMetachar(argText)) {
+        throw new Error(`Unsafe git args rejected: ${argText}`);
+    }
+    const tokens = splitShellLikeArgs(argText);
+    let program = 'git';
+    let finalArgs: string[] = [];
+    let commandForRisk = '';
 
-    if (!commands[action]) throw new Error(`Invalid git action: ${action}`);
+    switch (action) {
+        case 'checkout':
+            finalArgs = ['checkout', ...tokens];
+            commandForRisk = `git checkout ${tokens.join(' ')}`.trim();
+            break;
+        case 'commit':
+            finalArgs = ['commit', '--allow-empty', '-m', argText];
+            commandForRisk = `git commit --allow-empty -m "${argText}"`;
+            break;
+        case 'merge':
+            finalArgs = ['merge', ...tokens];
+            commandForRisk = `git merge ${tokens.join(' ')}`.trim();
+            break;
+        case 'add':
+            finalArgs = ['add', ...tokens];
+            commandForRisk = `git add ${tokens.join(' ')}`.trim();
+            break;
+        case 'push':
+            finalArgs = ['push', ...tokens];
+            commandForRisk = `git push ${tokens.join(' ')}`.trim();
+            break;
+        case 'status':
+            finalArgs = ['status'];
+            commandForRisk = 'git status';
+            break;
+        case 'create_pr':
+            program = 'gh';
+            finalArgs = ['pr', 'create', ...tokens];
+            commandForRisk = `gh pr create ${tokens.join(' ')}`.trim();
+            break;
+        default:
+            throw new Error(`Invalid git action: ${action}`);
+    }
+
+    const risk = classifyCommandRisk(commandForRisk);
+    const riskMode = resolveCommandRiskMode();
+    if (shouldBlockByRisk(risk.level, riskMode)) {
+        throw new Error(`Blocked by BASALT_COMMAND_RISK_MODE=${riskMode}: ${risk.level} risk (${risk.reason}).`);
+    }
 
     try {
-        const { stdout, stderr } = await execAsync(commands[action], { cwd });
-        if (stderr && !stdout && !commands[action].includes('status')) {
+        const { stdout, stderr } = await execFileAsync(program, finalArgs, { cwd });
+        if (stderr && !stdout && action !== 'status') {
             // Some git commands output to stderr even on success, but usually not all of it.
             // However, execAsync might put actual errors here.
         }
-        return stdout;
+        return { success: true, output: stdout || stderr, risk };
     } catch (error: any) {
-        // Throw actual error instead of returning it as a string
-        throw new Error(`Git command failed (${commands[action]}): ${error.message}`);
+        const finalCommand = `${program} ${finalArgs.join(' ')}`.trim();
+        throw new Error(`Git command failed (${finalCommand}): ${error.message}`);
     }
 }
 
