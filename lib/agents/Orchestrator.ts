@@ -14,6 +14,7 @@ import { validateSkillArgsBeforeExecution } from '@/lib/skills/arg-schemas';
 import { SKILL_ARG_GENERATION_INTRO, SKILL_ARG_GENERATION_RULES } from '@/lib/prompts/skill-arg-generation';
 import { getCachedSkillArgPromptBlock } from '@/lib/skills/skill-arg-prompt-cache';
 import { formatSkillResultForExecutionLog } from '@/lib/agents/skill-result-format';
+import { appendSessionMemoryEntry, loadRelevantSessionMemory } from '@/lib/session-memory';
 import * as llm from '@/lib/llm';
 import fs from 'fs';
 import path from 'path';
@@ -350,6 +351,22 @@ export class Orchestrator {
         } catch {
             return null;
         }
+    }
+
+    private async getSessionMemoryContext(query: string, options?: { limit?: number; maxChars?: number }): Promise<string> {
+        try {
+            return await loadRelevantSessionMemory(this.profiler.getProjectRoot(), query, options);
+        } catch {
+            return '';
+        }
+    }
+
+    private summarizeThoughts(thoughts: Array<{ agent?: string; thought?: string; type?: string }>, maxItems = 4): string {
+        const lines = thoughts
+            .filter((item) => Boolean(item?.agent) && Boolean(item?.thought))
+            .slice(0, maxItems)
+            .map((item) => `- [${item.agent}] ${String(item.thought).slice(0, 200)}`);
+        return lines.join('\n');
     }
 
     private isExplicitRootPageRequest(taskDescription: string, stepDescription: string, codePrompt: string): boolean {
@@ -1098,17 +1115,21 @@ export class Orchestrator {
                     this.profiler = new ProjectProfiler(projectPath);
                     await this.log(mainAgentName, `Scanning project at: ${projectPath}`, { type: 'System' });
 
-                    try {
-                        const [profilerContext, pkgJson] = await Promise.all([
-                            this.profiler.getContextString(),
-                            skills.read_codebase('package.json', projectPath),
-                        ]);
-                        codebaseContext = profilerContext;
+                try {
+                    const [profilerContext, pkgJson] = await Promise.all([
+                        this.profiler.getContextString(),
+                        skills.read_codebase('package.json', projectPath),
+                    ]);
+                    const sessionMemoryContext = await this.getSessionMemoryContext(taskDescription, {
+                        limit: 4,
+                        maxChars: 2500,
+                    });
+                    codebaseContext = [profilerContext, sessionMemoryContext].filter(Boolean).join('\n\n');
 
-                        // Also Add package.json explicitly for more depth if needed
-                        this.contextManager.addFile('package.json', pkgJson);
-                    } catch (error: any) {
-                        await this.log(mainAgentName, `Initial scan failed: ${error.message}`, { type: 'WARNING' });
+                    // Also Add package.json explicitly for more depth if needed
+                    this.contextManager.addFile('package.json', pkgJson);
+                } catch (error: any) {
+                    await this.log(mainAgentName, `Initial scan failed: ${error.message}`, { type: 'WARNING' });
                     }
                 }
             }
@@ -1167,6 +1188,66 @@ export class Orchestrator {
                 workflowSanity.workflow.steps
                     ?.map((s: { agent: string; action: string }, i: number) => `${i + 1}. [${s.agent}] ${s.action}`)
                     .join('\n') || '';
+
+            await this.log(mainAgentName, '계획 검토를 시작합니다. 실행 전 누락된 위험/검증/가정을 점검합니다.', { type: 'THOUGHT' });
+            this.emitter?.emit({ type: 'skill_execute', skill: 'consult_agents', args: 'plan_review' });
+            const planReview = await skills.consult_agents(
+                {
+                    summary: `플랜 검토: ${taskDescription}`,
+                    required_agents: ['product-manager', 'software-engineer', 'qa'],
+                    complexity: 'high',
+                },
+                availableAgents,
+                [
+                    codebaseContext,
+                    '[PROPOSED WORKFLOW]',
+                    workflowSteps,
+                    '[PLAN REVIEW FOCUS]',
+                    '1. 누락된 요구사항이 있는지 점검',
+                    '2. 위험한 구현 가정이 있는지 점검',
+                    '3. 테스트/검증 단계가 충분한지 점검',
+                    '4. 롤백/실패 처리 경로가 있는지 점검',
+                ].filter(Boolean).join('\n\n'),
+                this.emitter,
+                [],
+                {
+                    extraHintText: `${taskDescription}\n${effectiveDescription}`,
+                }
+            );
+            for (const item of planReview) {
+                if (!item.agent || !item.thought) continue;
+                await this.log(item.agent, item.thought, { type: 'REVIEW', thought_type: item.type || 'review' });
+                this.recordCollaboration(mainAgentName, item.agent, 'plan_review');
+            }
+            const planReviewSummary = this.summarizeThoughts(planReview);
+            await this.updateMetadata({
+                planReview: {
+                    reviewedAt: new Date().toISOString(),
+                    thoughts: planReview,
+                    summary: planReviewSummary,
+                },
+            });
+            await appendSessionMemoryEntry({
+                projectPath,
+                taskId: this.taskId,
+                kind: 'plan',
+                title: `Plan: ${taskDescription.slice(0, 80)}`,
+                summary: (typeof (analysis as any)?.summary === 'string' ? (analysis as any).summary : 'Plan created')?.slice(0, 500),
+                body: [
+                    '## Workflow',
+                    workflowSteps || '(no steps)',
+                    '',
+                    '## Plan Review',
+                    planReviewSummary || '(no review notes)',
+                ].join('\n'),
+                keywords: [
+                    'plan',
+                    'workflow',
+                    ...(Array.isArray((analysis as any)?.required_agents) ? (analysis as any).required_agents : []),
+                ].map(String),
+                source: 'Orchestrator.plan',
+            });
+
             const analysisSummary =
                 typeof (analysis as any)?.summary === 'string'
                     ? (analysis as any).summary
@@ -1348,6 +1429,10 @@ export class Orchestrator {
 
         // Get Optimized Context
         const dynamicContext = this.contextManager.getOptimizedContext(contextBudget);
+        const sessionMemoryContext = await this.getSessionMemoryContext(`${taskDescription}\n${stepDescription || ''}`, {
+            limit: 4,
+            maxChars: 2200,
+        });
 
         // --- Load PROJECT_CONVENTIONS.md for Project-Specific Rules ---
         let projectConventions = '';
@@ -1383,6 +1468,8 @@ Tech Stack: ${techStack}
 ${await this.profiler.getContextString()}
 
 ${dynamicContext}
+
+${sessionMemoryContext}
 
 ${SKILL_ARG_GENERATION_RULES}
 `;
@@ -3228,6 +3315,25 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
             await this.runDevExitQaPipeline(projectPath, task, mainAgentName, techStack, workflow.steps.length);
             await this.updateStatus('testing');
             await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
+            try {
+                await appendSessionMemoryEntry({
+                    projectPath,
+                    taskId: this.taskId,
+                    kind: 'execution',
+                    title: `Execution: ${task.description?.slice(0, 80) || 'task'}`,
+                    summary: `워크플로 실행이 완료되었습니다. 총 ${workflow.steps.length}단계가 실행되었고 상태는 testing으로 전환되었습니다.`,
+                    body: [
+                        '## Workflow Steps',
+                        workflow.steps
+                            .map((step: { agent?: string; action?: string }, index: number) => `${index + 1}. [${step.agent || 'unknown'}] ${step.action || 'unknown'}`)
+                            .join('\n'),
+                    ].join('\n'),
+                    keywords: ['execution', 'testing', ...workflow.steps.map((step: { action?: string }) => String(step.action || ''))],
+                    source: 'Orchestrator.execute',
+                });
+            } catch (memoryErr: any) {
+                await this.log('System', `세션 메모리 저장 실패: ${memoryErr.message}`, { type: 'WARNING' });
+            }
             // Release lock on success
             await this.updateMetadata({
                 lock: null,
@@ -3248,6 +3354,26 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                 executionMetrics: this.executionMetrics,
                 budgetPolicy: this.budgetPolicy,
             });
+            try {
+                const latestTask = await this.getTask();
+                const latestProjectPath = ((latestTask as any)?.project_id)
+                    ? (await supabase.from('Projects').select('path').eq('id', (latestTask as any).project_id).single())?.data?.path
+                    : null;
+                if (latestProjectPath) {
+                    await appendSessionMemoryEntry({
+                        projectPath: latestProjectPath,
+                        taskId: this.taskId,
+                        kind: 'note',
+                        title: `Failure: ${((latestTask as any)?.description || 'task').slice(0, 80)}`,
+                        summary: `실행 단계가 실패했습니다: ${error.message}`,
+                        body: `## Last Error\n${error.message}\n\n## Retry Count\n${((latestTask as any)?.metadata?.retryCount || 0) + 1}`,
+                        keywords: ['failure', 'execution', 'retry'],
+                        source: 'Orchestrator.execute.catch',
+                    });
+                }
+            } catch (memoryErr: any) {
+                await this.log('System', `실패 메모리 저장 생략: ${memoryErr.message}`, { type: 'WARNING' });
+            }
             this.emitter?.emit({ type: 'error', message: error.message });
             this.emitter?.emit({ type: 'done', status: 'failed' });
         } finally {
@@ -3480,6 +3606,26 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                 executionRepairs: repairs,
             });
             await this.updateMetadata({ qaSignoff });
+            try {
+                await appendSessionMemoryEntry({
+                    projectPath,
+                    taskId: this.taskId,
+                    kind: 'qa',
+                    title: `QA signoff: ${(freshTask as any)?.description?.slice(0, 80) || 'task'}`,
+                    summary: `Dev 종료 QA가 완료되었습니다. 스모크 결과: ${qaPageCheck.passed ? 'passed' : 'failed'} / 검증: ${verification.verified ? 'verified' : 'failed'}.`,
+                    body: [
+                        '## QA Summary',
+                        qaSignoff.finalVerdictKo || qaSignoff.narrativeKo || '',
+                        '',
+                        '## Smoke',
+                        qaPageCheck.summary,
+                    ].join('\n'),
+                    keywords: ['qa', 'verification', qaPageCheck.passed ? 'passed' : 'failed'],
+                    source: 'Orchestrator.runDevExitQaPipeline',
+                });
+            } catch (memoryErr: any) {
+                await this.log('System', `QA 메모리 저장 실패: ${memoryErr.message}`, { type: 'WARNING' });
+            }
             // #region agent log
             fetch('http://127.0.0.1:7256/ingest/07895da6-6416-419c-90c0-27e158a5f87a', {
                 method: 'POST',
