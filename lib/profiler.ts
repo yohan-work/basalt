@@ -72,6 +72,10 @@ export function findExistingCnUtilsRelPath(projectRoot: string): string | null {
  */
 export class ProjectProfiler {
     private projectRoot: string;
+    private profileCache: { at: number; value: any } | null = null;
+    private stackSummaryCache: { at: number; value: string } | null = null;
+    private contextStringCache: { at: number; value: string } | null = null;
+    private readonly CACHE_TTL_MS = 2_500;
 
     constructor(projectRoot: string) {
         this.projectRoot = projectRoot;
@@ -81,10 +85,23 @@ export class ProjectProfiler {
         return this.projectRoot;
     }
 
+    public invalidateCache(): void {
+        this.profileCache = null;
+        this.stackSummaryCache = null;
+        this.contextStringCache = null;
+    }
+
+    private isCacheFresh(at: number): boolean {
+        return Date.now() - at < this.CACHE_TTL_MS;
+    }
+
     /**
      * Gets summary of the project environment.
      */
     public async getProfileData() {
+        if (this.profileCache && this.isCacheFresh(this.profileCache.at)) {
+            return this.profileCache.value;
+        }
         const stackProfile = inferStackProfile(this.projectRoot);
         const packageInfo = {
             stack: formatTechStackDisplay(stackProfile),
@@ -101,7 +118,7 @@ export class ProjectProfiler {
         const routerBase = this.getRouteBaseFromStructure(structure);
         const pageCandidates = routerBase ? this.getPageCandidates(routerBase) : [];
 
-        return {
+        const profile = {
             techStack: packageInfo.stack,
             dependencies: packageInfo.deps,
             depsWithVersions: packageInfo.depsWithVersions,
@@ -123,6 +140,11 @@ export class ProjectProfiler {
             hasTailwind,
             stackProfile,
         };
+        this.profileCache = {
+            at: Date.now(),
+            value: profile,
+        };
+        return profile;
     }
 
     private async getAvailableComponentsInfo(): Promise<{
@@ -272,6 +294,9 @@ export class ProjectProfiler {
      * suitable for injecting into LLM prompt constraints.
      */
     public async getStackSummary(): Promise<string> {
+        if (this.stackSummaryCache && this.isCacheFresh(this.stackSummaryCache.at)) {
+            return this.stackSummaryCache.value;
+        }
         const data = await this.getProfileData();
         const versions = data.depsWithVersions;
 
@@ -362,13 +387,21 @@ export class ProjectProfiler {
             lines.push('중요: 위 목록에 없는 npm 패키지는 절대 import하지 마세요. 설치되지 않은 패키지를 사용하면 빌드 에러가 발생합니다.');
         }
 
-        return lines.join('\n');
+        const summary = lines.join('\n');
+        this.stackSummaryCache = {
+            at: Date.now(),
+            value: summary,
+        };
+        return summary;
     }
 
     /**
      * Formats the profile into a string for LLM prompts.
      */
     public async getContextString(): Promise<string> {
+        if (this.contextStringCache && this.isCacheFresh(this.contextStringCache.at)) {
+            return this.contextStringCache.value;
+        }
         const data = await this.getProfileData();
         const shadcnWarning = (data.availableUIComponents.length > 0 && !data.hasTailwind)
             ? '\n[WARNING] Project has shadcn/ui components but Tailwind CSS is NOT installed. These components may NOT render correctly without Tailwind. Prefer standard HTML tags or inline styles.'
@@ -505,7 +538,7 @@ export class ProjectProfiler {
         const routeExportResolution = resolveRouteExportStyle(this.projectRoot, data.routerBase, data.structure);
         const exportStylePolicyBlock = formatExportStylePolicySection(routeExportResolution);
 
-        return `
+        const context = `
 [PROJECT CONTEXT]
 - Tech Stack: ${data.techStack}
 - VERSION_CONSTRAINTS (package.json → 파싱 메이저): ${formatVersionConstraintsLine(data.stackProfile)}
@@ -529,6 +562,11 @@ ${designHints}
 [STACK_RULES]
 ${stackRules}
 `.trim();
+        this.contextStringCache = {
+            at: Date.now(),
+            value: context,
+        };
+        return context;
     }
 
     /**

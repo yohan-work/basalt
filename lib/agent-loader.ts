@@ -25,7 +25,30 @@ export interface AgentDefinition {
 
 const BASE_DIR = process.cwd();
 
+type CachedFileEntry<T> = {
+    mtimeMs: number;
+    size: number;
+    value: T;
+};
+
 export class AgentLoader {
+    private static agentCache = new Map<string, CachedFileEntry<AgentDefinition>>();
+    private static skillCache = new Map<string, CachedFileEntry<SkillDefinition>>();
+
+    private static readCacheSignature(filePath: string): { mtimeMs: number; size: number } | null {
+        try {
+            const stat = fs.statSync(filePath);
+            return { mtimeMs: stat.mtimeMs, size: stat.size };
+        } catch {
+            return null;
+        }
+    }
+
+    public static clearCaches(): void {
+        this.agentCache.clear();
+        this.skillCache.clear();
+    }
+
     /**
      * Loads an Agent configuration from lib/agents/[role]/AGENT.md
      */
@@ -34,6 +57,11 @@ export class AgentLoader {
             const filePath = path.join(BASE_DIR, 'lib', 'agents', role, 'AGENT.md');
             if (!fs.existsSync(filePath)) {
                 throw new Error(`Agent configuration not found for role: ${role}`);
+            }
+            const cached = this.agentCache.get(filePath);
+            const signature = this.readCacheSignature(filePath);
+            if (cached && signature && cached.mtimeMs === signature.mtimeMs && cached.size === signature.size) {
+                return cached.value;
             }
 
             const fileContent = fs.readFileSync(filePath, 'utf-8');
@@ -44,7 +72,7 @@ export class AgentLoader {
             const skills = this.extractListFromSection(content, 'Available Skills');
             const subAgents = this.extractListFromSection(content, 'Sub-Agents');
 
-            return {
+            const agent: AgentDefinition = {
                 name: data.name || role,
                 role: role,
                 description: data.description || '',
@@ -52,6 +80,10 @@ export class AgentLoader {
                 skills,
                 subAgents
             };
+            if (signature) {
+                this.agentCache.set(filePath, { ...signature, value: agent });
+            }
+            return agent;
         } catch (error: any) {
             console.error(`Failed to load agent ${role}:`, error);
             throw error;
@@ -101,21 +133,11 @@ export class AgentLoader {
             for (const entry of entries) {
                 if (entry.isDirectory()) {
                     try {
-                        const filePath = path.join(skillsDir, entry.name, 'SKILL.md');
-                        if (fs.existsSync(filePath)) {
-                            // Level 1: Meta-data loading only to save token processing
-                            const fileContent = fs.readFileSync(filePath, 'utf-8');
-                            
-                            // We only need the YAML frontmatter
-                            const endOfMatter = fileContent.indexOf('---', 3);
-                            const matterContent = endOfMatter !== -1 ? fileContent.substring(0, endOfMatter + 3) : fileContent;
-                            
-                            const { data } = matter(matterContent);
-                            skillsBrief.push({
-                                name: data.name || entry.name,
-                                description: data.description || 'No description provided.'
-                            });
-                        }
+                        const skill = this.loadSkill(entry.name);
+                        skillsBrief.push({
+                            name: skill.name || entry.name,
+                            description: skill.description || 'No description provided.'
+                        });
                     } catch (e) {
                         console.warn(`Skipping invalid skill directory: ${entry.name}`);
                     }
@@ -146,6 +168,11 @@ export class AgentLoader {
                     instructions: ''
                 };
             }
+            const cached = this.skillCache.get(localPath);
+            const signature = this.readCacheSignature(localPath);
+            if (cached && signature && cached.mtimeMs === signature.mtimeMs && cached.size === signature.size) {
+                return cached.value;
+            }
 
             const fileContent = fs.readFileSync(localPath, 'utf-8');
             const { data, content } = matter(fileContent);
@@ -154,13 +181,17 @@ export class AgentLoader {
             const inputsSection = this.extractSection(content, 'Inputs');
             const inputParams = this.extractInputParams(inputsSection);
 
-            return {
+            const skill: SkillDefinition = {
                 name: data.name || skillName,
                 description: data.description || '',
                 instructions: content.trim(),
                 inputs: inputsSection,
                 inputParams,
             };
+            if (signature) {
+                this.skillCache.set(localPath, { ...signature, value: skill });
+            }
+            return skill;
         } catch (error: any) {
             console.error(`Failed to load skill ${skillName}:`, error);
             throw error;
