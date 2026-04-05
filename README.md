@@ -1,33 +1,186 @@
 # Basalt
 
-개발 태스크를 AI 에이전트들이 알아서 처리해주는 자동화 시스템.  
-칸반 보드에 태스크를 올려두면, 계획 수립부터 코드 작성, 검증, PR 생성까지 한 번에.
+Basalt는 프론트엔드 수정 태스크를 AI와 함께 처리하는 작업 관리 프로토타입입니다.  
+칸반 보드에서 태스크를 등록한 뒤, 계획 생성, 실행, 로그 확인, 검증, 후속 정리까지 한 흐름으로 이어서 볼 수 있습니다.
 
----
+이번 과제에서 Basalt가 해결하려는 문제는 명확합니다. 프론트엔드 개발자는 작은 UI 수정 요청 하나를 처리할 때도 요청 해석, 작업 순서 정리, 수정 범위 확인, 결과 검토, 인수인계 정리를 반복해서 수행합니다. Basalt는 이 반복 비용을 줄이기 위해, 짧은 프론트엔드 수정 요청을 AI가 계획하고 실행 보조하며 결과까지 정리하는 흐름을 하나의 도구 안에 묶었습니다.
+
+## 서비스 요약
+
+- 해결하려는 문제: 작은 프론트엔드 수정 요청에서 반복되는 해석, 조율, 검토, 정리 비용 감소
+- AI 역할: 계획, 코드 수정 보조, 검토, 검증 담당
+- 기본 데모 범위: 프로젝트 연결 -> 태스크 생성 -> Plan -> Execute -> 로그/검증/후속 정리 확인
+- 주요 사용자: 작은 UI 수정 요청이 자주 들어오는 프론트엔드 개발자와 팀
+
+## 어떤 문제를 해결하려는가
+
+작은 UI 수정 요청도 실제 작업에서는 아래와 같은 단계를 동반합니다.
+
+- 짧고 모호한 요청을 실제 작업 단위로 다시 해석
+- 어떤 순서로 수정할지 먼저 정리
+- 수정 후 영향 범위와 이상 여부를 다시 확인
+- 작업 내용을 로그, 리뷰, 인수인계 형태로 정리
+
+이 과정은 각각은 작아 보이지만 반복되면 누적 비용이 커집니다. 특히 문구 변경, 섹션 추가, 레이아웃 보완처럼 비교적 짧은 프론트엔드 수정 요청이 자주 들어오는 환경에서는 실행 자체보다 중간 조율 비용이 더 크게 느껴질 수 있습니다.
+
+Basalt가 해결하려는 문제는 다음과 같습니다.
+
+> 프론트엔드 개발자의 반복적인 요청 해석, 실행 조율, 검토 정리 업무를 줄이는 것
+
+## 서비스 소개
+
+Basalt의 기본 사용 흐름은 다음과 같습니다.
+
+1. 로컬 프로젝트를 연결합니다.
+2. 처리할 태스크를 생성합니다.
+3. AI가 태스크를 바탕으로 작업 계획을 만듭니다.
+4. 실행 단계에서 코드 수정과 로그 기록이 이어집니다.
+5. 마지막에 검증 결과, 작업 이력, 후속 정리 내용을 확인합니다.
+
+각 단계에서 사용자가 얻는 결과는 아래와 같습니다.
+
+- 태스크 생성: 해야 할 작업을 한 곳에 등록
+- 계획 생성: 실행 가능한 작업 순서 확보
+- 실행 단계: 코드 수정 과정과 로그 확인
+- 검증 단계: 결과 점검과 문제 여부 확인
+- 마무리 단계: 복구 가이드, 인수인계 요약 등 후속 정보 확인
+
+즉, Basalt의 핵심은 `요청 등록 -> 계획 -> 실행 -> 검토/검증 -> 정리` 흐름을 하나의 서비스 안에서 연결하는 것입니다.
+
+## 왜 AI가 필요한가
+
+Basalt에서 AI는 부가 기능이 아니라 핵심 실행 주체입니다.
+
+- 계획: 짧은 요청을 실행 가능한 작업 계획으로 정리
+- 실행: 프로젝트 문맥을 읽고 코드 수정 작업을 수행
+- 검토: 결과를 다시 확인하고 보완 방향을 제안
+- 검증: 로그와 결과를 바탕으로 문제 여부와 후속 조치 내용을 정리
+
+AI가 없다면 Basalt는 단순 태스크 보드에 가까워집니다. 이 서비스의 핵심 가치는 개발 과정의 중간 단계를 AI가 실제로 처리해준다는 점에 있습니다.
+
+## 사용한 AI 모델과 활용 방식
+
+Basalt는 AI를 한 번 호출하고 끝내는 서비스가 아니라, 태스크를 `계획 -> 실행 -> 검증` 단계로 나눠 다루는 실행 시스템입니다. 사용자는 칸반에서 태스크를 만들고 결과를 확인하고, 내부에서는 `Orchestrator`가 상태와 step 실행을 관리합니다. 자세한 내용은 [docs/llm.md](docs/llm.md), [docs/architecture/orchestrator.md](docs/architecture/orchestrator.md), [docs/agents-skills.md](docs/agents-skills.md)에 정리되어 있습니다.
+
+역할별 모델 분리는 다음과 같습니다.
+
+- `FAST_MODEL`: 빠른 판단, 경량 의사결정, 일부 스킬 인자 생성에 사용
+- `SMART_MODEL`: 분석, workflow 설계, 검토, 검증, 구조화된 응답 생성에 사용
+- `CODING_MODEL`: 코드 생성, 수정, 보정(repair) 작업에 사용
+
+활용 방식도 단순 모델 라우팅 수준에서 끝나지 않습니다.
+
+- `analyze_task -> create_workflow -> consult_agents` 흐름으로 어떤 agent와 skill이 필요한지 먼저 결정합니다.
+- `software-engineer`, `product-manager`, `qa`, `devops-engineer`, `style-architect`, `technical-writer` 같은 역할별 전문가 agent가 정의되어 있고, 각 agent는 자신의 역할에 맞는 skill 체인을 사용합니다.
+- 실행 단계에서는 skill registry를 바탕으로 적절한 skill을 호출하고, 필요하면 project path, emitter, risk gate 같은 실행 제약을 함께 적용합니다.
+- skill도 분석/기획, 코드 수정, 품질 검증, 운영/도구, 스타일 보정처럼 역할에 맞게 분리해 연결합니다.
+- `ProjectProfiler`가 프로젝트 구조, 설치된 패키지, router 정보, stack rules를 읽어 프롬프트에 주입하므로 AI가 코드베이스 문맥 안에서 동작합니다.
+- 결과는 실행 로그, 검증 정보, 메타데이터로 저장되어 어떤 판단과 수정이 어떤 흐름으로 나왔는지 추적할 수 있습니다.
+
+프롬프트와 처리 방식도 명확합니다. Basalt는 프로젝트 구조, 설치된 패키지, 라우터 규칙, 안전 제약을 프롬프트에 함께 넣고, 쓰기 전 검증과 쓰기 후 typecheck, QA smoke, verify 단계를 통해 결과를 다시 확인합니다.
+
+안정성 측면에서도 AI 활용을 별도 설계했습니다.
+
+- 미설치 패키지 import, 잘못된 경로, App Router의 RSC 경계 위반 같은 문제를 쓰기 전에 차단합니다.
+- `write_code` 이후에는 typecheck, QA smoke, verify 루프를 통해 오류를 다시 확인하고 필요한 경우 repair를 반복합니다.
+- 위험도가 높은 shell, git, network 성격의 skill은 registry 기반 risk gate로 경고하거나 차단할 수 있습니다.
+
+즉, Basalt는 AI를 보조 기능으로 붙인 서비스가 아니라, orchestration, agents, skills, guardrail, feedback loop를 갖춘 실행 시스템으로 AI를 활용합니다. `Ralph` 이벤트 모드는 이 구조를 확장한 옵션 기능으로, `plan -> execute -> verify`를 여러 라운드 반복하며 이전 실패를 다음 계획에 반영할 수 있습니다.
+
+## 기존 AI 코딩 도구와 다른 점
+
+Basalt의 차별점은 "AI가 코드를 만들어준다"에 머무르지 않고, 짧은 프론트엔드 수정 요청 자체를 하나의 운영 단위로 다룬다는 점입니다. Basalt는 요청을 task 단위로 등록하고, planning 결과, execution 결과, verification 결과, 후속 정리 정보를 같은 흐름 안에서 연결합니다. 즉, 결과 코드만 생성하는 것이 아니라 "짧은 수정 요청을 끝까지 처리하는 과정" 자체를 제품의 핵심 단위로 본 것이 차별점입니다.
+
+- 단발성 답변보다 태스크 상태를 따라가며 계획, 실행, 검증, 정리까지 연결합니다.
+- 하나의 범용 에이전트에 맡기기보다, 역할이 분리된 전문가 agent들과 그에 맞는 skill 조합으로 실행합니다.
+- 결과 코드만 보여주지 않고 실행 로그, 검증 결과, 작업 이력을 함께 남깁니다.
+- 실패나 검증 결과를 다음 수정과 후속 정리에 다시 연결할 수 있도록 설계했습니다.
+
+즉, Basalt는 "AI로 코드를 도와주는 서비스"보다 "짧은 프론트엔드 수정 요청을 workflow와 guardrail로 운영하는 서비스"에 더 가깝습니다.
+
+## 현재 구현된 핵심 기능
+
+현재 데모에서 안정적으로 확인할 수 있는 기본 기능과 결과물은 아래와 같습니다.
+
+- 로컬 프로젝트 연결
+- 태스크 생성 및 상태 관리
+- AI 기반 계획 생성
+- 실행 단계에서 실제 코드 변경과 step별 실행 로그 기록
+- `Test` 단계에서 검증 결과, 작업 이력, verification 상태 저장
+- `agent-browser` 기반 QA 캡처와 `검수 완료` 탭의 결과 확인
+- 복구 가이드, 인수인계 요약 같은 후속 정리 정보 생성
+
+즉, 데모에서는 단순히 "계획을 만든다"에서 끝나는 것이 아니라, 요청이 실제 코드 수정으로 이어지고, 그 결과가 로그, 검증 데이터, QA 캡처, 후속 정리 정보까지 남는 흐름을 확인할 수 있습니다.
+
+## 주요 사용자
+
+Basalt는 다음과 같은 사용자를 염두에 두고 만들었습니다.
+
+- 작은 UI 수정 요청이 자주 들어오는 프론트엔드 개발자
+- 짧은 제품 수정 태스크를 빠르게 처리해야 하는 프론트엔드 중심 팀
+- AI를 활용하되 실행 과정과 결과 기록도 함께 관리하고 싶은 작업 환경
+
+## 데모에서 보여줄 흐름
+
+평가에서는 아래 기본 흐름을 기준으로 보면 이해하기 쉽습니다.
+
+1. 칸반 보드의 `Request` 컬럼에서 프로젝트를 하나 선택하고 짧은 태스크를 생성합니다.
+2. `Plan` 단계로 이동해 작업 계획을 만듭니다.
+3. `Dev (Working)` 단계에서 `Execute`를 실행합니다.
+4. `Test` 단계와 태스크 상세 화면에서 실행 로그와 검증 결과를 확인합니다.
+5. `Task Details`에서 후속 정보와 `검수 완료` 탭의 QA 결과를 확인합니다.
+
+평가자가 화면에서 확인할 수 있는 증빙은 아래와 같습니다.
+
+- 태스크가 `Request -> Plan -> Dev (Working) -> Test`로 실제 이동하는 흐름
+- `Task Details`에서 실행 로그가 남는지 여부
+- `Test` 단계와 `검수 완료` 탭에서 검증 결과와 작업 이력이 저장되는지 여부
+- 복구 가이드나 인수인계 같은 후속 정리 정보가 생성되는지 여부
+
+## 기술 구조
+
+Basalt는 다음 구조로 동작합니다.
+
+- Next.js App Router: 칸반 UI와 API 라우트를 한 프로젝트 안에서 함께 구성해 빠르게 프로토타이핑하기 위해 사용
+- Supabase: 태스크 상태, 실행 로그, 메타데이터를 저장해 재시도와 추적 가능성을 확보하기 위해 사용
+- Ollama 호환 LLM 호출: 계획, 분석, 코드 생성, 검토를 역할별로 나누어 처리하기 위해 사용
+- Orchestrator + Agent + Skill 레이어: 역할별 전문가 agent와 적절한 skill 조합을 연결하고, 태스크를 step 단위로 실행하며, 검증과 수리 루프를 제어하기 위해 사용
+
+구조 요약은 [docs/architecture/overview.md](docs/architecture/overview.md)에서 볼 수 있습니다.
+
+프론트에서는 칸반과 `Task Details`가 태스크 상태, 실행 로그, 검수 결과를 보여주고, 백엔드에서는 Orchestrator가 역할별 agent와 skill 체인을 조합해 step 실행, 검증, 수리 루프를 순서대로 제어하는 방식입니다.
+
+## 실행 방법
+
+```bash
+node -v # >= 20.9.0
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+실행 전에는 아래 준비가 필요합니다.
+
+- Supabase 프로젝트 정보 설정
+- 필요한 테이블 생성
+- Ollama 또는 호환 가능한 모델 엔드포인트 준비
+- 연결해서 테스트할 로컬 프로젝트 준비
+
+평가용 데모 기준으로는, 위 준비가 끝나면 `프로젝트 연결 -> 태스크 생성 -> 계획 -> 실행 -> 결과 확인` 흐름을 실제로 시연할 수 있습니다.
+
+자세한 설정은 아래 문서를 참고하면 됩니다.
+
+- [docs/setup.md](docs/setup.md)
+- [supabase/schema.sql](supabase/schema.sql)
 
 ## 문서
 
 | 문서 | 내용 |
 |------|------|
 | [docs/README.md](docs/README.md) | 전체 문서 인덱스 |
-| [docs/architecture/orchestrator.md](docs/architecture/orchestrator.md) | Orchestrator 동작, 동적 토큰 예산, Dev 종료 QA, 잠금, 메타데이터 |
-| [docs/architecture/team-orchestrator.md](docs/architecture/team-orchestrator.md) | 팀 오케스트레이션, 라운드, handoff, 토큰 예산 |
-| [docs/llm.md](docs/llm.md) | LLM 모델 구성, App Router 가드, backoff, 스트리밍 |
-| [docs/agents-skills.md](docs/agents-skills.md) | 에이전트·스킬 정의, 동적 로더 |
-| [docs/api.md](docs/api.md) | 전체 API 엔드포인트 |
-| [docs/features.md](docs/features.md) | 기능별 상세 (QA, Ralph 이벤트 모드, UI 스캐폴드·확장 스캐폴드, Next 가이드, 태스크 미리보기·복구·스펙 확장·검색, TTS 등) |
-| [docs/ui-components.md](docs/ui-components.md) | UI/컴포넌트 카탈로그 |
-| [docs/setup.md](docs/setup.md) | 설치·실행·스크립트·운영 가이드 |
-| [docs/stack.md](docs/stack.md) | 기술 스택 요약 |
-| [docs/prompting/contract-template.md](docs/prompting/contract-template.md) | 프롬프트 계약 템플릿 |
-| [docs/prompting/api-contracts.md](docs/prompting/api-contracts.md) | API 계약서 |
-| [docs/prompting/agent-skill-contracts.md](docs/prompting/agent-skill-contracts.md) | 에이전트/스킬 계약서 |
-| [docs/prompting/prompt-families.md](docs/prompting/prompt-families.md) | 프롬프트 패밀리 |
-| [docs/prompting/eval-metric.md](docs/prompting/eval-metric.md) | 프롬프트 성능 측정 지표 |
-| [docs/prompting/failure-log-template.md](docs/prompting/failure-log-template.md) | 실패 패턴 기록 템플릿 |
-
----
-
-## 라이선스
-
-Yohan Choi
+| [docs/features.md](docs/features.md) | 주요 기능 설명, 실행 흐름, 검증/복구 관련 기능 정리 |
+| [docs/api.md](docs/api.md) | API 엔드포인트와 용도 정리 |
+| [docs/llm.md](docs/llm.md) | 사용 모델, 라우팅 방식, 프롬프트/LLM 처리 구조 설명 |
+| [docs/setup.md](docs/setup.md) | 설치, 실행, 환경 변수, 운영 가이드 |
+| [docs/architecture/overview.md](docs/architecture/overview.md) | 시스템 전체 구조 요약 |
+| [supabase/schema.sql](supabase/schema.sql) | 최소 실행에 필요한 Supabase 테이블 스키마 |
