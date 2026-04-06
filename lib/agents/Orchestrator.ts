@@ -67,6 +67,7 @@ import {
     type ImpactPreviewPayload,
 } from '../pre-execution/gates';
 import { sendDebugIngest } from '@/lib/debug-ingest';
+import { applyDemoArtifactSnapshot, type DemoPresetConfig } from '@/lib/demo-preset';
 
 interface AgentTask {
     id: string; // Supabase UUID
@@ -361,6 +362,91 @@ export class Orchestrator {
         } catch {
             return '';
         }
+    }
+
+    private async applyDemoPresetSnapshotIfNeeded(projectPath: string, mainAgentName: string): Promise<void> {
+        await this.ensureMetadataCache();
+        const currentMeta = (this.metadataCache || {}) as Record<string, unknown>;
+        const demoPreset = (currentMeta.demoPreset || null) as DemoPresetConfig | null;
+        if (!demoPreset?.enabled) return;
+
+        const applyPhase = demoPreset.applyPhase || 'after_execute_before_test';
+        if (applyPhase !== 'after_execute_before_test') {
+            await this.log(mainAgentName, `Demo preset skipped: unsupported apply phase "${applyPhase}"`, { type: 'WARNING' });
+            return;
+        }
+
+        const taskTemplateId =
+            typeof currentMeta.taskTemplateId === 'string' ? currentMeta.taskTemplateId.trim() : '';
+        const expectedTemplateId =
+            typeof demoPreset.templateId === 'string' ? demoPreset.templateId.trim() : '';
+        if (expectedTemplateId && taskTemplateId && expectedTemplateId !== taskTemplateId) {
+            throw new Error(
+                `Demo preset template mismatch: expected "${expectedTemplateId}", got "${taskTemplateId}"`
+            );
+        }
+
+        const artifactId = typeof demoPreset.artifactId === 'string' ? demoPreset.artifactId.trim() : '';
+        if (!artifactId) {
+            throw new Error('Demo preset enabled but artifactId is missing');
+        }
+
+        try {
+            await this.log(mainAgentName, `Applying demo preset artifact: ${artifactId}`, { type: 'System' });
+            this.emitter?.emit({ type: 'skill_execute', skill: 'demo_preset_apply' });
+            const applied = await applyDemoArtifactSnapshot({ projectPath, artifactId });
+            const appliedAt = new Date().toISOString();
+
+            await this.updateMetadata({
+                demoPreset: {
+                    ...demoPreset,
+                    enabled: true,
+                    applyPhase: 'after_execute_before_test',
+                    appliedAt,
+                    appliedFiles: applied.appliedFiles,
+                    manifestPath: applied.manifestPath,
+                    lastError: null,
+                },
+            });
+
+            await this.log(
+                mainAgentName,
+                `Demo preset applied (${applied.appliedFiles.length} files)`,
+                {
+                    type: 'System',
+                    artifactId,
+                    appliedFiles: applied.appliedFiles,
+                    manifestPath: applied.manifestPath,
+                }
+            );
+            this.emitter?.emit({
+                type: 'skill_result',
+                skill: 'demo_preset_apply',
+                summary: `artifact=${artifactId}, files=${applied.appliedFiles.length}`,
+            });
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            await this.updateMetadata({
+                demoPreset: {
+                    ...demoPreset,
+                    enabled: true,
+                    applyPhase: 'after_execute_before_test',
+                    lastError: message,
+                },
+            });
+            throw new Error(`Demo preset apply failed: ${message}`);
+        }
+    }
+
+    private isPresentationDemoPresetEnabled(): boolean {
+        const currentMeta = (this.metadataCache || {}) as Record<string, unknown>;
+        const demoPreset = (currentMeta.demoPreset || null) as DemoPresetConfig | null;
+        const taskTemplateId =
+            typeof currentMeta.taskTemplateId === 'string' ? currentMeta.taskTemplateId.trim() : '';
+        const presetTemplateId =
+            typeof demoPreset?.templateId === 'string' ? demoPreset.templateId.trim() : '';
+        if (!demoPreset?.enabled) return false;
+        return presetTemplateId === 'demo-presentation' || taskTemplateId === 'demo-presentation';
     }
 
     private summarizeThoughts(thoughts: Array<{ agent?: string; thought?: string; type?: string }>, maxItems = 4): string {
@@ -2293,6 +2379,22 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
             await this.updateStatus('working');
             skills.reset_runtime_caches();
             this.emitter?.emit({ type: 'phase_start', phase: 'execution', taskId: this.taskId });
+            if (this.isPresentationDemoPresetEnabled()) {
+                await this.updateMetadata({
+                    demoPreset: {
+                        ...(((this.metadataCache || {}) as Record<string, unknown>).demoPreset as Record<string, unknown>),
+                        mode: 'deterministic_presentation',
+                        modeActivatedAt: new Date().toISOString(),
+                        modeNotice:
+                            'Demo preset deterministic mode: execution flow is live, final output is fixed from artifact.',
+                    },
+                }, false);
+                await this.log(
+                    'System',
+                    'Demo preset deterministic mode is active. Flow is live; final output is applied from prebuilt artifact.',
+                    { type: 'System' }
+                );
+            }
 
             // Feature branch for this task (reuse local branch if it already exists)
             const branchName = `feature/task-${this.taskId.slice(0, 8)}`;
@@ -2393,6 +2495,7 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                 : null;
             const stepExecutionAgents = workflowAgents;
             const actionCatalog = this.buildActionCatalog();
+            let demoPresetGuardTriggered: { stepIndex: number; action: string; error: string } | null = null;
 
             for (let stepIndex = resumeFrom; stepIndex < workflow.steps.length; stepIndex++) {
                 // Heartbeat/Lock Refresh: Update metadata periodically to show we are still alive
@@ -3291,11 +3394,44 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                     };
                     await this.updateMetadata(errorMetadata, false);
                     await this.updateMetadata({ executionMetrics: this.executionMetrics, budgetPolicy: this.budgetPolicy });
+
+                    if (this.isPresentationDemoPresetEnabled()) {
+                        demoPresetGuardTriggered = {
+                            stepIndex,
+                            action,
+                            error: err.message,
+                        };
+                        await this.updateMetadata({
+                            demoPreset: {
+                                ...(((this.metadataCache || {}) as Record<string, unknown>).demoPreset as Record<string, unknown>),
+                                guardTriggered: true,
+                                guardTriggeredAt: new Date().toISOString(),
+                                guardReason: err.message,
+                                guardStep: stepIndex,
+                                guardAction: action,
+                            },
+                        }, false);
+                        await this.log(
+                            'System',
+                            `Demo preset guard activated at step ${stepIndex + 1} (${action}). Falling back to deterministic snapshot.`,
+                            { type: 'WARNING' }
+                        );
+                        break;
+                    }
+
                     await this.updateStatus('failed');
                     await this.log('System', `Task marked as failed. Can be retried from step ${stepIndex + 1}.`, { type: 'ERROR' });
                     this.emitter?.emit({ type: 'done', status: 'failed' });
                     return; // Exit instead of throwing
                 }
+            }
+
+            if (demoPresetGuardTriggered) {
+                await this.log(
+                    mainAgentName,
+                    `Execution fallback active: step ${demoPresetGuardTriggered.stepIndex + 1} failed (${demoPresetGuardTriggered.action}) but demo preset recovery will continue.`,
+                    { type: 'WARNING' }
+                );
             }
 
             this.executionMetrics.endedAt = new Date().toISOString();
@@ -3306,7 +3442,27 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                 message: 'execute_workflow_loop_done_before_testing',
                 data: { taskId: this.taskId, totalSteps: workflow.steps.length },
             });
-            await this.runDevExitQaPipeline(projectPath, task, mainAgentName, techStack, workflow.steps.length);
+            await this.applyDemoPresetSnapshotIfNeeded(projectPath, mainAgentName);
+            try {
+                await this.runDevExitQaPipeline(projectPath, task, mainAgentName, techStack, workflow.steps.length);
+            } catch (devQaError: unknown) {
+                if (!this.isPresentationDemoPresetEnabled()) {
+                    throw devQaError;
+                }
+                const detail = devQaError instanceof Error ? devQaError.message : String(devQaError);
+                await this.updateMetadata({
+                    demoPreset: {
+                        ...(((this.metadataCache || {}) as Record<string, unknown>).demoPreset as Record<string, unknown>),
+                        qaBypassedAt: new Date().toISOString(),
+                        qaBypassReason: detail,
+                    },
+                }, false);
+                await this.log(
+                    'System',
+                    `Demo preset mode: Dev QA failure bypassed to keep deterministic presentation flow. (${detail.slice(0, 400)})`,
+                    { type: 'WARNING' }
+                );
+            }
             await this.updateStatus('testing');
             await this.log(mainAgentName, 'Workflow Execution Completed. Task moved to Testing phase.');
             try {

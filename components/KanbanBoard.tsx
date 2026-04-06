@@ -170,15 +170,37 @@ export function KanbanBoard() {
         return blob.includes(q);
     };
 
-    const handleCreateTask = async (taskData: { title: string; description: string; priority: string; attachedComponentPaths?: string[] }) => {
+    const handleCreateTask = async (taskData: {
+        title: string;
+        description: string;
+        priority: string;
+        attachedComponentPaths?: string[];
+        taskTemplateId?: string;
+        demoPreset?: {
+            enabled: boolean;
+            templateId: string;
+            artifactId: string;
+            applyPhase: 'after_execute_before_test';
+        };
+    }) => {
         const newTask: Record<string, unknown> = {
             title: taskData.title,
             description: taskData.description,
             status: 'pending',
             project_id: selectedProjectId
         };
+        const newMetadata: Record<string, unknown> = {};
         if (taskData.attachedComponentPaths?.length) {
-            newTask.metadata = { attachedComponentPaths: taskData.attachedComponentPaths };
+            newMetadata.attachedComponentPaths = taskData.attachedComponentPaths;
+        }
+        if (taskData.taskTemplateId) {
+            newMetadata.taskTemplateId = taskData.taskTemplateId;
+        }
+        if (taskData.demoPreset?.enabled) {
+            newMetadata.demoPreset = taskData.demoPreset;
+        }
+        if (Object.keys(newMetadata).length > 0) {
+            newTask.metadata = newMetadata;
         }
 
         const { data: createdTask, error } = await supabase.from('Tasks')

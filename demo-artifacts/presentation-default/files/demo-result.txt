@@ -1,0 +1,3 @@
+Basalt presentation demo artifact applied.
+Timestamp source: static snapshot.
+Purpose: deterministic demo output for presentation.

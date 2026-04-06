@@ -10,6 +10,29 @@ export interface TaskTemplate {
 
 export const TASK_TEMPLATES: TaskTemplate[] = [
     {
+        id: 'demo-presentation',
+        name: '발표 데모(4분)',
+        icon: 'FileText',
+        titlePrefix: '[발표 데모] 랜딩 + 게시판 페이지 생성',
+        description: `발표용 안정 시나리오 태스크입니다. 결과물은 페이지 생성 요건에 맞춰 고정합니다.
+
+목표:
+- "/" 랜딩 페이지를 생성/정리
+- "/board" 게시판 페이지를 생성/정리
+- 랜딩에서 게시판으로 이동 가능한 링크를 포함
+
+제약:
+- 데이터 연동/비즈니스 로직 변경 금지
+- 디자인은 인라인 스타일 또는 기존 스타일 체계 내에서 단순/안정적으로 구성
+- 오류 없이 로컬에서 바로 렌더 가능한 코드만 사용
+
+완료 기준:
+- 상태 전이(Request -> Plan -> Execute -> Test)가 정상 진행
+- 최종 결과 화면이 랜딩 + 게시판 구조로 확인 가능
+- 변경 파일/실행 로그/검수 결과 중 최소 1개 이상 증빙 가능`,
+        priority: 'Medium',
+    },
+    {
         id: 'component',
         name: '컴포넌트 생성',
         icon: 'LayoutGrid',
