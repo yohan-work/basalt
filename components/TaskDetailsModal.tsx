@@ -519,6 +519,19 @@ export function TaskDetailsModal({
     const executionDiscussions = Array.isArray(metadata.executionDiscussions)
         ? metadata.executionDiscussions
         : [];
+    const demoPreset = metadata.demoPreset as
+        | {
+              enabled?: boolean;
+              artifactId?: string;
+              appliedAt?: string;
+              appliedFiles?: string[];
+              lastError?: string | null;
+              mode?: string;
+              modeActivatedAt?: string;
+              qaBypassedAt?: string;
+              qaBypassReason?: string;
+          }
+        | undefined;
     const collaboration = metadata.agentCollaboration;
     const clarifyingGate = metadata.clarifyingGate as
         | {
@@ -1017,6 +1030,31 @@ export function TaskDetailsModal({
                                     >
                                         {draftExecutionOptions.carryDiscussionToPrompt ? 'Prompt Carry On' : 'Prompt Carry Off'}
                                     </Badge>
+                                    {demoPreset?.enabled && (
+                                        <Badge variant="outline" className="text-[10px]">
+                                            Demo Preset: {demoPreset.artifactId || 'configured'}
+                                        </Badge>
+                                    )}
+                                    {demoPreset?.enabled && demoPreset.mode === 'deterministic_presentation' && (
+                                        <Badge variant="secondary" className="text-[10px]">
+                                            Deterministic Demo Mode
+                                        </Badge>
+                                    )}
+                                    {demoPreset?.enabled && demoPreset.appliedAt && (
+                                        <Badge variant="secondary" className="text-[10px]">
+                                            Demo Applied ({Array.isArray(demoPreset.appliedFiles) ? demoPreset.appliedFiles.length : 0})
+                                        </Badge>
+                                    )}
+                                    {demoPreset?.enabled && demoPreset.qaBypassedAt && (
+                                        <Badge className="text-[10px] bg-amber-500 hover:bg-amber-500 text-black">
+                                            Demo QA Bypassed
+                                        </Badge>
+                                    )}
+                                    {demoPreset?.enabled && demoPreset.lastError && (
+                                        <Badge className="text-[10px] bg-red-600 hover:bg-red-600 text-white">
+                                            Demo Apply Failed
+                                        </Badge>
+                                    )}
                                 </div>
                             </div>
                             <div className="flex bg-muted rounded-md p-1 gap-1 ml-4">

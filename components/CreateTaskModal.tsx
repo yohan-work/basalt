@@ -31,6 +31,13 @@ export interface CreateTaskPayload {
     description: string;
     priority: string;
     attachedComponentPaths?: string[];
+    taskTemplateId?: string;
+    demoPreset?: {
+        enabled: boolean;
+        templateId: string;
+        artifactId: string;
+        applyPhase: 'after_execute_before_test';
+    };
 }
 
 interface CreateTaskModalProps {
@@ -143,6 +150,17 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
         setIsSubmitting(true);
         try {
             const payload: CreateTaskPayload = { title, description, priority };
+            if (selectedTemplateId) {
+                payload.taskTemplateId = selectedTemplateId;
+            }
+            if (selectedTemplateId === 'demo-presentation') {
+                payload.demoPreset = {
+                    enabled: true,
+                    templateId: 'demo-presentation',
+                    artifactId: 'presentation-default',
+                    applyPhase: 'after_execute_before_test',
+                };
+            }
             if (selectedComponentPaths.length > 0) {
                 payload.attachedComponentPaths = selectedComponentPaths;
                 payload.description = `다음 컴포넌트를 import해서 사용해줘: ${selectedComponentPaths.map(p => `@${p}`).join(', ')}.\n\n${description}`;

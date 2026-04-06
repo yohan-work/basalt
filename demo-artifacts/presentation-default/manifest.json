@@ -1,0 +1,14 @@
+{
+  "artifactId": "presentation-default",
+  "version": "1",
+  "files": [
+    {
+      "source": "files/app/page.tsx",
+      "target": "app/page.tsx"
+    },
+    {
+      "source": "files/app/board/page.tsx",
+      "target": "app/board/page.tsx"
+    }
+  ]
+}
