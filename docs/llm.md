@@ -15,7 +15,7 @@ Basalt의 LLM 호출은 `lib/llm.ts`에서 공통 처리됩니다.
 `lib/model-config.ts` 기준 기본값은 다음과 같습니다.
 
 - 빠른 응답(FAST): `llama3.2:latest` (`FAST_MODEL`)
-- 분석/추론(SMART): `gemma3:latest` (`SMART_MODEL`)
+- 분석/추론(SMART): `gemma4:e2b` (`SMART_MODEL`)
 - 코드 생성(CODING): `qwen2.5-coder:7b` (`CODING_MODEL`)
 
 ## 안정성 정책

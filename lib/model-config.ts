@@ -6,7 +6,7 @@ export const MODEL_CONFIG = {
 
     // Used for complex planning, reasoning, and argument generation
     // Override with SMART_MODEL env var
-    SMART_MODEL: process.env.SMART_MODEL || 'gemma3:latest',
+    SMART_MODEL: process.env.SMART_MODEL || 'gemma4:e2b',
 
     // Used for writing code
     // Override with CODING_MODEL env var

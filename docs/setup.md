@@ -29,7 +29,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 # 선택
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 FAST_MODEL=llama3.2:latest
-SMART_MODEL=gemma3:latest
+SMART_MODEL=gemma4:e2b
 CODING_MODEL=qwen2.5-coder:7b
 MOCK_LLM=false
 
