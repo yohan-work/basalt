@@ -5,12 +5,15 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Badge } from '@/components/ui/badge';
 import { Sparkles, MessageSquare, Send, Volume2, VolumeX, Square } from 'lucide-react';
+import { getBuddyDefinition, getBuddyReaction } from '@/lib/buddy-catalog';
 import { useTTS } from '@/lib/tts/useTTS';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AgentAvatar } from './AgentAvatar';
 import { OfficeLayout } from './OfficeLayout';
+import { BuddyAscii } from './BuddyAscii';
+import type { TaskBuddyInstance } from '@/lib/types/agent-visualization';
 
 interface AgentThought {
     id: string;
@@ -23,6 +26,7 @@ interface AgentThought {
 interface AgentDiscussionProps {
     taskId: string;
     isActive: boolean;
+    buddy?: TaskBuddyInstance | null;
 }
 
 const AGENTS = [
@@ -48,7 +52,7 @@ const AGENTS = [
     }
 ];
 
-export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
+export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscussionProps) {
     const [allThoughts, setAllThoughts] = useState<AgentThought[]>([]);
     const [visibleThoughts, setVisibleThoughts] = useState<AgentThought[]>([]);
     const [currentThoughtIndex, setCurrentThoughtIndex] = useState(-1);
@@ -73,6 +77,7 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     const meetingZoneRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const [chatPortalTarget, setChatPortalTarget] = useState<HTMLElement | null>(null);
+    const buddyDefinition = getBuddyDefinition(buddy?.buddyId);
 
     useEffect(() => {
         setChatPortalTarget(document.getElementById('agent-discussion-chat-portal'));
@@ -336,6 +341,12 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
     };
 
     const currentThought = currentThoughtIndex >= 0 ? allThoughts[currentThoughtIndex] : null;
+    const buddyReaction = getBuddyReaction(buddyDefinition.id, {
+        thoughtType: currentThought?.type,
+        isHighlighted: currentThought?.type === 'critique',
+        isWarning: currentThought?.type === 'critique',
+        isComplete: currentThought?.type === 'agreement' && currentThoughtIndex === allThoughts.length - 1,
+    });
 
     const getAgentData = React.useCallback((thought: AgentThought | null) => {
         if (!thought || thought.agent === 'user') return null;
@@ -482,6 +493,25 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                     {/* The Office Layout Component (Contains Brick Wall & Wooden Floor) */}
                     <div className="absolute inset-0 pointer-events-none z-0">
                         <OfficeLayout />
+                    </div>
+
+                    <div className="absolute left-4 top-4 z-30 max-w-[260px]">
+                        <div className="mb-2 flex items-center gap-2">
+                            <Badge variant="secondary" className="border-0 bg-emerald-500/20 text-[10px] text-emerald-200">
+                                Task Buddy
+                            </Badge>
+                            <span className="text-[11px] font-semibold text-white/90">{buddy?.name || buddyDefinition.name}</span>
+                            <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">{buddyDefinition.rarity}</span>
+                        </div>
+                        <BuddyAscii
+                            buddyId={buddyDefinition.id}
+                            thoughtType={currentThought?.type}
+                            isHighlighted={currentThought?.type === 'critique'}
+                            isWarning={currentThought?.type === 'critique'}
+                            isComplete={currentThought?.type === 'agreement' && currentThoughtIndex === allThoughts.length - 1}
+                            active={isActive}
+                            className="max-w-[250px]"
+                        />
                     </div>
 
                     {/* User Interaction Beams Layer */}
@@ -709,11 +739,16 @@ export function AgentDiscussion({ taskId, isActive }: AgentDiscussionProps) {
                         <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center justify-between shadow-sm z-10">
                             <div className="flex items-center">
                                 <MessageSquare className="w-4 h-4 text-emerald-500 mr-2" />
-                                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Live Discussion</span>
+                                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Discussion</span>
+                                <Badge variant="secondary" className="ml-2 text-[10px]">
+                                    Buddy: {buddy?.name || buddyDefinition.name}
+                                </Badge>
+                                <Badge variant="secondary" className="ml-1 text-[10px]">
+                                    {buddyReaction.emote} {buddyReaction.label}
+                                </Badge>
                             </div>
-                            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
+                            <div className="flex items-center">
                                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                                <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Chat: ON</span>
                             </div>
                         </div>
 

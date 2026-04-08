@@ -35,6 +35,15 @@ import type { QaSignoffStored } from '@/lib/qa/signoff-report';
 import { QA_ARTIFACT_SLOTS, type QaArtifactSlot } from '@/lib/qa/artifact-slots';
 import { TaskLivePreview } from '@/components/TaskLivePreview';
 import { apiErrorText, parseResponseAsJson } from '@/lib/fetch-json';
+import {
+    BUDDY_DEFINITIONS,
+    BUDDY_RARITY_COLORS,
+    BUDDY_RARITY_LABELS,
+    BUDDY_RARITY_ORDER,
+    createTaskBuddyInstance,
+    getBuddyDefinition,
+    resolveTaskBuddySelection,
+} from '@/lib/buddy-catalog';
 
 function qaSlotLabelKo(slot: QaArtifactSlot): string {
     switch (slot) {
@@ -52,8 +61,10 @@ function qaSlotLabelKo(slot: QaArtifactSlot): string {
 }
 import type {
     ExecuteStreamOptions,
+    AgentInboxEntry,
     ExecutionDiscussionEntry,
     OrchestratorCollaborationMap,
+    TaskBuddyInstance,
 } from '@/lib/types/agent-visualization';
 
 interface TaskDetailsModalProps {
@@ -84,6 +95,9 @@ const DEFAULT_EXECUTION_OPTIONS: Required<ExecuteStreamOptions> = {
     carryDiscussionToPrompt: true,
     strategyPreset: 'balanced',
     multiPhaseCodegen: false,
+    planningDepth: 'standard',
+    coordinationMode: 'single',
+    proactiveMode: 'brief',
 };
 
 type MarkdownLineView = {
@@ -278,6 +292,18 @@ function normalizeExecutionOptions(raw?: ExecuteStreamOptions): Required<Execute
         typeof raw?.multiPhaseCodegen === 'boolean'
             ? raw.multiPhaseCodegen
             : DEFAULT_EXECUTION_OPTIONS.multiPhaseCodegen;
+    const planningDepth =
+        raw?.planningDepth === 'deep' || raw?.planningDepth === 'standard'
+            ? raw.planningDepth
+            : DEFAULT_EXECUTION_OPTIONS.planningDepth;
+    const coordinationMode =
+        raw?.coordinationMode === 'single' || raw?.coordinationMode === 'parallel'
+            ? raw.coordinationMode
+            : DEFAULT_EXECUTION_OPTIONS.coordinationMode;
+    const proactiveMode =
+        raw?.proactiveMode === 'off' || raw?.proactiveMode === 'brief' || raw?.proactiveMode === 'normal'
+            ? raw.proactiveMode
+            : DEFAULT_EXECUTION_OPTIONS.proactiveMode;
 
     return {
         discussionMode,
@@ -285,7 +311,14 @@ function normalizeExecutionOptions(raw?: ExecuteStreamOptions): Required<Execute
         carryDiscussionToPrompt,
         strategyPreset,
         multiPhaseCodegen,
+        planningDepth,
+        coordinationMode,
+        proactiveMode,
     };
+}
+
+function normalizeTaskBuddy(raw: unknown): TaskBuddyInstance | null {
+    return resolveTaskBuddySelection(raw);
 }
 
 function normalizeReviewSuggestionSet(raw: unknown): ReviewSuggestionSet | null {
@@ -352,6 +385,7 @@ export function TaskDetailsModal({
     const [isGeneratingClarify, setIsGeneratingClarify] = useState(false);
     const [isSubmittingClarify, setIsSubmittingClarify] = useState(false);
     const [isAckImpact, setIsAckImpact] = useState(false);
+    const [isSavingBuddy, setIsSavingBuddy] = useState(false);
     const [recoveryNote, setRecoveryNote] = useState('');
     const [recoveryMarkdown, setRecoveryMarkdown] = useState<string | null>(null);
     const [isRecoveryLoading, setIsRecoveryLoading] = useState(false);
@@ -482,6 +516,8 @@ export function TaskDetailsModal({
         reviewSuggestions?: ReviewSuggestionSet;
         reviewSuggestionsAt?: string;
         reviewSuggestionsAppliedAt?: string;
+        buddy?: TaskBuddyInstance;
+        agentInbox?: AgentInboxEntry[];
     };
     const reviewResult = metadata.reviewResult as string | undefined;
     const reviewSuggestionSet = normalizeReviewSuggestionSet(metadata.reviewSuggestions);
@@ -516,10 +552,17 @@ export function TaskDetailsModal({
     const canEditOrReview = ['testing', 'review', 'done'].includes(task.status);
     const hasChanges = fileChanges && fileChanges.length > 0;
     const persistedExecutionOptions = normalizeExecutionOptions(metadata.executionOptions);
+    const selectedBuddy = normalizeTaskBuddy(metadata.buddy);
+    const selectedBuddyDefinition = getBuddyDefinition(selectedBuddy?.buddyId);
     const executionDiscussions = Array.isArray(metadata.executionDiscussions)
         ? metadata.executionDiscussions
         : [];
+    const agentInbox = Array.isArray(metadata.agentInbox) ? metadata.agentInbox : [];
     const collaboration = metadata.agentCollaboration;
+    const proactiveAssistant = metadata.proactiveAssistant as
+        | { enabled?: boolean; mode?: string; lastTrigger?: string; lastTickAt?: string }
+        | undefined;
+    const deepPlan = (metadata.planArtifacts as { deepPlan?: { summary?: string; generatedAt?: string } } | undefined)?.deepPlan;
     const clarifyingGate = metadata.clarifyingGate as
         | {
               version?: number;
@@ -747,6 +790,26 @@ export function TaskDetailsModal({
         const next = normalizeExecutionOptions({ ...draftExecutionOptions, ...patch });
         setDraftExecutionOptions(next);
         onExecutionOptionsChange?.(task.id, next);
+    };
+
+    const handleBuddySelect = async (buddyId: string) => {
+        if (!task) return;
+        setIsSavingBuddy(true);
+        setActionError(null);
+        try {
+            const buddyInstance = createTaskBuddyInstance(buddyId, `${task.id}:${buddyId}`);
+            const nextMetadata = {
+                ...(task.metadata || {}),
+                buddy: buddyInstance,
+            };
+            const { error } = await supabase.from('Tasks').update({ metadata: nextMetadata }).eq('id', task.id);
+            if (error) throw error;
+        } catch (error) {
+            console.error('Buddy save failed', error);
+            setActionError(error instanceof Error ? error.message : 'Buddy 저장에 실패했습니다.');
+        } finally {
+            setIsSavingBuddy(false);
+        }
     };
 
     const handleExecuteWithOptions = () => {
@@ -1003,6 +1066,12 @@ export function TaskDetailsModal({
                                 </p>
                                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                     <Badge variant="outline" className="text-[10px]">
+                                        Buddy: {selectedBuddy?.name || selectedBuddyDefinition.name}
+                                    </Badge>
+                                    <Badge variant="outline" className="text-[10px]">
+                                        Rarity: {selectedBuddyDefinition.rarity}
+                                    </Badge>
+                                    <Badge variant="outline" className="text-[10px]">
                                         Preset: {draftExecutionOptions.strategyPreset}
                                     </Badge>
                                     <Badge variant="outline" className="text-[10px]">
@@ -1017,6 +1086,20 @@ export function TaskDetailsModal({
                                     >
                                         {draftExecutionOptions.carryDiscussionToPrompt ? 'Prompt Carry On' : 'Prompt Carry Off'}
                                     </Badge>
+                                    <Badge variant="outline" className="text-[10px]">
+                                        Plan: {draftExecutionOptions.planningDepth}
+                                    </Badge>
+                                    <Badge variant="outline" className="text-[10px]">
+                                        Coord: {draftExecutionOptions.coordinationMode}
+                                    </Badge>
+                                    <Badge variant="outline" className="text-[10px]">
+                                        Proactive: {draftExecutionOptions.proactiveMode}
+                                    </Badge>
+                                    {agentInbox.length > 0 ? (
+                                        <Badge variant="outline" className="text-[10px]">
+                                            Inbox: {agentInbox.length}
+                                        </Badge>
+                                    ) : null}
                                 </div>
                             </div>
                             <div className="flex bg-muted rounded-md p-1 gap-1 ml-4">
@@ -1110,6 +1193,7 @@ export function TaskDetailsModal({
                                     <AgentDiscussion
                                         taskId={task.id}
                                         isActive={task.status === 'planning' || task.status === 'working'}
+                                        buddy={selectedBuddy}
                                     />
                                 </div>
 
@@ -1605,6 +1689,97 @@ export function TaskDetailsModal({
                                     </div>
                                 </div>
 
+                                {/* Buddy Picker */}
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-medium text-muted-foreground">Task Buddy</h3>
+                                    <div className="rounded-md border bg-card p-4 space-y-4">
+                                        <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border bg-muted/20 p-3">
+                                            <div>
+                                                <div className="flex items-center gap-2">
+                                                    <Badge variant="secondary" className="text-[10px]">
+                                                        Selected
+                                                    </Badge>
+                                                    <span className="text-sm font-semibold">{selectedBuddy?.name || selectedBuddyDefinition.name}</span>
+                                                    <span className="text-xs text-muted-foreground">{selectedBuddyDefinition.rarity}</span>
+                                                </div>
+                                                <p className="mt-1 text-xs text-muted-foreground">
+                                                    {selectedBuddyDefinition.personaHint}
+                                                </p>
+                                                {selectedBuddy ? (
+                                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                                        <Badge variant="outline" className="text-[10px]">Species: {selectedBuddyDefinition.name}</Badge>
+                                                        <Badge variant="outline" className="text-[10px]">Debug {selectedBuddy.traits.debugging}</Badge>
+                                                        <Badge variant="outline" className="text-[10px]">Patience {selectedBuddy.traits.patience}</Badge>
+                                                        <Badge variant="outline" className="text-[10px]">Wisdom {selectedBuddy.traits.wisdom}</Badge>
+                                                        <Badge variant="outline" className="text-[10px]">Chaos {selectedBuddy.traits.chaos}</Badge>
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                            <pre className="rounded-md border bg-slate-950 px-3 py-2 text-[10px] leading-3 text-slate-100">
+                                                {selectedBuddyDefinition.ascii}
+                                            </pre>
+                                        </div>
+
+                                        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                                            {BUDDY_DEFINITIONS.map((buddy) => {
+                                                const isSelected = buddy.id === selectedBuddy?.buddyId;
+                                                return (
+                                                    <button
+                                                        key={buddy.id}
+                                                        type="button"
+                                                        disabled={isSavingBuddy}
+                                                        onClick={() => handleBuddySelect(buddy.id)}
+                                                        className={`rounded-xl border p-3 text-left transition-colors ${
+                                                            isSelected
+                                                                ? 'border-foreground bg-muted/40'
+                                                                : 'border-border hover:border-foreground/40 hover:bg-muted/20'
+                                                        }`}
+                                                    >
+                                                        <div className="mb-2 flex items-center justify-between gap-2">
+                                                            <div className="font-semibold">{buddy.name}</div>
+                                                            <Badge variant="outline" className="text-[10px]">
+                                                                {buddy.rarity}
+                                                            </Badge>
+                                                        </div>
+                                                        <pre className="min-h-[56px] rounded-md bg-slate-950 px-2 py-2 text-[10px] leading-3 text-slate-100">
+                                                            {buddy.ascii}
+                                                        </pre>
+                                                        <p className="mt-2 text-xs text-muted-foreground">{buddy.personaHint}</p>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <div className="text-xs font-medium text-muted-foreground">Rarity</div>
+                                            <div className="flex h-3 overflow-hidden rounded-full bg-muted">
+                                                {BUDDY_RARITY_ORDER.map((rarity) => {
+                                                    const count = BUDDY_DEFINITIONS.filter((buddy) => buddy.rarity === rarity).length;
+                                                    const width = `${(count / BUDDY_DEFINITIONS.length) * 100}%`;
+                                                    return (
+                                                        <div
+                                                            key={rarity}
+                                                            className={BUDDY_RARITY_COLORS[rarity]}
+                                                            style={{ width }}
+                                                            title={`${BUDDY_RARITY_LABELS[rarity]} ${count}`}
+                                                        />
+                                                    );
+                                                })}
+                                            </div>
+                                            <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                                                {BUDDY_RARITY_ORDER.map((rarity) => {
+                                                    const count = BUDDY_DEFINITIONS.filter((buddy) => buddy.rarity === rarity).length;
+                                                    return (
+                                                        <span key={rarity}>
+                                                            {BUDDY_RARITY_LABELS[rarity]} {count}
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 {/* Discussion Controls */}
                                 <div className="space-y-3">
                                     <h3 className="text-sm font-medium text-muted-foreground">Discussion Controls</h3>
@@ -1678,6 +1853,56 @@ export function TaskDetailsModal({
                                                 </button>
                                             </div>
                                             <div className="space-y-1 md:col-span-4">
+                                                <Label className="text-xs text-muted-foreground">Planning Depth</Label>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {(['standard', 'deep'] as const).map((mode) => (
+                                                        <button
+                                                            key={mode}
+                                                            type="button"
+                                                            className={`h-9 rounded-md border px-3 text-sm transition-colors ${
+                                                                draftExecutionOptions.planningDepth === mode
+                                                                    ? 'border-violet-500/50 bg-violet-50 text-violet-800 dark:bg-violet-950/30 dark:text-violet-200'
+                                                                    : 'border-input bg-background text-muted-foreground'
+                                                            }`}
+                                                            onClick={() => updateExecutionOptions({ planningDepth: mode })}
+                                                        >
+                                                            {mode}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1 md:col-span-2">
+                                                <Label className="text-xs text-muted-foreground">Coordination</Label>
+                                                <select
+                                                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                                    value={draftExecutionOptions.coordinationMode}
+                                                    onChange={(e) =>
+                                                        updateExecutionOptions({
+                                                            coordinationMode: e.target.value as ExecuteStreamOptions['coordinationMode'],
+                                                        })
+                                                    }
+                                                >
+                                                    <option value="single">single</option>
+                                                    <option value="parallel">parallel</option>
+                                                </select>
+                                            </div>
+                                            <div className="space-y-1 md:col-span-2">
+                                                <Label className="text-xs text-muted-foreground">Proactive</Label>
+                                                <select
+                                                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                                                    value={draftExecutionOptions.proactiveMode}
+                                                    onChange={(e) =>
+                                                        updateExecutionOptions({
+                                                            proactiveMode: e.target.value as ExecuteStreamOptions['proactiveMode'],
+                                                        })
+                                                    }
+                                                >
+                                                    <option value="off">off</option>
+                                                    <option value="brief">brief</option>
+                                                    <option value="normal">normal</option>
+                                                </select>
+                                            </div>
+                                            <div className="space-y-1 md:col-span-4">
                                                 <Label className="text-xs text-muted-foreground">
                                                     Multi-phase codegen (plan + typecheck retry)
                                                 </Label>
@@ -1720,6 +1945,15 @@ export function TaskDetailsModal({
                                             <Badge variant="outline" className="text-[10px]">
                                                 Multi-phase: {persistedExecutionOptions.multiPhaseCodegen ? 'on' : 'off'}
                                             </Badge>
+                                            <Badge variant="outline" className="text-[10px]">
+                                                Saved Plan: {persistedExecutionOptions.planningDepth}
+                                            </Badge>
+                                            <Badge variant="outline" className="text-[10px]">
+                                                Saved Coord: {persistedExecutionOptions.coordinationMode}
+                                            </Badge>
+                                            <Badge variant="outline" className="text-[10px]">
+                                                Saved Proactive: {persistedExecutionOptions.proactiveMode}
+                                            </Badge>
                                         </div>
                                         {canRunExecuteFromModal && (
                                             <div className="flex justify-end">
@@ -1727,6 +1961,78 @@ export function TaskDetailsModal({
                                                     Execute With Discussion Options
                                                 </Button>
                                             </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="grid gap-3 lg:grid-cols-2">
+                                    <div className="space-y-3">
+                                        <h3 className="text-sm font-medium text-muted-foreground">Deep Plan</h3>
+                                        <div className="rounded-md border bg-card p-4">
+                                            {deepPlan?.summary ? (
+                                                <div className="space-y-2">
+                                                    <p className="text-xs text-foreground/90 whitespace-pre-wrap">{deepPlan.summary}</p>
+                                                    <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+                                                        <Badge variant="outline" className="text-[10px]">
+                                                            Mode: {draftExecutionOptions.planningDepth}
+                                                        </Badge>
+                                                        {deepPlan.generatedAt ? (
+                                                            <Badge variant="outline" className="text-[10px]">
+                                                                {new Date(deepPlan.generatedAt).toLocaleString()}
+                                                            </Badge>
+                                                        ) : null}
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-muted-foreground">
+                                                    아직 Deep Plan 아티팩트가 없습니다. `planningDepth=deep`로 플랜을 다시 생성하면 더 구조화된 계획과 체크포인트가 저장됩니다.
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="space-y-3">
+                                        <h3 className="text-sm font-medium text-muted-foreground">Agent Inbox</h3>
+                                        <div className="rounded-md border bg-card p-4 space-y-2">
+                                            {agentInbox.length > 0 ? agentInbox.slice(0, 6).map((entry) => (
+                                                <div key={entry.id} className="rounded-md border bg-muted/30 p-2 text-xs">
+                                                    <div className="font-semibold text-foreground">
+                                                        {entry.from} → {entry.to}
+                                                    </div>
+                                                    <div className="mt-1 text-foreground/90">{entry.summary}</div>
+                                                    {entry.actionRequired ? (
+                                                        <div className="mt-1 text-muted-foreground">Next: {entry.actionRequired}</div>
+                                                    ) : null}
+                                                </div>
+                                            )) : (
+                                                <p className="text-xs text-muted-foreground">
+                                                    아직 저장된 inbox handoff가 없습니다. `coordinationMode=parallel`에서 플랜/실행을 진행하면 구조화된 handoff가 여기에 쌓입니다.
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-medium text-muted-foreground">Kairos-lite</h3>
+                                    <div className="rounded-md border bg-card p-4">
+                                        {proactiveAssistant?.enabled ? (
+                                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                                <Badge variant="outline" className="text-[10px]">Mode: {proactiveAssistant.mode || 'brief'}</Badge>
+                                                {proactiveAssistant.lastTrigger ? (
+                                                    <Badge variant="outline" className="text-[10px]">
+                                                        Last trigger: {proactiveAssistant.lastTrigger}
+                                                    </Badge>
+                                                ) : null}
+                                                {proactiveAssistant.lastTickAt ? (
+                                                    <Badge variant="outline" className="text-[10px]">
+                                                        Last tick: {new Date(proactiveAssistant.lastTickAt).toLocaleString()}
+                                                    </Badge>
+                                                ) : null}
+                                            </div>
+                                        ) : (
+                                            <p className="text-xs text-muted-foreground">
+                                                Proactive mode가 꺼져 있습니다. brief 이상으로 설정하면 QA 실패나 stalled 상태를 감지해 짧은 권고를 남깁니다.
+                                            </p>
                                         )}
                                     </div>
                                 </div>
@@ -1757,6 +2063,7 @@ export function TaskDetailsModal({
                                             <ExecutionDiscussionTimeline
                                                 entries={executionDiscussions}
                                                 carryDiscussionToPrompt={draftExecutionOptions.carryDiscussionToPrompt}
+                                                buddy={selectedBuddy}
                                             />
                                         </div>
                                     )}

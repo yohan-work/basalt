@@ -208,6 +208,9 @@ export function KanbanBoard() {
         const carryDiscussionToPrompt = raw?.carryDiscussionToPrompt;
         const strategyPreset = raw?.strategyPreset;
         const multiPhaseCodegen = raw?.multiPhaseCodegen;
+        const planningDepth = raw?.planningDepth;
+        const coordinationMode = raw?.coordinationMode;
+        const proactiveMode = raw?.proactiveMode;
 
         return {
             discussionMode:
@@ -228,6 +231,9 @@ export function KanbanBoard() {
                     ? strategyPreset
                     : 'balanced',
             multiPhaseCodegen: typeof multiPhaseCodegen === 'boolean' ? multiPhaseCodegen : false,
+            planningDepth: planningDepth === 'deep' || planningDepth === 'standard' ? planningDepth : 'standard',
+            coordinationMode: coordinationMode === 'parallel' || coordinationMode === 'single' ? coordinationMode : 'single',
+            proactiveMode: proactiveMode === 'off' || proactiveMode === 'normal' || proactiveMode === 'brief' ? proactiveMode : 'brief',
         };
     };
 
@@ -247,7 +253,7 @@ export function KanbanBoard() {
     };
 
     const handleConfirmPlan = (e: React.MouseEvent, task: Task) => {
-        startStreamAction(e, task, 'plan');
+        startStreamAction(e, task, 'plan', getTaskExecutionOptions(task));
     };
 
     const handleRalphEvent = (e: React.MouseEvent, task: Task) => {
