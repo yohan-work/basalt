@@ -1,11 +1,14 @@
 import { AgentDefinition, AgentLoader } from '@/lib/agent-loader';
 import { pickConsultParticipantRoles, resolveTargetedConsultRole } from '@/lib/agent-roster-heuristics';
+import { buildBuddyPromptContext } from '@/lib/buddy-catalog';
 import * as llm from '@/lib/llm';
 import { MODEL_CONFIG } from '@/lib/model-config';
+import type { TaskBuddyInstance } from '@/lib/types/agent-visualization';
 
 export type ConsultAgentsOptions = {
     /** Merged into keyword heuristics (e.g. raw task description). */
     extraHintText?: string;
+    buddy?: TaskBuddyInstance | null;
 };
 
 type ConsultThought = {
@@ -179,6 +182,7 @@ ${codebaseContext}
 
 Task Analysis:
 ${JSON.stringify(taskAnalysis)}
+${buildBuddyPromptContext(consultOptions?.buddy)}
 ${contextDiscussion}${targetedRule}${lineFormatDirective}
 `;
 
