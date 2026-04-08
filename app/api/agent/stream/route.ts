@@ -5,6 +5,7 @@ import { Orchestrator } from '@/lib/agents/Orchestrator';
 import { runRalphSession } from '@/lib/agents/ralph-runner';
 import { StreamEmitter } from '@/lib/stream-emitter';
 import { sendDebugIngest } from '@/lib/debug-ingest';
+import type { ExecuteStreamOptions } from '@/lib/types/agent-visualization';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,9 @@ export async function GET(req: NextRequest) {
     const carryDiscussionToPromptParam = req.nextUrl.searchParams.get('carryDiscussionToPrompt');
     const strategyPresetParam = req.nextUrl.searchParams.get('strategyPreset');
     const multiPhaseCodegenParam = req.nextUrl.searchParams.get('multiPhaseCodegen');
+    const planningDepthParam = req.nextUrl.searchParams.get('planningDepth');
+    const coordinationModeParam = req.nextUrl.searchParams.get('coordinationMode');
+    const proactiveModeParam = req.nextUrl.searchParams.get('proactiveMode');
 
     if (!taskId || !action) {
         return new Response(
@@ -45,7 +49,7 @@ export async function GET(req: NextRequest) {
         async start(controller) {
             const emitter = new StreamEmitter();
             emitter.attach(controller);
-            const executionOptions = {
+            const executionOptions: ExecuteStreamOptions = {
                 discussionMode: (discussionModeParam as 'off' | 'step_handoff' | 'roundtable' | null) || undefined,
                 maxDiscussionThoughts: maxDiscussionThoughtsParam ? Number(maxDiscussionThoughtsParam) : undefined,
                 carryDiscussionToPrompt: carryDiscussionToPromptParam
@@ -58,6 +62,18 @@ export async function GET(req: NextRequest) {
                         : multiPhaseCodegenParam === 'false'
                           ? false
                           : undefined,
+                planningDepth:
+                    planningDepthParam === 'deep' || planningDepthParam === 'standard'
+                        ? planningDepthParam
+                        : undefined,
+                coordinationMode:
+                    coordinationModeParam === 'single' || coordinationModeParam === 'parallel'
+                        ? coordinationModeParam
+                        : undefined,
+                proactiveMode:
+                    proactiveModeParam === 'off' || proactiveModeParam === 'brief' || proactiveModeParam === 'normal'
+                        ? proactiveModeParam
+                        : undefined,
             };
 
             // Set up heartbeat to keep connection alive
@@ -82,11 +98,43 @@ export async function GET(req: NextRequest) {
                             break;
                         }
 
+                        await supabase
+                            .from('Tasks')
+                            .update({
+                                metadata: {
+                                    ...(task.metadata || {}),
+                                    executionOptions: {
+                                        ...(task.metadata?.executionOptions || {}),
+                                        ...Object.fromEntries(
+                                            Object.entries(executionOptions).filter(([, value]) => value !== undefined)
+                                        ),
+                                    },
+                                },
+                            })
+                            .eq('id', taskId);
+
                         const description = task.description || task.title || 'No description provided';
                         await orchestrator.plan(description);
                         break;
                     }
                     case 'execute': {
+                        const { data: task } = await supabase.from('Tasks').select('metadata').eq('id', taskId).single();
+                        if (task) {
+                            await supabase
+                                .from('Tasks')
+                                .update({
+                                    metadata: {
+                                        ...(task.metadata || {}),
+                                        executionOptions: {
+                                            ...(task.metadata?.executionOptions || {}),
+                                            ...Object.fromEntries(
+                                                Object.entries(executionOptions).filter(([, value]) => value !== undefined)
+                                            ),
+                                        },
+                                    },
+                                })
+                                .eq('id', taskId);
+                        }
                         await orchestrator.execute(undefined, executionOptions);
                         void sendDebugIngest({
                             sessionId: 'f89f62',
@@ -106,6 +154,23 @@ export async function GET(req: NextRequest) {
                         break;
                     }
                     case 'ralph': {
+                        const { data: task } = await supabase.from('Tasks').select('metadata').eq('id', taskId).single();
+                        if (task) {
+                            await supabase
+                                .from('Tasks')
+                                .update({
+                                    metadata: {
+                                        ...(task.metadata || {}),
+                                        executionOptions: {
+                                            ...(task.metadata?.executionOptions || {}),
+                                            ...Object.fromEntries(
+                                                Object.entries(executionOptions).filter(([, value]) => value !== undefined)
+                                            ),
+                                        },
+                                    },
+                                })
+                                .eq('id', taskId);
+                        }
                         await runRalphSession(taskId, emitter, executionOptions);
                         break;
                     }

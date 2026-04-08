@@ -1,5 +1,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
+import { buildBuddyPromptContext, getBuddyDefinition, resolveTaskBuddySelection } from '@/lib/buddy-catalog';
 import { supabase } from '@/lib/supabase';
 import * as skills from '@/lib/skills';
 import { AgentLoader } from '@/lib/agent-loader';
@@ -13,18 +14,19 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Missing taskId or message' }, { status: 400 });
         }
 
-        // 1. Log the user's message
+        // 1. Fetch task and buddy context
+        const { data: task } = await supabase.from('Tasks').select('*').eq('id', taskId).single();
+        if (!task) throw new Error('Task not found');
+        const buddy = resolveTaskBuddySelection(task.metadata?.buddy);
+
+        // 2. Log the user's message
         await supabase.from('Execution_Logs').insert({
             task_id: taskId,
             agent_role: 'user',
             message: message,
-            metadata: { type: 'THOUGHT', thought_type: 'idea' },
+            metadata: { type: 'THOUGHT', thought_type: 'idea', buddyId: buddy?.buddyId },
             created_at: new Date().toISOString()
         });
-
-        // 2. Fetch context for discussion
-        const { data: task } = await supabase.from('Tasks').select('*').eq('id', taskId).single();
-        if (!task) throw new Error('Task not found');
 
         const { data: logs } = await supabase
             .from('Execution_Logs')
@@ -51,10 +53,10 @@ export async function POST(req: NextRequest) {
         const newThoughts = await skills.consult_agents(
             analysis,
             availableAgents,
-            codebaseContext,
+            [codebaseContext, buildBuddyPromptContext(buddy)].filter(Boolean).join('\n\n'),
             null,
             pastThoughts,
-            { extraHintText: typeof message === 'string' ? message : '' }
+            { extraHintText: typeof message === 'string' ? message : '', buddy }
         );
 
         // 5. Save AI responses
@@ -64,7 +66,13 @@ export async function POST(req: NextRequest) {
                 task_id: taskId,
                 agent_role: item.agent,
                 message: item.thought,
-                metadata: { type: 'THOUGHT', thought_type: item.type || 'idea' },
+                metadata: {
+                    type: 'THOUGHT',
+                    thought_type: item.type || 'idea',
+                    buddyId: buddy?.buddyId,
+                    buddyInstanceId: buddy?.instanceId,
+                    buddyName: buddy ? (buddy.name || getBuddyDefinition(buddy.buddyId).name) : undefined,
+                },
                 created_at: new Date().toISOString()
             });
         }
