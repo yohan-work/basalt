@@ -14,7 +14,7 @@
 - `architecture/overview.md`  
   - 시스템 구성도·디렉터리 맵(루브릭 P6용 1페이지 요약)
 - `architecture/orchestrator.md`  
-  - Orchestrator/상태 흐름/동적 토큰 예산/Dev 종료 QA/재시도/잠금/메타데이터 저장 규칙
+  - Orchestrator/상태 흐름/동적 토큰 예산/Deep Plan·Agent Inbox·Kairos-lite/Dev 종료 QA/재시도/잠금/메타데이터 저장 규칙
 - `architecture/team-orchestrator.md`  
   - 팀 오케스트레이션 라운드, 메시지, handoff, 협업 지표, 토큰 예산
 - `llm.md`  
@@ -25,9 +25,9 @@
 - `implementation-history.md`  
   - 누적 구현·개선 작업 요약(게이트, QA, 스택 규칙, UI 정책·import 복구 등) 및 상세 문서 링크
 - `features.md`  
-  - 완료 수정, QA·Dev 종료 파이프라인·QA URL 추론 경고, UI 스캐폴드·확장 UI 누락 스캐폴드(§11)·별칭, Next 코드 생성 가이드(§11b), 라우트 루트 일관성(§11c), `write_code` RSC/metadata 방어(§11d), 플랜 스킬·`scan_project`(§11e), 리뷰, discuss, enhance-prompt, TTS, 동적 스택 분석, 미설치 패키지 방어(§12), **태스크 미리보기·복구·인수인계·스펙 확장·유사 태스크·칸반 검색(§13), **Ralph 이벤트 모드(§5d)**, **다단계 코드 생성·스킬 risk 게이트(§5e)** 등
+  - 완료 수정, QA·Dev 종료 파이프라인·QA URL 추론 경고, **Buddy v2·Deep Plan·Agent Inbox·Kairos-lite(§7b)**, UI 스캐폴드·확장 UI 누락 스캐폴드(§11)·별칭, Next 코드 생성 가이드(§11b), 라우트 루트 일관성(§11c), `write_code` RSC/metadata 방어(§11d), 플랜 스킬·`scan_project`(§11e), 리뷰, discuss, enhance-prompt, TTS, 동적 스택 분석, 미설치 패키지 방어(§12), **태스크 미리보기·복구·인수인계·스펙 확장·유사 태스크·칸반 검색(§13), **Ralph 이벤트 모드(§5d)**, **다단계 코드 생성·스킬 risk 게이트(§5e)** 등
 - `api.md`  
-  - `/app/api/**/route.ts` 기준 전체 엔드포인트 목록 및 사용 사례
+  - `/app/api/**/route.ts` 기준 전체 엔드포인트 목록, 실행 옵션(`planningDepth`/`coordinationMode`/`proactiveMode`) 및 metadata 저장 표면
 - `agents-skills.md`  
   - 에이전트 정의, SKILL/AGENT 동작, 동적 로더 연동
 

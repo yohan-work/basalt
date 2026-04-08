@@ -124,6 +124,17 @@ README의 장문 기능 설명을 기능별로 분리한 문서입니다.
 - `discuss` 엔드포인트로 실행 전후 브레인스토밍 대화 생성
 - `enhance-prompt`로 사용자 초안 품질 향상
 
+## 7b) Buddy v2 · Deep Plan · Kairos-lite
+
+- **Buddy v2**: 태스크의 buddy는 더 이상 단순 `{ buddyId, selectedAt }` 선택값이 아니라 `metadata.buddy`에 저장되는 **`TaskBuddyInstance`** 입니다. 선택 시 `instanceId`, `name`, `rarity`, `traits`, `cosmetic`, `personaSeed`, `selectedAt`가 함께 저장되며, 기존 구버전 buddy 메타데이터도 런타임에서 읽어 호환합니다.
+- **역할**: Buddy는 기술 결정을 대신하지 않고, 오케스트레이터와 `discuss` 프롬프트에 **가벼운 톤/감시자 힌트**만 추가합니다. 이름·dominant trait·cosmetic이 프롬프트에 포함되지만, “core technical decisions를 바꾸지 말라”는 제약을 유지합니다.
+- **UI**: 태스크 상세의 **Task Buddy** 영역은 선택된 개체 이름과 stat(`debugging`, `patience`, `wisdom`, `chaos`)을 보여주고, `AgentDiscussion`/`ExecutionDiscussionTimeline`은 species 대신 instance 이름을 우선 표시합니다.
+- **Deep Plan**: 실행 옵션에 `planningDepth=standard|deep`가 추가되었습니다. `deep`일 때 `plan()`은 일반 workflow/plan review 외에 추가 consultation을 한 번 더 수행해 `metadata.planArtifacts.deepPlan`에 요약과 thought artifact를 저장합니다. Task 상세에는 **Deep Plan** 패널이 나타납니다.
+- **Agent Inbox**: 실행 옵션 `coordinationMode=single|parallel`가 추가되었습니다. `parallel`일 때 플랜 단계와 step handoff 단계에서 구조화된 handoff note를 `metadata.agentInbox[]`에 저장합니다. 이는 기존 `executionDiscussions`처럼 의견 로그가 아니라, 다음 에이전트가 바로 이어받을 수 있는 요약/다음 액션 메모입니다.
+- **Kairos-lite**: 실행 옵션 `proactiveMode=off|brief|normal`가 추가되었습니다. `brief` 또는 `normal`일 때 `plan_complete`, 반복 QA 실패, execution 실패 같은 이벤트에 대해 `Execution_Logs.metadata.type = PROACTIVE_NOTE` 로그를 남기고, `metadata.proactiveAssistant`에 마지막 트리거와 모드를 기록합니다.
+- **동작 원칙**: Kairos-lite는 상시 daemon이나 자동 실행기가 아니라 **event-driven proactive evaluator**입니다. 화면 진입, 플랜 완료, QA 실패, 실행 실패 같은 시점에 짧은 권고를 남기며 자동으로 코드를 수정하거나 워크플로를 진행시키지는 않습니다.
+- **Discussion Controls**: 태스크 상세 모달의 **Discussion Controls**는 기존 `discussionMode`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`, `multiPhaseCodegen`에 더해 `planningDepth`, `coordinationMode`, `proactiveMode`를 저장/표시합니다. 칸반의 `Confirm & Plan`, `Start Dev`, `Ralph Mode`는 이 값을 SSE query 및 `metadata.executionOptions`에 반영합니다.
+
 ## 8) react-grab 연동
 
 - 클립보드 기반 요소 컨텍스트 붙여넣기 지원

@@ -81,7 +81,19 @@
 
 ## 운영 참고
 
-- `execute`/`retry`/`stream`의 파라미터는 `discussionMode`, `strategyPreset`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`, `multiPhaseCodegen`(문자열 `true`/`false`) 등으로 제어 — `GET /api/agent/stream` 쿼리에 동일 키를 넘기면 `Orchestrator.execute` 등에 전달되는 `executionOptions`와 맞춘다
+- `plan`/`execute`/`retry`/`stream`의 실행 옵션은 `discussionMode`, `strategyPreset`, `maxDiscussionThoughts`, `carryDiscussionToPrompt`, `multiPhaseCodegen`(문자열 `true`/`false`) 외에 아래 키를 지원합니다.
+  - `planningDepth=standard|deep`
+  - `coordinationMode=single|parallel`
+  - `proactiveMode=off|brief|normal`
+- `GET /api/agent/stream`에 위 쿼리를 넘기면 SSE 실행 시점의 `executionOptions`로 반영되며, `plan`/`execute`/`ralph`는 현재 값을 `Tasks.metadata.executionOptions`에도 저장합니다.
+- `POST /api/agent/discuss`는 buddy 컨텍스트가 있을 때 `Execution_Logs.metadata`에 최소 buddy 필드(`buddyId`, `buddyInstanceId`, `buddyName`)를 함께 기록합니다.
+- proactive evaluator가 활성화된 실행은 `Execution_Logs.metadata.type = PROACTIVE_NOTE` 로그를 남길 수 있습니다.
+- 관련 메타데이터 필드:
+  - `metadata.buddy`
+  - `metadata.executionOptions`
+  - `metadata.agentInbox`
+  - `metadata.planArtifacts.deepPlan`
+  - `metadata.proactiveAssistant`
 - 라우트별 응답 스키마는 실제 호출 코드에서 고정되므로 문서 변경은 라우트 파일 기준으로 갱신
 
 ### API별 계약 빠른 참조
