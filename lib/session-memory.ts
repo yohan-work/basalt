@@ -349,8 +349,13 @@ function scoreRecord(record: SessionMemoryRecord, query: string): number {
         else if (ageMs < 1000 * 60 * 60 * 24 * 7) score += 2;
     }
 
-    if (record.kind === 'plan') score += 1;
-    if (record.kind === 'review') score += 1;
+    if (record.kind === 'plan') score += 2;
+    if (record.kind === 'review') score += 2;
+    if (record.kind === 'qa') score += 3;
+    if (record.kind === 'execution') score += 2;
+    if (queryTokens.some((token) => ['error', 'fail', 'retry', 'qa', 'bug', 'broken', 'warning', '실패', '오류', '검증'].includes(token))) {
+        if (record.kind === 'qa' || record.kind === 'note') score += 3;
+    }
     return score;
 }
 
@@ -419,6 +424,19 @@ export async function loadRelevantSessionMemory(
     const maxChars = options?.maxChars ?? MAX_CONTEXT_CHARS;
     let currentChars = 0;
     const lines: string[] = ['## SESSION_MEMORY'];
+    const indexPath = resolveConsolidationIndexPath(projectPath);
+    if (fs.existsSync(indexPath)) {
+        try {
+            const indexRaw = fs.readFileSync(indexPath, 'utf8').trim();
+            if (indexRaw) {
+                const excerpt = indexRaw.slice(0, Math.min(1600, Math.floor(maxChars * 0.35)));
+                lines.push(excerpt, '');
+                currentChars += excerpt.length;
+            }
+        } catch {
+            // best effort
+        }
+    }
     for (const { record } of ranked) {
         const block = serializeRecord(record);
         if (currentChars + block.length > maxChars) break;
