@@ -121,6 +121,15 @@ export function useEventStream(options: UseEventStreamOptions = {}) {
         if (typeof executeOptions?.multiPhaseCodegen === 'boolean') {
             params.set('multiPhaseCodegen', String(executeOptions.multiPhaseCodegen));
         }
+        if (executeOptions?.planningDepth) {
+            params.set('planningDepth', executeOptions.planningDepth);
+        }
+        if (executeOptions?.coordinationMode) {
+            params.set('coordinationMode', executeOptions.coordinationMode);
+        }
+        if (executeOptions?.proactiveMode) {
+            params.set('proactiveMode', executeOptions.proactiveMode);
+        }
         const url = `/api/agent/stream?${params.toString()}`;
 
         (async () => {

@@ -67,6 +67,11 @@ import {
     type ImpactPreviewPayload,
 } from '../pre-execution/gates';
 import { sendDebugIngest } from '@/lib/debug-ingest';
+import {
+    buildBuddyPromptContext,
+    resolveTaskBuddySelection,
+} from '@/lib/buddy-catalog';
+import type { AgentInboxEntry, CoordinationMode, PlanningDepth, ProactiveMode, TaskBuddyInstance } from '@/lib/types/agent-visualization';
 
 interface AgentTask {
     id: string; // Supabase UUID
@@ -104,6 +109,9 @@ interface ExecutionOptions {
     strategyPreset?: StrategyPreset;
     /** Plan(JSON) → stream codegen → optional second pass after project typecheck */
     multiPhaseCodegen?: boolean;
+    planningDepth?: PlanningDepth;
+    coordinationMode?: CoordinationMode;
+    proactiveMode?: ProactiveMode;
 }
 
 type CollaborationGraph = Record<string, Record<string, {
@@ -125,6 +133,9 @@ export class Orchestrator {
         carryDiscussionToPrompt: true,
         strategyPreset: 'balanced',
         multiPhaseCodegen: false,
+        planningDepth: 'standard',
+        coordinationMode: 'single',
+        proactiveMode: 'brief',
     };
     private budgetPolicy: ExecutionBudgetPolicy = { ...DEFAULT_BUDGET_POLICY };
     private executionMetrics: ExecutionMetrics = {
@@ -141,6 +152,7 @@ export class Orchestrator {
         budgetEvents: [],
         stepMetrics: {},
     };
+    private taskBuddy: TaskBuddyInstance | null = null;
     private activeStepIndex: number | null = null;
     private metadataCache: Record<string, any> | null = null;
     private metadataLastFlushedAt = 0;
@@ -261,7 +273,7 @@ export class Orchestrator {
                 task_id: this.taskId,
                 agent_role: agentName,
                 message: message,
-                metadata: metadata,
+                metadata: this.attachBuddyMetadata(metadata),
                 created_at: new Date().toISOString()
             });
         } catch (e: any) {
@@ -549,6 +561,9 @@ export class Orchestrator {
             maxDiscussionThoughts: runtimeOptions?.maxDiscussionThoughts ?? saved.maxDiscussionThoughts ?? presetDefaults.maxDiscussionThoughts,
             carryDiscussionToPrompt: runtimeOptions?.carryDiscussionToPrompt ?? saved.carryDiscussionToPrompt ?? presetDefaults.carryDiscussionToPrompt,
             strategyPreset: preset,
+            planningDepth: runtimeOptions?.planningDepth ?? saved.planningDepth ?? 'standard',
+            coordinationMode: runtimeOptions?.coordinationMode ?? saved.coordinationMode ?? 'single',
+            proactiveMode: runtimeOptions?.proactiveMode ?? saved.proactiveMode ?? 'brief',
         };
 
         const validModes: DiscussionMode[] = ['off', 'step_handoff', 'roundtable'];
@@ -558,6 +573,11 @@ export class Orchestrator {
             typeof saved.multiPhaseCodegen === 'boolean' ? saved.multiPhaseCodegen : undefined,
             runtimeOptions?.multiPhaseCodegen
         );
+        const planningDepth = merged.planningDepth === 'deep' ? 'deep' : 'standard';
+        const coordinationMode = merged.coordinationMode === 'parallel' ? 'parallel' : 'single';
+        const proactiveMode = merged.proactiveMode === 'off' || merged.proactiveMode === 'normal'
+            ? merged.proactiveMode
+            : 'brief';
 
         return {
             discussionMode,
@@ -567,7 +587,90 @@ export class Orchestrator {
                 ? merged.strategyPreset
                 : 'balanced',
             multiPhaseCodegen,
+            planningDepth,
+            coordinationMode,
+            proactiveMode,
         };
+    }
+
+    private resolveTaskBuddy(taskMetadata: any): TaskBuddyInstance | null {
+        return resolveTaskBuddySelection(taskMetadata?.buddy);
+    }
+
+    private getTaskBuddyContext(): string {
+        return buildBuddyPromptContext(this.taskBuddy);
+    }
+
+    private attachBuddyMetadata(metadata: any = {}) {
+        if (!this.taskBuddy?.buddyId) return metadata;
+        return {
+            ...metadata,
+            buddyId: this.taskBuddy.buddyId,
+            buddyInstanceId: this.taskBuddy.instanceId,
+        };
+    }
+
+    private createInboxEntry(input: {
+        from: string;
+        to: string;
+        summary: string;
+        actionRequired?: string;
+        artifacts?: string[];
+        step?: number;
+    }): AgentInboxEntry {
+        return {
+            id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+            from: this.normalizeAgentKey(input.from) || input.from,
+            to: this.normalizeAgentKey(input.to) || input.to,
+            summary: input.summary.trim(),
+            actionRequired: input.actionRequired?.trim() || undefined,
+            artifacts: Array.isArray(input.artifacts) ? input.artifacts.filter(Boolean) : undefined,
+            createdAt: new Date().toISOString(),
+            status: 'open',
+            buddyId: this.taskBuddy?.buddyId,
+            buddyInstanceId: this.taskBuddy?.instanceId,
+            step: input.step,
+        };
+    }
+
+    private async appendAgentInboxEntries(entries: AgentInboxEntry[]) {
+        if (!entries.length) return;
+        const current = Array.isArray(this.metadataCache?.agentInbox) ? this.metadataCache?.agentInbox : [];
+        await this.updateMetadata({
+            agentInbox: [...current, ...entries],
+        });
+    }
+
+    private summarizeThoughtsForInbox(thoughts: Array<{ agent?: string; thought?: string; type?: string }>, maxItems: number = 2): string {
+        return thoughts
+            .filter((item) => item?.agent && item?.thought)
+            .slice(0, maxItems)
+            .map((item) => `[${item.agent}] ${String(item.thought).replace(/\s+/g, ' ').trim()}`)
+            .join(' ');
+    }
+
+    private async maybeEmitProactiveNote(trigger: string, detail: string, options?: { urgent?: boolean }) {
+        if (this.executionOptions.proactiveMode === 'off') return;
+        const conciseDetail = detail.replace(/\s+/g, ' ').trim().slice(0, this.executionOptions.proactiveMode === 'brief' ? 180 : 320);
+        await this.log(
+            'kairos-lite',
+            conciseDetail,
+            {
+                type: 'PROACTIVE_NOTE',
+                trigger,
+                urgency: options?.urgent ? 'high' : 'normal',
+            }
+        );
+        await this.updateMetadata({
+            proactiveAssistant: {
+                enabled: true,
+                mode: this.executionOptions.proactiveMode,
+                lastTickAt: new Date().toISOString(),
+                lastDigestAt: new Date().toISOString(),
+                lastTrigger: trigger,
+                watchTargets: ['qa', 'logs', 'review', 'stalled_task'],
+            },
+        }, false);
     }
 
     private recordCollaboration(from: string | null | undefined, to: string | null | undefined, reason: string) {
@@ -948,10 +1051,13 @@ export class Orchestrator {
             const rawThoughts = await skills.consult_agents(
                 analysisForStep,
                 participants,
-                context,
+                [context, this.getTaskBuddyContext()].filter(Boolean).join('\n\n'),
                 this.emitter,
                 [],
-                { extraHintText: [task.description, step.description, step.action].filter(Boolean).join('\n') }
+                {
+                    extraHintText: [task.description, step.description, step.action].filter(Boolean).join('\n'),
+                    buddy: this.taskBuddy,
+                }
             );
             const thoughts = Array.isArray(rawThoughts)
                 ? rawThoughts.slice(0, this.executionOptions.maxDiscussionThoughts)
@@ -985,6 +1091,8 @@ export class Orchestrator {
                 action: step.action,
                 createdAt: new Date().toISOString(),
                 participants: participants.map(a => a.role),
+                buddyId: this.taskBuddy?.buddyId,
+                buddyInstanceId: this.taskBuddy?.instanceId,
                 thoughts,
             };
             await this.updateMetadata({
@@ -1110,6 +1218,8 @@ export class Orchestrator {
             let codebaseContext = '';
 
             const task = await this.getTask();
+            this.taskBuddy = this.resolveTaskBuddy(task?.metadata);
+            this.executionOptions = this.resolveExecutionOptions(task?.metadata);
             if (task && (task as any).project_id) {
                 const { data: project } = await supabase.from('Projects').select('path').eq('id', (task as any).project_id).single();
                 if (project?.path) {
@@ -1160,10 +1270,10 @@ export class Orchestrator {
             const discussion = await skills.consult_agents(
                 analysis,
                 availableAgents,
-                codebaseContext,
+                [codebaseContext, this.getTaskBuddyContext()].filter(Boolean).join('\n\n'),
                 this.emitter,
                 [],
-                { extraHintText: effectiveDescription }
+                { extraHintText: effectiveDescription, buddy: this.taskBuddy }
             );
 
             // Log each individual thought from the discussion
@@ -1213,6 +1323,7 @@ export class Orchestrator {
                 this.emitter,
                 [],
                 {
+                    buddy: this.taskBuddy,
                     extraHintText: `${taskDescription}\n${effectiveDescription}`,
                 }
             );
@@ -1222,6 +1333,68 @@ export class Orchestrator {
                 this.recordCollaboration(mainAgentName, item.agent, 'plan_review');
             }
             const planReviewSummary = this.summarizeThoughts(planReview);
+            const inboxEntries: AgentInboxEntry[] = [];
+            if (this.executionOptions.coordinationMode === 'parallel') {
+                for (let index = 0; index < (workflowSanity.workflow.steps?.length || 0); index += 1) {
+                    const currentStep = workflowSanity.workflow.steps[index];
+                    const nextStep = workflowSanity.workflow.steps[index + 1];
+                    if (!currentStep?.agent || !nextStep?.agent) continue;
+                    inboxEntries.push(
+                        this.createInboxEntry({
+                            from: currentStep.agent,
+                            to: nextStep.agent,
+                            step: index,
+                            summary: `Step ${index + 1} handoff for ${currentStep.action || 'workflow item'}.`,
+                            actionRequired: this.summarizeThoughtsForInbox(planReview, 1) || 'Review prior outputs and continue with the next step.',
+                            artifacts: [String(currentStep.action || ''), String(nextStep.action || '')].filter(Boolean),
+                        })
+                    );
+                }
+            }
+
+            let deepPlanArtifact: Record<string, unknown> | null = null;
+            if (this.executionOptions.planningDepth === 'deep') {
+                const deepPlanThoughts = await skills.consult_agents(
+                    {
+                        summary: `Deep plan synthesis: ${taskDescription}`,
+                        required_agents: ['product-manager', 'software-engineer', 'qa'],
+                        complexity: 'high',
+                    },
+                    availableAgents,
+                    [
+                        codebaseContext,
+                        '[WORKFLOW]',
+                        workflowSteps,
+                        '[PLAN REVIEW]',
+                        planReviewSummary,
+                        '[DEEP PLAN GOAL]',
+                        'Surface failure guards, validation checkpoints, and concise handoff instructions.',
+                    ].filter(Boolean).join('\n\n'),
+                    this.emitter,
+                    discussion,
+                    {
+                        buddy: this.taskBuddy,
+                        extraHintText: `${effectiveDescription}\nDeep plan mode enabled`,
+                    }
+                );
+                deepPlanArtifact = {
+                    mode: 'deep',
+                    generatedAt: new Date().toISOString(),
+                    summary: this.summarizeThoughts(deepPlanThoughts),
+                    thoughts: deepPlanThoughts,
+                };
+                if (deepPlanThoughts.length > 0) {
+                    inboxEntries.unshift(
+                        this.createInboxEntry({
+                            from: mainAgentName,
+                            to: workflowSanity.workflow.steps?.[0]?.agent || mainAgentName,
+                            summary: 'Deep plan kickoff',
+                            actionRequired: this.summarizeThoughtsForInbox(deepPlanThoughts, 2) || 'Use deep plan checkpoints during execution.',
+                            artifacts: ['deep-plan'],
+                        })
+                    );
+                }
+            }
             await this.updateMetadata({
                 planReview: {
                     reviewedAt: new Date().toISOString(),
@@ -1292,7 +1465,18 @@ export class Orchestrator {
                     required_agents: workflowSanity.workflow.required_agents,
                 },
                 agentCollaboration: this.collaborationGraph,
+                agentInbox: inboxEntries,
                 impactPreview,
+                executionOptions: this.executionOptions,
+                planArtifacts: {
+                    deepPlan: deepPlanArtifact,
+                    approvalState: 'draft',
+                },
+                proactiveAssistant: {
+                    enabled: this.executionOptions.proactiveMode !== 'off',
+                    mode: this.executionOptions.proactiveMode,
+                    watchTargets: ['qa', 'logs', 'review', 'stalled_task'],
+                },
                 executionPreflight: {
                     requiresImpactAck: true,
                     impactAcknowledgedAt: null,
@@ -1301,6 +1485,14 @@ export class Orchestrator {
             });
 
             // Wait for user confirmation
+            if (this.executionOptions.proactiveMode !== 'off') {
+                await this.maybeEmitProactiveNote(
+                    'plan_complete',
+                    this.executionOptions.planningDepth === 'deep'
+                        ? 'Deep plan ready. Check the inbox and impact preview before execution.'
+                        : 'Plan ready. Review impact preview before execution.'
+                );
+            }
             await this.log(mainAgentName, 'Plan created. Waiting for user approval.');
             this.emitter?.emit({ type: 'done', status: 'planning_complete' });
         } catch (error: any) {
@@ -2257,6 +2449,7 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                 await this.log(mainAgentName, `워크플로우 실행 시작 전 정합성 보정 적용: ${workflowSanity.reason}`, { type: 'WARNING' });
             }
             this.executionOptions = this.resolveExecutionOptions(task.metadata, options);
+            this.taskBuddy = this.resolveTaskBuddy(task.metadata);
             this.budgetPolicy = this.resolveBudgetPolicy(
                 task.metadata,
                 this.executionOptions.strategyPreset,
@@ -2286,6 +2479,13 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
             this.seedCollaborationFromWorkflow(workflow);
             await this.updateMetadata({
                 executionOptions: this.executionOptions,
+                buddy: this.taskBuddy,
+                buddySummary: this.taskBuddy ? {
+                    buddyId: this.taskBuddy.buddyId,
+                    instanceId: this.taskBuddy.instanceId,
+                    name: this.taskBuddy.name,
+                    rarity: this.taskBuddy.rarity,
+                } : null,
                 budgetPolicy: this.budgetPolicy,
                 executionMetrics: this.executionMetrics,
                 agentCollaboration: this.collaborationGraph
@@ -2446,6 +2646,18 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                     }
                 }
                 this.recordCollaboration(previousStepAgent, agentRoleSlug, 'step_handoff');
+                if (this.executionOptions.coordinationMode === 'parallel' && previousStepAgent && previousStepAgent !== agentRoleSlug) {
+                    await this.appendAgentInboxEntries([
+                        this.createInboxEntry({
+                            from: previousStepAgent,
+                            to: agentRoleSlug,
+                            step: stepIndex,
+                            summary: `Execution handoff into step ${stepIndex + 1}: ${action}`,
+                            actionRequired: 'Read the latest execution logs and continue from the previous step output.',
+                            artifacts: [action],
+                        }),
+                    ]);
+                }
 
                 try {
                     this.activeStepIndex = stepIndex;
@@ -3337,6 +3549,9 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
             this.emitter?.emit({ type: 'done', status: 'execution_complete' });
         } catch (error: any) {
             await this.log('System', `Execution Phase Failed: ${error.message}`, { type: 'ERROR' });
+            await this.maybeEmitProactiveNote('execution_failed', `Execution failed. Prioritize triage and retry planning. ${error.message}`, {
+                urgent: true,
+            });
             await this.updateStatus('failed');
             // Release lock on fatal error
             this.executionMetrics.endedAt = new Date().toISOString();
@@ -3450,6 +3665,11 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
             if (qaPageCheck.passed) {
                 break;
             }
+            await this.maybeEmitProactiveNote(
+                'qa_failure',
+                `QA smoke failed on round ${r + 1}/${maxRounds}. ${qaPageCheck.summary}`,
+                { urgent: r >= 1 }
+            );
             if (r === maxRounds - 1) {
                 throw new Error(
                     `Dev QA: ${maxRounds}회 시도 후에도 대상 페이지가 정상이 아닙니다 (${qaBaseUrl}). ${qaPageCheck.summary}`
