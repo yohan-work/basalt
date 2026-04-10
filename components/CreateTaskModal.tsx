@@ -20,6 +20,12 @@ import {
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { apiErrorText, parseResponseAsJson } from '@/lib/fetch-json';
+import {
+    getDefaultDesignPresetForTemplate,
+    getDesignPresetOptions,
+    PAGE_TASK_TEMPLATE_ID,
+    type BuiltInDesignPreset,
+} from '@/lib/design-preset';
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
     LayoutGrid, Globe, Bug, RefreshCw, FileText,
@@ -30,6 +36,8 @@ export interface CreateTaskPayload {
     title: string;
     description: string;
     priority: string;
+    templateId?: string;
+    designPreset?: BuiltInDesignPreset;
     attachedComponentPaths?: string[];
 }
 
@@ -45,6 +53,8 @@ interface ComponentItem {
     displayName: string;
 }
 
+const DESIGN_PRESET_OPTIONS = getDesignPresetOptions();
+
 export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectId }: CreateTaskModalProps) {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
@@ -53,6 +63,7 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
     const [isEnhancing, setIsEnhancing] = useState(false);
     const [showTemplates, setShowTemplates] = useState(true);
     const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+    const [selectedDesignPreset, setSelectedDesignPreset] = useState<BuiltInDesignPreset | null>(null);
     const [components, setComponents] = useState<ComponentItem[]>([]);
     const [selectedComponentPaths, setSelectedComponentPaths] = useState<string[]>([]);
     const [componentsLoading, setComponentsLoading] = useState(false);
@@ -84,10 +95,19 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
             setIsSubmitting(false);
             setIsEnhancing(false);
             setSelectedTemplateId(null);
+            setSelectedDesignPreset(null);
             setShowTemplates(true);
             setSelectedComponentPaths([]);
         }
     }, [open]);
+
+    useEffect(() => {
+        if (selectedTemplateId === PAGE_TASK_TEMPLATE_ID) {
+            setSelectedDesignPreset((prev) => prev ?? getDefaultDesignPresetForTemplate(selectedTemplateId));
+            return;
+        }
+        setSelectedDesignPreset(null);
+    }, [selectedTemplateId]);
 
     useEffect(() => {
         if (!open || !selectedProjectId) {
@@ -142,7 +162,13 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
         if (!title.trim()) return;
         setIsSubmitting(true);
         try {
-            const payload: CreateTaskPayload = { title, description, priority };
+            const payload: CreateTaskPayload = {
+                title,
+                description,
+                priority,
+                templateId: selectedTemplateId ?? undefined,
+                designPreset: selectedDesignPreset ?? undefined,
+            };
             if (selectedComponentPaths.length > 0) {
                 payload.attachedComponentPaths = selectedComponentPaths;
                 payload.description = `다음 컴포넌트를 import해서 사용해줘: ${selectedComponentPaths.map(p => `@${p}`).join(', ')}.\n\n${description}`;
@@ -167,7 +193,13 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
             const res = await fetch('/api/agent/enhance-prompt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, description, projectId: selectedProjectId })
+                body: JSON.stringify({
+                    title,
+                    description,
+                    projectId: selectedProjectId,
+                    templateId: selectedTemplateId,
+                    designPreset: selectedDesignPreset ?? undefined,
+                })
             });
             const data = await parseResponseAsJson(res);
             if (!res.ok) throw new Error(apiErrorText(data, 'Failed to enhance prompt'));
@@ -260,6 +292,37 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
                         </div>
                     )}
                 </div>
+
+                {selectedTemplateId === PAGE_TASK_TEMPLATE_ID && (
+                    <div className="mt-4 grid gap-2">
+                        <Label>디자인 프리셋</Label>
+                        <p className="text-xs text-muted-foreground">
+                            페이지 생성 시 사용할 기본 디자인 시스템을 선택합니다.
+                        </p>
+                        <div className="grid grid-cols-3 gap-2">
+                            {DESIGN_PRESET_OPTIONS.map((preset) => {
+                                const isSelected = selectedDesignPreset === preset.id;
+                                return (
+                                    <button
+                                        key={preset.id}
+                                        type="button"
+                                        onClick={() => setSelectedDesignPreset(preset.id)}
+                                        className={`rounded-md border p-3 text-left transition-colors ${
+                                            isSelected
+                                                ? 'border-primary bg-primary/5'
+                                                : 'border-border hover:border-primary/50 hover:bg-muted/40'
+                                        }`}
+                                    >
+                                        <div className="text-sm font-medium">{preset.label}</div>
+                                        <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                                            {preset.summary}
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
 
                 <div className="grid gap-4 py-2">
                     <div className="grid gap-2">

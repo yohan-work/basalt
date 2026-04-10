@@ -17,6 +17,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { useEventStream } from '@/lib/hooks/useEventStream';
 import type { ExecuteStreamOptions } from '@/lib/types/agent-visualization';
 import { apiErrorText, parseResponseAsJson } from '@/lib/fetch-json';
+import { buildTaskMetadataWithDesignPreset, type BuiltInDesignPreset } from '@/lib/design-preset';
 
 interface Task {
     id: string;
@@ -170,15 +171,27 @@ export function KanbanBoard() {
         return blob.includes(q);
     };
 
-    const handleCreateTask = async (taskData: { title: string; description: string; priority: string; attachedComponentPaths?: string[] }) => {
+    const handleCreateTask = async (taskData: {
+        title: string;
+        description: string;
+        priority: string;
+        templateId?: string;
+        designPreset?: BuiltInDesignPreset;
+        attachedComponentPaths?: string[];
+    }) => {
         const newTask: Record<string, unknown> = {
             title: taskData.title,
             description: taskData.description,
             status: 'pending',
             project_id: selectedProjectId
         };
-        if (taskData.attachedComponentPaths?.length) {
-            newTask.metadata = { attachedComponentPaths: taskData.attachedComponentPaths };
+        const nextMetadata = buildTaskMetadataWithDesignPreset(
+            taskData.attachedComponentPaths?.length ? { attachedComponentPaths: taskData.attachedComponentPaths } : undefined,
+            taskData.templateId,
+            taskData.designPreset
+        );
+        if (nextMetadata) {
+            newTask.metadata = nextMetadata;
         }
 
         const { data: createdTask, error } = await supabase.from('Tasks')
