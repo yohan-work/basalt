@@ -1045,7 +1045,12 @@ export class Orchestrator {
                 ],
             };
 
-            const context = `${await this.profiler.getContextString()}\n\n${this.contextManager.getOptimizedContext(5000)}`;
+            const context = `${await this.profiler.getContextString({
+                taskMetadata:
+                    task?.metadata && typeof task.metadata === 'object'
+                        ? (task.metadata as Record<string, unknown>)
+                        : null,
+            })}\n\n${this.contextManager.getOptimizedContext(5000)}`;
 
             this.emitter?.emit({ type: 'skill_execute', skill: 'consult_agents', args: `step-${stepIndex + 1}` });
             const rawThoughts = await skills.consult_agents(
@@ -1136,7 +1141,17 @@ export class Orchestrator {
         }
 
         return async (...args: any[]) => {
-            return await skills.execute_skill(skillName, { args }, await this.profiler.getContextString(), this.emitter);
+            return await skills.execute_skill(
+                skillName,
+                { args },
+                await this.profiler.getContextString({
+                    taskMetadata:
+                        this.metadataCache && typeof this.metadataCache === 'object'
+                            ? (this.metadataCache as Record<string, unknown>)
+                            : null,
+                }),
+                this.emitter
+            );
         };
     }
 
@@ -1229,7 +1244,12 @@ export class Orchestrator {
 
                 try {
                     const [profilerContext, pkgJson] = await Promise.all([
-                        this.profiler.getContextString(),
+                        this.profiler.getContextString({
+                            taskMetadata:
+                                task?.metadata && typeof task.metadata === 'object'
+                                    ? (task.metadata as Record<string, unknown>)
+                                    : null,
+                        }),
                         skills.read_codebase('package.json', projectPath),
                     ]);
                     const sessionMemoryContext = await this.getSessionMemoryContext(taskDescription, {
@@ -1659,7 +1679,12 @@ Overall Task: ${taskDescription}
 Project Path: ${projectPath}
 Tech Stack: ${techStack}
 
-${await this.profiler.getContextString()}
+${await this.profiler.getContextString({
+    taskMetadata:
+        this.metadataCache && typeof this.metadataCache === 'object'
+            ? (this.metadataCache as Record<string, unknown>)
+            : null,
+})}
 
 ${dynamicContext}
 
@@ -2255,7 +2280,12 @@ File: ${relativePath}
         const tailNote = prof.hasTailwind
             ? 'Tailwind is installed; you may use className with utility classes where appropriate.'
             : 'Tailwind is NOT installed; do NOT use Tailwind classes—use semantic HTML, inline style, or existing CSS patterns from the repo.';
-        const profilerBlock = await this.profiler.getContextString();
+        const profilerBlock = await this.profiler.getContextString({
+            taskMetadata:
+                this.metadataCache && typeof this.metadataCache === 'object'
+                    ? (this.metadataCache as Record<string, unknown>)
+                    : null,
+        });
 
         const userPrompt = `
 Fix Next.js App Router RSC boundary. Basalt rejected the write:
@@ -2843,7 +2873,12 @@ Return **two or more** files in the standard multi-file format (each \`File: ...
                                             const contextData = this.contextManager.getOptimizedContext(contextSize);
                                             let augmentedContext = contextData;
                                             if (this.profiler) {
-                                                const profilerData = await this.profiler.getContextString();
+                                                const profilerData = await this.profiler.getContextString({
+                                                    taskMetadata:
+                                                        task.metadata && typeof task.metadata === 'object'
+                                                            ? (task.metadata as Record<string, unknown>)
+                                                            : null,
+                                                });
                                                 augmentedContext = `${profilerData}\n\n${contextData}`;
                                             }
 
@@ -3933,7 +3968,12 @@ metadata vs use client: "use client"가 있는 파일에서는 export const meta
             const contextData = this.contextManager.getOptimizedContext(contextSize);
             let augmentedContext = contextData;
             if (this.profiler) {
-                const profilerData = await this.profiler.getContextString();
+                const profilerData = await this.profiler.getContextString({
+                    taskMetadata:
+                        task.metadata && typeof task.metadata === 'object'
+                            ? (task.metadata as Record<string, unknown>)
+                            : null,
+                });
                 augmentedContext = `${profilerData}\n\n${contextData}`;
             }
 

@@ -12,7 +12,11 @@ export async function getCodebaseSnippetForTask(taskId: string): Promise<{ proje
     let snippet = '';
 
     try {
-        const { data: task, error: taskErr } = await supabase.from('Tasks').select('project_id').eq('id', taskId).single();
+        const { data: task, error: taskErr } = await supabase
+            .from('Tasks')
+            .select('project_id, metadata')
+            .eq('id', taskId)
+            .single();
         if (taskErr || !task?.project_id) {
             return { projectPath, snippet: '' };
         }
@@ -22,7 +26,12 @@ export async function getCodebaseSnippetForTask(taskId: string): Promise<{ proje
         }
         projectPath = project.path;
         const profiler = new ProjectProfiler(projectPath);
-        snippet = await profiler.getContextString();
+        snippet = await profiler.getContextString({
+            taskMetadata:
+                task.metadata && typeof task.metadata === 'object'
+                    ? (task.metadata as Record<string, unknown>)
+                    : null,
+        });
         if (snippet.length > MAX_SNIPPET) {
             snippet = `${snippet.slice(0, MAX_SNIPPET)}\n...[truncated]`;
         }

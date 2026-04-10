@@ -10,10 +10,15 @@ import {
 } from './stack-version-context';
 import { formatStackRulesSummary, loadStackRulesBlock } from './stack-rules/load';
 import { inferComponentsUiRelativeDirFromConfig } from './tsconfig-paths';
+import { getDesignPresetById, isPageTaskTemplate, resolveDesignPreset } from './design-preset';
 
 interface AvailableUiComponent {
     name: string;
     absolutePath: string;
+}
+
+export interface PromptContextOptions {
+    taskMetadata?: Record<string, unknown> | null;
 }
 
 /** Relative paths (POSIX) checked when `@prisma/client` is installed — hint only. */
@@ -398,8 +403,9 @@ export class ProjectProfiler {
     /**
      * Formats the profile into a string for LLM prompts.
      */
-    public async getContextString(): Promise<string> {
-        if (this.contextStringCache && this.isCacheFresh(this.contextStringCache.at)) {
+    public async getContextString(options?: PromptContextOptions): Promise<string> {
+        const useCache = !options?.taskMetadata;
+        if (useCache && this.contextStringCache && this.isCacheFresh(this.contextStringCache.at)) {
             return this.contextStringCache.value;
         }
         const data = await this.getProfileData();
@@ -523,7 +529,7 @@ export class ProjectProfiler {
         const allDeps = data.dependencies.sort().join(', ') || 'None';
 
         const stackRules = loadStackRulesBlock(this.projectRoot, data.stackProfile);
-        const designHints = await this.getDesignHintsBlock();
+        const designHints = await this.getDesignHintsBlock(options);
 
         const routerConflictWarning =
             data.routerDualRoot && data.routerResolutionNote
@@ -562,17 +568,19 @@ ${designHints}
 [STACK_RULES]
 ${stackRules}
 `.trim();
-        this.contextStringCache = {
-            at: Date.now(),
-            value: context,
-        };
+        if (useCache) {
+            this.contextStringCache = {
+                at: Date.now(),
+                value: context,
+            };
+        }
         return context;
     }
 
     /**
      * Read-only excerpts from globals / Tailwind config so generated UI matches the target repo.
      */
-    public async getDesignHintsBlock(): Promise<string> {
+    public async getDesignHintsBlock(options?: PromptContextOptions): Promise<string> {
         const chunks: string[] = [];
         const maxCss = 3500;
         const cssCandidates = [
@@ -607,10 +615,59 @@ ${stackRules}
             chunks.push(`### Excerpt: \`${name}\`\n\`\`\`\n${raw}\n\`\`\``);
             break;
         }
+        const presetBlock = this.getDesignPresetBlock(options?.taskMetadata);
+        if (presetBlock) {
+            chunks.push(presetBlock);
+        }
         if (chunks.length === 0) {
             return '\n## DESIGN HINTS\n_No `globals.css` / `tailwind.config` found at common paths; infer styling only from files you read._\n_Default until you find evidence otherwise: light pages use dark body text on light backgrounds; do not assume dark mode or light-on-light without files that define it._\n';
         }
         return `\n## DESIGN HINTS (target repo — match this; do not impose an unrelated product theme)\n${chunks.join('\n\n')}\n`;
+    }
+
+    private getDesignPresetBlock(taskMetadata?: Record<string, unknown> | null): string {
+        if (!taskMetadata || !isPageTaskTemplate(taskMetadata)) {
+            return '';
+        }
+
+        const preset = resolveDesignPreset(taskMetadata);
+        const presetDef = getDesignPresetById(preset);
+        if (!presetDef) {
+            return '';
+        }
+
+        const rel = presetDef.relativePath;
+        const full = path.join(this.projectRoot, rel);
+        const fallback = path.resolve(process.cwd(), rel);
+        const candidatePaths = [full, fallback];
+
+        for (const candidate of candidatePaths) {
+            try {
+                if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) continue;
+                let raw = fs.readFileSync(candidate, 'utf8');
+                if (raw.length > 5000) {
+                    raw = `${raw.slice(0, 5000)}\n<!-- truncated -->\n`;
+                }
+                return [
+                    '## DESIGN PRESET',
+                    `- Active preset: \`${presetDef.id}\``,
+                    `- Tone summary: ${presetDef.summary}`,
+                    '- Apply this only as the default tone for new page generation tasks.',
+                    '- Respect the target repo tokens first. Use the preset for whitespace, typography rhythm, surface treatment, and restraint.',
+                    '```md',
+                    raw,
+                    '```',
+                ].join('\n');
+            } catch {
+                continue;
+            }
+        }
+
+        return [
+            '## DESIGN PRESET',
+            `- Active preset: \`${presetDef.id}\``,
+            `- Tone summary: ${presetDef.summary}`,
+        ].join('\n');
     }
 
     private getRoutePolicyHint(data: any): string {
