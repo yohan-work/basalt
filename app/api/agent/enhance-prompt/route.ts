@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { MODEL_CONFIG } from '@/lib/model-config';
+import { getDesignPresetById, PAGE_TASK_TEMPLATE_ID } from '@/lib/design-preset';
 import { supabase } from '@/lib/supabase';
 import { ProjectProfiler } from '@/lib/profiler';
 
@@ -34,9 +35,17 @@ Make the result sound professional, actionable, and ready to be fed directly int
 
 const GENERIC_CONSTRAINTS = 'E.g., Use Tailwind CSS, TypeScript, shadcn/ui.';
 
-async function buildSystemPrompt(projectId?: string): Promise<string> {
+async function buildSystemPrompt(
+    projectId?: string,
+    options?: { templateId?: string; designPreset?: string }
+): Promise<string> {
+    const presetSummary = getDesignPresetById(options?.designPreset)?.summary;
     if (!projectId) {
-        return BASE_SYSTEM_PROMPT.replace('STACK_CONSTRAINTS_PLACEHOLDER', GENERIC_CONSTRAINTS);
+        const base = BASE_SYSTEM_PROMPT.replace('STACK_CONSTRAINTS_PLACEHOLDER', GENERIC_CONSTRAINTS);
+        if (options?.templateId !== PAGE_TASK_TEMPLATE_ID) {
+            return base;
+        }
+        return `${base}\n\n페이지 생성 태스크이므로 선택된 디자인 프리셋을 따르세요.${presetSummary ? ` 핵심 톤: ${presetSummary}` : ''}`;
     }
 
     try {
@@ -52,9 +61,17 @@ async function buildSystemPrompt(projectId?: string): Promise<string> {
 
         const profiler = new ProjectProfiler(project.path);
         const stackSummary = await profiler.getStackSummary();
+        const promptContext = await profiler.getContextString({
+            taskMetadata: options?.templateId
+                ? {
+                    taskTemplateId: options.templateId,
+                    designPreset: options.designPreset,
+                }
+                : null,
+        });
 
         const dynamicConstraints =
-            `아래는 이 프로젝트의 실제 기술 스택입니다. 제약 조건은 반드시 이 스택에 맞게 작성하세요:\n${stackSummary}`;
+            `아래는 이 프로젝트의 실제 기술 스택입니다. 제약 조건은 반드시 이 스택에 맞게 작성하세요:\n${stackSummary}\n\n${promptContext}`;
 
         return BASE_SYSTEM_PROMPT.replace('STACK_CONSTRAINTS_PLACEHOLDER', dynamicConstraints);
     } catch (e) {
@@ -66,7 +83,7 @@ async function buildSystemPrompt(projectId?: string): Promise<string> {
 export async function POST(req: Request) {
     try {
         const body = await req.json();
-        const { title, description, projectId } = body;
+        const { title, description, projectId, templateId, designPreset } = body;
 
         if (!title && !description) {
             return NextResponse.json(
@@ -75,7 +92,7 @@ export async function POST(req: Request) {
             );
         }
 
-        const systemPrompt = await buildSystemPrompt(projectId);
+        const systemPrompt = await buildSystemPrompt(projectId, { templateId, designPreset });
         const userDraft = `Title: ${title}\nDescription: ${description}`;
         
         const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
