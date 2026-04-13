@@ -1,10 +1,9 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Badge } from '@/components/ui/badge';
-import { Sparkles, MessageSquare, Send, Volume2, VolumeX, Square } from 'lucide-react';
+import { Search, MessageSquare, Send, Volume2, VolumeX, Square, TerminalSquare } from 'lucide-react';
 import { getBuddyDefinition, getBuddyReaction } from '@/lib/buddy-catalog';
 import { useTTS } from '@/lib/tts/useTTS';
 import { supabase } from '@/lib/supabase';
@@ -12,7 +11,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AgentAvatar } from './AgentAvatar';
 import { OfficeLayout } from './OfficeLayout';
-import { BuddyAscii } from './BuddyAscii';
 import type { TaskBuddyInstance } from '@/lib/types/agent-visualization';
 
 interface AgentThought {
@@ -31,26 +29,31 @@ interface AgentDiscussionProps {
 
 const AGENTS = [
     {
-        // PM -> Engineering Hub
         role: 'product-manager', name: 'PM', color: 'bg-emerald-500', baseColor: 'bg-emerald-500',
-        zone: { idle: { left: '25%', top: '75%' }, meeting: { left: '25%', top: '25%' } } // idle on left desk hub, meeting inside Boardroom
+        zone: { idle: { left: '70%', top: '36%' }, meeting: { left: '64%', top: '58%' } }
     },
     {
-        // Lead -> Patio
         role: 'main-agent', name: 'Lead', color: 'bg-blue-500', baseColor: 'bg-blue-500',
-        zone: { idle: { left: '72%', top: '22%' }, meeting: { left: '30%', top: '30%' } }
+        zone: { idle: { left: '31%', top: '30%' }, meeting: { left: '63%', top: '31%' } }
     },
     {
-        // Dev -> Boardroom 
         role: 'software-engineer', name: 'Dev', color: 'bg-indigo-500', baseColor: 'bg-indigo-500',
-        zone: { idle: { left: '15%', top: '35%' }, meeting: { left: '27%', top: '21%' } } // Center of the oval table
+        zone: { idle: { left: '26%', top: '62%' }, meeting: { left: '73%', top: '52%' } }
     },
     {
-        // Design -> Bottom Right area
         role: 'designer', name: 'Design', color: 'bg-pink-500', baseColor: 'bg-pink-500',
-        zone: { idle: { left: '80%', top: '80%' }, meeting: { left: '32%', top: '25%' } }
+        zone: { idle: { left: '35%', top: '79%' }, meeting: { left: '67%', top: '70%' } }
     }
 ];
+
+function roleLabel(role: string) {
+    if (role === 'main-agent') return 'Codex';
+    if (role === 'product-manager') return 'Claude';
+    if (role === 'software-engineer') return 'Gemini';
+    if (role === 'designer') return 'Style';
+    if (role === 'user') return 'You';
+    return role;
+}
 
 export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscussionProps) {
     const [allThoughts, setAllThoughts] = useState<AgentThought[]>([]);
@@ -67,8 +70,7 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
     const tts = useTTS();
     const lastSpokenIdRef = useRef<string | null>(null);
 
-    // User Agency State
-    const [userPos, setUserPos] = useState({ x: 50, y: 85 });
+    const [userPos, setUserPos] = useState({ x: 52, y: 88 });
     const [userDir, setUserDir] = useState<'left' | 'right' | 'forward'>('forward');
     const [isUserWalking, setIsUserWalking] = useState(false);
     const [activeEmote, setActiveEmote] = useState<'thumbsup' | 'heart' | 'question' | null>(null);
@@ -83,7 +85,6 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
         setChatPortalTarget(document.getElementById('agent-discussion-chat-portal'));
     }, []);
 
-    // 1. Fetch and Subscribe (SAME)
     useEffect(() => {
         if (!taskId) return;
 
@@ -96,7 +97,7 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
 
             if (!error && data) {
                 const thoughtLogs = data
-                    .filter((log: any) => (log.metadata?.type === 'THOUGHT' || log.agent_role === 'user'))
+                    .filter((log: any) => log.metadata?.type === 'THOUGHT' || log.agent_role === 'user')
                     .map((log: any) => ({
                         id: log.id,
                         agent: log.agent_role,
@@ -124,37 +125,36 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                 },
                 (payload: any) => {
                     const newLog = payload.new;
-                    if ((newLog.metadata?.type === 'THOUGHT' || newLog.agent_role === 'user')) {
-                        const newThought: AgentThought = {
-                            id: newLog.id,
-                            agent: newLog.agent_role,
-                            thought: newLog.message,
-                            type: (newLog.metadata?.thought_type || 'idea') as AgentThought['type'],
-                            timestamp: new Date(newLog.created_at).getTime()
-                        };
+                    if (newLog.metadata?.type !== 'THOUGHT' && newLog.agent_role !== 'user') return;
 
-                        if (newLog.agent_role === 'user') {
-                            let isNew = false;
-                            setAllThoughts((prev: AgentThought[]) => {
-                                if (prev.some((t: AgentThought) => t.id === newThought.id)) return prev;
-                                isNew = true;
+                    const newThought: AgentThought = {
+                        id: newLog.id,
+                        agent: newLog.agent_role,
+                        thought: newLog.message,
+                        type: (newLog.metadata?.thought_type || 'idea') as AgentThought['type'],
+                        timestamp: new Date(newLog.created_at).getTime()
+                    };
+
+                    if (newLog.agent_role === 'user') {
+                        let isNew = false;
+                        setAllThoughts((prev) => {
+                            if (prev.some((t) => t.id === newThought.id)) return prev;
+                            isNew = true;
+                            return [...prev, newThought];
+                        });
+                        setTimeout(() => {
+                            if (!isNew) return;
+                            setVisibleThoughts((prev) => {
+                                if (prev.some((t) => t.id === newThought.id)) return prev;
                                 return [...prev, newThought];
                             });
-                            setTimeout(() => {
-                                if (isNew) {
-                                    setVisibleThoughts((v: AgentThought[]) => {
-                                        if (v.some(t => t.id === newThought.id)) return v;
-                                        return [...v, newThought];
-                                    });
-                                    setCurrentThoughtIndex(prev => prev + 1);
-                                }
-                            }, 0);
-                        } else {
-                            setAllThoughts((prev: AgentThought[]) => {
-                                if (prev.some((t: AgentThought) => t.id === newThought.id)) return prev;
-                                return [...prev, newThought];
-                            });
-                        }
+                            setCurrentThoughtIndex((prev) => prev + 1);
+                        }, 0);
+                    } else {
+                        setAllThoughts((prev) => {
+                            if (prev.some((t) => t.id === newThought.id)) return prev;
+                            return [...prev, newThought];
+                        });
                     }
                 }
             )
@@ -165,94 +165,85 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
         };
     }, [taskId]);
 
-    // 2. Drip feed logic (4.5s delay)
     useEffect(() => {
         const interval = setInterval(() => {
-            if (currentThoughtIndex < allThoughts.length - 1) {
-                const nextIndex = currentThoughtIndex + 1;
-                const nextThought = allThoughts[nextIndex];
+            if (currentThoughtIndex >= allThoughts.length - 1) return;
 
-                // --- Particle Generation ---
-                if (nextThought && nextThought.agent !== 'user') {
-                    let parsedData: any = AGENTS.find(a => a.role.toLowerCase() === nextThought.agent.toLowerCase());
-                    if (!parsedData) {
-                        if (nextThought.agent.toLowerCase().includes('lead') || nextThought.agent.toLowerCase().includes('main')) parsedData = AGENTS.find(a => a.role === 'main-agent');
-                        else if (nextThought.agent.toLowerCase().includes('dev') || nextThought.agent.toLowerCase().includes('software')) parsedData = AGENTS.find(a => a.role === 'software-engineer');
-                        else if (nextThought.agent.toLowerCase().includes('design') || nextThought.agent.toLowerCase().includes('style')) parsedData = AGENTS.find(a => a.role === 'designer');
-                        else parsedData = AGENTS[0];
-                    }
-                    if (parsedData) {
-                        const newParticle = {
-                            id: `${nextThought.id}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-                            type: nextThought.type,
-                            role: parsedData.role,
-                            x: parsedData.zone.meeting.left,
-                            y: parsedData.zone.meeting.top
-                        };
-                        setThoughtParticles(pt => [...pt, newParticle]);
-                        setTimeout(() => {
-                            setThoughtParticles(pt => pt.filter(p => p.id !== newParticle.id));
-                        }, 2500); // Life time of particle
-                    }
+            const nextIndex = currentThoughtIndex + 1;
+            const nextThought = allThoughts[nextIndex];
+
+            if (nextThought && nextThought.agent !== 'user') {
+                let parsedData: typeof AGENTS[number] | undefined = AGENTS.find((a) => a.role.toLowerCase() === nextThought.agent.toLowerCase());
+                if (!parsedData) {
+                    if (nextThought.agent.toLowerCase().includes('lead') || nextThought.agent.toLowerCase().includes('main')) parsedData = AGENTS.find((a) => a.role === 'main-agent');
+                    else if (nextThought.agent.toLowerCase().includes('dev') || nextThought.agent.toLowerCase().includes('software')) parsedData = AGENTS.find((a) => a.role === 'software-engineer');
+                    else if (nextThought.agent.toLowerCase().includes('design') || nextThought.agent.toLowerCase().includes('style')) parsedData = AGENTS.find((a) => a.role === 'designer');
+                    else parsedData = AGENTS[0];
                 }
-                // -------------------------
-
-                setCurrentThoughtIndex(nextIndex);
-                setVisibleThoughts((prev: AgentThought[]) => {
-                    if (prev.some(t => t.id === nextThought.id)) return prev;
-                    return [...prev, nextThought];
-                });
+                if (parsedData) {
+                    const newParticle = {
+                        id: `${nextThought.id}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+                        type: nextThought.type,
+                        role: parsedData.role,
+                        x: parsedData.zone.meeting.left,
+                        y: parsedData.zone.meeting.top
+                    };
+                    setThoughtParticles((prev) => [...prev, newParticle]);
+                    setTimeout(() => {
+                        setThoughtParticles((prev) => prev.filter((p) => p.id !== newParticle.id));
+                    }, 2500);
+                }
             }
+
+            setCurrentThoughtIndex(nextIndex);
+            setVisibleThoughts((prev) => {
+                if (prev.some((t) => t.id === nextThought.id)) return prev;
+                return [...prev, nextThought];
+            });
         }, 4500);
 
         return () => clearInterval(interval);
     }, [allThoughts, currentThoughtIndex]);
 
-    // 2.5 Idle Wandering Logic (Random movement in idle zone)
     useEffect(() => {
         const updateOffsets = () => {
-            setIdleOffsets(prev => {
+            setIdleOffsets((prev) => {
                 const next = { ...prev };
-                AGENTS.forEach(agent => {
-                    // random -3 to +3 % offset for wandering
-                    const dx = (Math.random() - 0.5) * 6;
-                    const dy = (Math.random() - 0.5) * 6;
-                    next[agent.role] = { dx, dy };
+                AGENTS.forEach((agent) => {
+                    next[agent.role] = {
+                        dx: (Math.random() - 0.5) * 2.8,
+                        dy: (Math.random() - 0.5) * 2.8,
+                    };
                 });
                 return next;
             });
         };
 
-        updateOffsets(); // initial
-        const interval = setInterval(updateOffsets, 4000); // adjust time as needed
+        updateOffsets();
+        const interval = setInterval(updateOffsets, 4200);
         return () => clearInterval(interval);
     }, []);
 
-    // 2.6 Background Working Logic (Idle agents occasionally work)
     useEffect(() => {
         const updateWorking = () => {
-            setWorkingAgents(new Set(
-                AGENTS.filter(() => Math.random() > 0.6).map(a => a.role)
-            ));
+            setWorkingAgents(new Set(AGENTS.filter(() => Math.random() > 0.58).map((a) => a.role)));
         };
 
         updateWorking();
-        const interval = setInterval(updateWorking, 5000); // random work cycles
+        const interval = setInterval(updateWorking, 5000);
         return () => clearInterval(interval);
     }, []);
 
-    // 3. Movement and Emote Logic
     useEffect(() => {
-        if (isUserFocused) return; // Disable keys if user is typing
+        if (isUserFocused) return;
 
         const handleKeyDown = (e: KeyboardEvent) => {
-            // Emote keys
             if (e.key === '1') {
                 setActiveEmote('thumbsup');
                 setTimeout(() => setActiveEmote(null), 2500);
                 return;
             }
-            if (e.key === '2' || e.key === '4') { // Accommodate the '4' key preference if mentioned, or map '4' to heart as well
+            if (e.key === '2' || e.key === '4') {
                 setActiveEmote('heart');
                 setTimeout(() => setActiveEmote(null), 2500);
                 return;
@@ -263,9 +254,9 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                 return;
             }
 
-            const step = 2.5; // Movement speed %
+            const step = 2.5;
             let moved = false;
-            setUserPos(prev => {
+            setUserPos((prev) => {
                 let newX = prev.x;
                 let newY = prev.y;
 
@@ -276,10 +267,7 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
 
                 if (moved) {
                     setIsUserWalking(true);
-                    // Clear walking animation after short delay if no more keys
                     setTimeout(() => setIsUserWalking(false), 200);
-
-                    // Clamp to bounds to prevent walking off-screen
                     newX = Math.max(5, Math.min(95, newX));
                     newY = Math.max(5, Math.min(95, newY));
                 }
@@ -291,7 +279,6 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isUserFocused]);
 
-    // Auto-speak new visible thoughts via TTS
     useEffect(() => {
         if (!tts.enabled || visibleThoughts.length === 0) return;
         const latest = visibleThoughts[visibleThoughts.length - 1];
@@ -301,52 +288,11 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
         }
     }, [visibleThoughts, tts.enabled, tts.speak]);
 
-    // Auto-scroll log
     useEffect(() => {
         if (scrollContainerRef.current) {
             scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
         }
     }, [visibleThoughts]);
-
-    // 3. User Interaction
-    const handleSendMessage = async () => {
-        if (!userInput.trim() || isSending) return;
-
-        const newId = Date.now();
-        setShowInteractions(prev => [...prev, { id: newId, x: 50 + (Math.random() * 20 - 10) }]);
-        setTimeout(() => {
-            setShowInteractions(prev => prev.filter(p => p.id !== newId));
-        }, 800);
-
-        setIsSending(true);
-        try {
-            const res = await fetch('/api/agent/discuss', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    taskId, 
-                    message: userInput,
-                    targetAgent: nearestAgent?.role || undefined
-                })
-            });
-
-            if (res.ok) {
-                setUserInput('');
-            }
-        } catch (err) {
-            console.error('Failed to send message:', err);
-        } finally {
-            setIsSending(false);
-        }
-    };
-
-    const currentThought = currentThoughtIndex >= 0 ? allThoughts[currentThoughtIndex] : null;
-    const buddyReaction = getBuddyReaction(buddyDefinition.id, {
-        thoughtType: currentThought?.type,
-        isHighlighted: currentThought?.type === 'critique',
-        isWarning: currentThought?.type === 'critique',
-        isComplete: currentThought?.type === 'agreement' && currentThoughtIndex === allThoughts.length - 1,
-    });
 
     const getAgentData = React.useCallback((thought: AgentThought | null) => {
         if (!thought || thought.agent === 'user') return null;
@@ -363,10 +309,11 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
         return null;
     }, []);
 
-    const activeAgentData = React.useMemo(() => getAgentData(currentThought), [currentThought, getAgentData]);
+    const currentThought = currentThoughtIndex >= 0 ? allThoughts[currentThoughtIndex] : null;
     const nextThought = currentThoughtIndex + 1 < allThoughts.length ? allThoughts[currentThoughtIndex + 1] : null;
-    const nextAgentData = React.useMemo(() => getAgentData(nextThought), [nextThought, getAgentData]);
     const prevThought = currentThoughtIndex > 0 ? allThoughts[currentThoughtIndex - 1] : null;
+    const activeAgentData = React.useMemo(() => getAgentData(currentThought), [currentThought, getAgentData]);
+    const nextAgentData = React.useMemo(() => getAgentData(nextThought), [nextThought, getAgentData]);
     const prevAgentData = React.useMemo(() => getAgentData(prevThought), [prevThought, getAgentData]);
 
     const getDistance = (p1Left: string, p1Top: string, p2X: number, p2Y: number) => {
@@ -378,11 +325,12 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
     };
 
     const nearestAgent = React.useMemo(() => {
-        let nearest: any = null;
-        let minDistance = 15; // 15% radius threshold
-        AGENTS.forEach(agent => {
+        let nearest: typeof AGENTS[number] | null = null;
+        let minDistance = 15;
+
+        AGENTS.forEach((agent) => {
             const isSpeaking = activeAgentData?.role === agent.role;
-            const isTarget = activeAgentData && prevAgentData?.role === agent.role && (currentThought?.type === 'critique' || currentThought?.type === 'agreement') ? true : false;
+            const isTarget = !!(activeAgentData && prevAgentData?.role === agent.role && (currentThought?.type === 'critique' || currentThought?.type === 'agreement'));
             let targetLeft = agent.zone.idle.left;
             let targetTop = agent.zone.idle.top;
             if (isSpeaking || isTarget) {
@@ -404,269 +352,185 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
         return nearest;
     }, [userPos, activeAgentData, prevAgentData, currentThought, idleOffsets]);
 
+    const handleSendMessage = async () => {
+        if (!userInput.trim() || isSending) return;
 
+        const newId = Date.now();
+        setShowInteractions((prev) => [...prev, { id: newId, x: 50 + (Math.random() * 20 - 10) }]);
+        setTimeout(() => {
+            setShowInteractions((prev) => prev.filter((p) => p.id !== newId));
+        }, 800);
 
-    const PROXIMITY_RADIUS = 30; // 30% screen distance
+        setIsSending(true);
+        try {
+            const res = await fetch('/api/agent/discuss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    taskId,
+                    message: userInput,
+                    targetAgent: nearestAgent?.role || undefined
+                })
+            });
+            if (res.ok) setUserInput('');
+        } catch (err) {
+            console.error('Failed to send message:', err);
+        } finally {
+            setIsSending(false);
+        }
+    };
+
+    const buddyReaction = getBuddyReaction(buddyDefinition.id, {
+        thoughtType: currentThought?.type,
+        isHighlighted: currentThought?.type === 'critique',
+        isWarning: currentThought?.type === 'critique',
+        isComplete: currentThought?.type === 'agreement' && currentThoughtIndex === allThoughts.length - 1,
+    });
 
     if (allThoughts.length === 0) {
         return (
-            <div className="relative w-full h-[500px] bg-slate-950/40 rounded-2xl border border-slate-800/60 flex items-center justify-center backdrop-blur-xl group">
-                <div className="text-center space-y-4 animate-in fade-in zoom-in duration-700">
-                    <div className="relative inline-block">
-                        <div className="absolute inset-0 bg-blue-500/10 rounded-full blur-3xl group-hover:bg-blue-500/20 transition-all duration-1000" />
-                        <motion.div animate={{ rotate: 360 }} transition={{ duration: 20, repeat: Infinity, ease: "linear" }}>
-                            <MessageSquare className="w-16 h-16 text-slate-700 relative" />
-                        </motion.div>
-                    </div>
-                    <div className="space-y-2">
-                        <p className="text-slate-400 text-sm font-black uppercase tracking-widest">Entering Virtual Workspace...</p>
-                        <p className="text-slate-600 text-[10px] font-mono">Synchronizing Neural Links</p>
-                    </div>
+            <div className="relative flex h-full min-h-[520px] w-full items-center justify-center overflow-hidden rounded-[24px] border border-white/10 bg-[#0f1117] text-slate-300 shadow-[0_32px_90px_rgba(0,0,0,0.45)]">
+                <div className="space-y-4 text-center">
+                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 20, repeat: Infinity, ease: 'linear' }} className="mx-auto">
+                        <MessageSquare className="h-14 w-14 text-slate-600" />
+                    </motion.div>
+                    <div className="text-sm font-semibold uppercase tracking-[0.24em]">Booting Agent Office</div>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="flex flex-col gap-0 w-full h-[75vh] min-h-[600px] max-h-[850px] animate-in fade-in duration-700 font-sans text-slate-800 bg-[#f5f5f5] overflow-hidden border border-slate-200 rounded-xl shadow-md">
-            {/* Header - White Minimalist */}
-            <div className="bg-white border-b border-slate-200 p-4 shrink-0 relative z-10">
-                <div className="flex items-center justify-between relative">
-                    <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-slate-50 flex items-center justify-center border border-slate-200 rounded-lg shadow-sm">
-                            <Sparkles className="w-5 h-5 text-emerald-500" />
+        <div className="flex h-full min-h-[520px] w-full overflow-hidden rounded-[24px] border border-white/8 bg-[#0f1117] text-slate-100 shadow-[0_32px_90px_rgba(0,0,0,0.45)]">
+            <aside className="flex w-[220px] shrink-0 flex-col border-r border-white/8 bg-[linear-gradient(180deg,#141823,#0d1118)]">
+                <div className="border-b border-white/8 px-4 py-3">
+                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Task Buddy</div>
+                    <div className="rounded-[14px] border border-[#f2c94c]/70 bg-[#fff7df] p-3 text-slate-800 shadow-[0_14px_36px_rgba(0,0,0,0.18)]">
+                        <div className="mb-2 flex items-center gap-2">
+                            <div className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Buddy</div>
+                            <div className="text-[12px] font-semibold">{buddy?.name || buddyDefinition.name}</div>
+                            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{buddyDefinition.rarity}</div>
                         </div>
-                        <div>
-                            <div className="flex items-center gap-3">
-                                <h3 className="text-[16px] font-black text-slate-800 tracking-tight">
-                                    Basalt <span className="text-slate-400 font-medium">Virtual Office</span>
-                                </h3>
-                                <div className="flex items-center gap-2 px-2 py-0.5 bg-emerald-50 border border-emerald-100 rounded-full">
-                                    <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-                                    <span className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider">Live</span>
-                                </div>
-                            </div>
-                            <p className="text-[10px] text-slate-500 font-medium">Session ID: {taskId?.slice(0, 8)}</p>
-                        </div>
+                        <pre className="text-[12px] leading-4 text-slate-900">{buddyDefinition.ascii}</pre>
+                        <div className="mt-2 text-[12px] font-medium">{buddyReaction.emote} {buddyReaction.label}</div>
+                        <div className="mt-1 text-[11px] text-slate-600">{buddyReaction.comment}</div>
                     </div>
-                    <div className="flex items-center gap-3">
-                        {/* TTS Controls */}
-                        <div className="flex items-center gap-1.5">
-                            <button
-                                onClick={() => tts.setEnabled(!tts.enabled)}
-                                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-bold uppercase tracking-wider transition-all ${tts.enabled ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100' : 'bg-slate-50 border-slate-200 text-slate-400 hover:bg-slate-100'}`}
-                                title={tts.enabled ? 'TTS 끄기' : 'TTS 켜기'}
-                            >
-                                {tts.enabled ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
-                                TTS
-                            </button>
-                            {tts.isSpeaking && (
-                                <button
-                                    onClick={() => tts.stop()}
-                                    className="flex items-center gap-1 px-2 py-1 rounded-full bg-red-50 border border-red-200 text-red-600 text-[10px] font-bold uppercase tracking-wider hover:bg-red-100 transition-all"
-                                    title="재생 중지"
-                                >
-                                    <Square className="w-2.5 h-2.5" />
-                                </button>
-                            )}
-                            {tts.isLoading && (
-                                <div className="w-4 h-4 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin" />
-                            )}
+                </div>
+
+                <div className="px-4 py-4">
+                    <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                        <Search className="h-3.5 w-3.5" />
+                        Discussion
+                    </div>
+                    <div className="rounded-[14px] border border-white/8 bg-white/4 p-3 text-[12px] text-slate-300">
+                        <div className="mb-2 flex items-center justify-between">
+                            <span>Thoughts</span>
+                            <span>{visibleThoughts.length}</span>
                         </div>
-                        <div className="text-right">
-                            <div className="text-[10px] text-slate-500 font-bold uppercase mb-1">Progress</div>
-                            <div className="w-32 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                <motion.div
-                                    className="h-full bg-emerald-400"
-                                    initial={{ width: 0 }}
-                                    animate={{ width: `${((currentThoughtIndex + 1) / allThoughts.length) * 100}%` }}
-                                />
-                            </div>
+                        <div className="mb-2 flex items-center justify-between">
+                            <span>Active agents</span>
+                            <span>{AGENTS.length}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                            <span>Status</span>
+                            <span>{isActive ? 'live' : 'idle'}</span>
                         </div>
                     </div>
                 </div>
-            </div>
+            </aside>
 
-            <div className="flex flex-1 min-h-0 overflow-hidden relative flex-col md:flex-row">
-                {/* Background Office Zone (Full Size) */}
-                <div className="flex-1 relative bg-slate-100 overflow-hidden h-full flex flex-col rounded-b-xl border border-slate-200">
-                    {/* The Office Layout Component (Contains Brick Wall & Wooden Floor) */}
+            <div className="relative flex min-w-0 flex-1 flex-col bg-[#111319]">
+                <div className="flex items-center justify-between border-b border-white/8 px-4 py-3">
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => tts.setEnabled(!tts.enabled)}
+                            className={`rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${tts.enabled ? 'border-blue-400/30 bg-blue-500/10 text-blue-300' : 'border-white/10 text-slate-500'}`}
+                        >
+                            {tts.enabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+                        </button>
+                        {tts.isSpeaking && (
+                            <button
+                                onClick={() => tts.stop()}
+                                className="rounded-full border border-red-400/25 bg-red-500/10 px-3 py-1.5 text-[10px] text-red-300"
+                            >
+                                <Square className="h-3.5 w-3.5" />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                <div className="relative min-h-0 flex-1 overflow-hidden">
                     <div className="absolute inset-0 pointer-events-none z-0">
                         <OfficeLayout />
                     </div>
 
-                    <div className="absolute left-4 top-4 z-30 max-w-[260px]">
-                        <div className="mb-2 flex items-center gap-2">
-                            <Badge variant="secondary" className="border-0 bg-emerald-500/20 text-[10px] text-emerald-200">
-                                Task Buddy
-                            </Badge>
-                            <span className="text-[11px] font-semibold text-white/90">{buddy?.name || buddyDefinition.name}</span>
-                            <span className="text-[10px] uppercase tracking-[0.2em] text-slate-400">{buddyDefinition.rarity}</span>
-                        </div>
-                        <BuddyAscii
-                            buddyId={buddyDefinition.id}
-                            thoughtType={currentThought?.type}
-                            isHighlighted={currentThought?.type === 'critique'}
-                            isWarning={currentThought?.type === 'critique'}
-                            isComplete={currentThought?.type === 'agreement' && currentThoughtIndex === allThoughts.length - 1}
-                            active={isActive}
-                            className="max-w-[250px]"
-                        />
-                    </div>
-
-                    {/* User Interaction Beams Layer */}
-                    <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden rounded-b-xl">
+                    <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden">
                         <AnimatePresence>
-                            {showInteractions.map(interaction => (
+                            {showInteractions.map((interaction) => (
                                 <motion.div
                                     key={interaction.id}
                                     initial={{ opacity: 0, top: '100%', left: `${interaction.x}%`, x: '-50%', scale: 0 }}
-                                    animate={{ opacity: [0, 1, 1, 0], top: ['100%', '35%'], scale: [0.5, 1, 1.2, 0.8] }}
-                                    transition={{ duration: 0.8, ease: "easeOut" }}
-                                    className="absolute z-50 pointer-events-none origin-bottom"
+                                    animate={{ opacity: [0, 1, 1, 0], top: ['100%', '55%'], scale: [0.5, 1, 1.1, 0.8] }}
+                                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                                    className="absolute z-30 origin-bottom"
                                 >
-                                    <div className="w-1.5 h-24 bg-gradient-to-t from-transparent via-cyan-400 to-cyan-200 rounded-full blur-[2px] shadow-[0_0_20px_rgba(34,211,238,0.8)]" />
+                                    <div className="h-20 w-1 rounded-full bg-gradient-to-t from-transparent via-cyan-400 to-cyan-100 blur-[1px]" />
                                 </motion.div>
                             ))}
                         </AnimatePresence>
                     </div>
 
-                    {/* User Interaction Beams Layer */}
-                    <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden rounded-b-xl">
+                    <div className="absolute inset-0 pointer-events-none z-20 overflow-hidden">
                         <AnimatePresence>
-                            {showInteractions.map(interaction => (
-                                <motion.div
-                                    key={interaction.id}
-                                    initial={{ opacity: 0, top: '100%', left: `${interaction.x}%`, x: '-50%', scale: 0 }}
-                                    animate={{ opacity: [0, 1, 1, 0], top: ['100%', '35%'], scale: [0.5, 1, 1.2, 0.8] }}
-                                    transition={{ duration: 0.8, ease: "easeOut" }}
-                                    className="absolute z-50 pointer-events-none origin-bottom"
-                                >
-                                    <div className="w-1.5 h-24 bg-gradient-to-t from-transparent via-cyan-400 to-cyan-200 rounded-full blur-[2px] shadow-[0_0_20px_rgba(34,211,238,0.8)]" />
-                                </motion.div>
-                            ))}
-                        </AnimatePresence>
-                    </div>
-
-                    {/* Thought Particles Layer */}
-                    <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden rounded-b-xl">
-                        <AnimatePresence>
-                            {thoughtParticles.map(particle => (
+                            {thoughtParticles.map((particle) => (
                                 <motion.div
                                     key={particle.id}
-                                    initial={{ opacity: 0, left: particle.x, top: particle.y, scale: 0.5, y: -20, x: '-50%' }}
-                                    animate={{ opacity: [0, 1, 0], y: -80, scale: [0.5, 1.2, 0.8] }}
-                                    transition={{ duration: 2.5, ease: "easeOut" }}
-                                    className="absolute z-50 pointer-events-none"
+                                    initial={{ opacity: 0, left: particle.x, top: particle.y, scale: 0.5, y: -10, x: '-50%' }}
+                                    animate={{ opacity: [0, 1, 0], y: -38, scale: [0.5, 1, 0.8] }}
+                                    transition={{ duration: 2, ease: 'easeOut' }}
+                                    className="absolute z-30"
                                 >
-                                    {particle.type === 'idea' && <div className="text-2xl drop-shadow-md relative -left-4">💡</div>}
-                                    {particle.type === 'critique' && <div className="text-2xl drop-shadow-md relative -left-4">⚠️</div>}
-                                    {particle.type === 'agreement' && <div className="text-2xl drop-shadow-md relative -left-4">👍</div>}
+                                    {particle.type === 'idea' && <div className="text-lg">💡</div>}
+                                    {particle.type === 'critique' && <div className="text-lg">⚠</div>}
+                                    {particle.type === 'agreement' && <div className="text-lg">✓</div>}
                                 </motion.div>
                             ))}
                         </AnimatePresence>
                     </div>
 
-                    {/* Agent Avatars Layer */}
-                    <div ref={meetingZoneRef} className="relative h-full w-full z-10">
-                        {/* Data Flow Lines SVG (Phase 3) */}
-                        {activeAgentData && !isUserFocused && (
-                            <svg className="absolute inset-0 w-full h-full pointer-events-none z-0" viewBox="0 0 100 100" preserveAspectRatio="none">
-                                <defs>
-                                    <linearGradient id="dataFlowGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                                        <stop offset="0%" stopColor="#10b981" stopOpacity="0.6" />
-                                        <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
-                                    </linearGradient>
-                                </defs>
-                                <AnimatePresence>
-                                    {AGENTS.map(agent => {
-                                        if (agent.role === activeAgentData?.role) return null;
-                                        
-                                        const startX = parseFloat(activeAgentData.zone.meeting.left);
-                                        const startY = parseFloat(activeAgentData.zone.meeting.top);
-                                        
-                                        const offset = idleOffsets[agent.role] || { dx: 0, dy: 0 };
-                                        const endX = Math.max(5, Math.min(95, parseFloat(agent.zone.idle.left) + offset.dx));
-                                        const endY = Math.max(5, Math.min(95, parseFloat(agent.zone.idle.top) + offset.dy));
-
-                                        return (
-                                            <motion.line
-                                                key={`flow-${agent.role}`}
-                                                x1={startX}
-                                                y1={startY}
-                                                x2={endX}
-                                                y2={endY}
-                                                stroke="url(#dataFlowGradient)"
-                                                strokeWidth="0.2"
-                                                strokeDasharray="1 1"
-                                                initial={{ strokeDashoffset: 10, opacity: 0 }}
-                                                animate={{ 
-                                                    strokeDashoffset: 0,
-                                                    opacity: [0, 0.4, 0]
-                                                }}
-                                                exit={{ opacity: 0 }}
-                                                transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-                                            />
-                                        );
-                                    })}
-                                </AnimatePresence>
-                            </svg>
-                        )}
-
+                    <div ref={meetingZoneRef} className="relative z-20 h-full w-full">
                         {AGENTS.map((agent) => {
                             const isSpeaking = activeAgentData?.role === agent.role;
-                            const isTarget = activeAgentData && prevAgentData?.role === agent.role && (currentThought?.type === 'critique' || currentThought?.type === 'agreement') ? true : false;
+                            const isTarget = !!(activeAgentData && prevAgentData?.role === agent.role && (currentThought?.type === 'critique' || currentThought?.type === 'agreement'));
                             const isDebating = currentThought?.type === 'critique' && (isSpeaking || isTarget);
                             const isNearest = nearestAgent?.role === agent.role;
-                            
+
                             let targetLeft = agent.zone.idle.left;
                             let targetTop = agent.zone.idle.top;
-
                             if (isSpeaking || isTarget) {
                                 targetLeft = agent.zone.meeting.left;
                                 targetTop = agent.zone.meeting.top;
                             } else {
-                                // apply wander offset
                                 const offset = idleOffsets[agent.role];
                                 if (offset) {
-                                    const baseL = parseFloat(agent.zone.idle.left);
-                                    const baseT = parseFloat(agent.zone.idle.top);
-                                    targetLeft = `${Math.max(5, Math.min(95, baseL + offset.dx))}%`;
-                                    targetTop = `${Math.max(5, Math.min(95, baseT + offset.dy))}%`;
+                                    targetLeft = `${Math.max(5, Math.min(95, parseFloat(agent.zone.idle.left) + offset.dx))}%`;
+                                    targetTop = `${Math.max(5, Math.min(95, parseFloat(agent.zone.idle.top) + offset.dy))}%`;
                                 }
                             }
 
                             let lookDirection: 'left' | 'right' | 'forward' = 'forward';
-
-                            if (isSpeaking && isDebating && prevAgentData) {
-                                // Speaker looking at the target
-                                const myLeft = parseFloat(targetLeft);
-                                const targetLeftPos = parseFloat(prevAgentData.zone.meeting.left);
-                                if (myLeft < targetLeftPos - 2) lookDirection = 'right';
-                                else if (myLeft > targetLeftPos + 2) lookDirection = 'left';
-                            }
-                            // 1. If someone is speaking, look at the active speaker
-                            else if (activeAgentData && !isSpeaking) {
+                            if (activeAgentData && !isSpeaking) {
                                 const myLeft = parseFloat(targetLeft);
                                 const activeLeft = parseFloat(activeAgentData.zone.meeting.left);
                                 if (myLeft < activeLeft - 2) lookDirection = 'right';
                                 else if (myLeft > activeLeft + 2) lookDirection = 'left';
-                            }
-                            // 2. Otherwise if User is nearby, stare at the user (GAZE)
-                            else {
-                                const distToUser = getDistance(targetLeft, targetTop, userPos.x, userPos.y);
-                                if (distToUser < PROXIMITY_RADIUS && !isSpeaking) {
-                                    const myLeft = parseFloat(targetLeft);
-                                    if (myLeft < userPos.x - 1) lookDirection = 'right';
-                                    else if (myLeft > userPos.x + 1) lookDirection = 'left';
-                                }
                             }
 
                             const isThinking = nextAgentData?.role === agent.role;
                             const isWalking = movingAgents.has(agent.role);
                             const isWorking = workingAgents.has(agent.role) && !isSpeaking && !isWalking;
 
-                            let currentEmote: any = null;
+                            let currentEmote: 'thumbsup' | 'heart' | 'question' | 'sweat' | 'exclamation' | 'idea' | null = null;
                             if (isTarget) {
                                 if (currentThought?.type === 'critique') currentEmote = 'sweat';
                                 else if (currentThought?.type === 'agreement') currentEmote = 'idea';
@@ -677,15 +541,15 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                                 <motion.div
                                     key={agent.role}
                                     className="absolute"
-                                    animate={{
-                                        left: targetLeft,
-                                        top: targetTop,
-                                        zIndex: isSpeaking ? 40 : (isWalking ? 30 : 20)
-                                    }}
-                                    transition={{ type: "spring", stiffness: 40, damping: 15, mass: 1 }}
+                                    animate={{ left: targetLeft, top: targetTop, zIndex: isSpeaking ? 40 : isWalking ? 30 : 20 }}
+                                    transition={{ type: 'spring', stiffness: 40, damping: 15, mass: 1 }}
                                     style={{ transform: 'translate(-50%, -50%)' }}
-                                    onAnimationStart={() => setMovingAgents(prev => new Set(prev).add(agent.role))}
-                                    onAnimationComplete={() => setMovingAgents(prev => { const next = new Set(prev); next.delete(agent.role); return next; })}
+                                    onAnimationStart={() => setMovingAgents((prev) => new Set(prev).add(agent.role))}
+                                    onAnimationComplete={() => setMovingAgents((prev) => {
+                                        const next = new Set(prev);
+                                        next.delete(agent.role);
+                                        return next;
+                                    })}
                                 >
                                     <AgentAvatar
                                         role={agent.role}
@@ -700,18 +564,15 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                                         lookDirection={lookDirection}
                                         emote={currentEmote}
                                     />
-                                    {isNearest && (
-                                        <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-12 h-3 bg-emerald-400/50 blur-[4px] rounded-full pointer-events-none animate-pulse" />
-                                    )}
+                                    {isNearest && <div className="absolute -bottom-2 left-1/2 h-3 w-10 -translate-x-1/2 rounded-full bg-emerald-400/35 blur-[6px]" />}
                                 </motion.div>
                             );
                         })}
 
-                        {/* User Avatar */}
                         <motion.div
-                            className="absolute pointer-events-none"
+                            className="absolute"
                             animate={{ left: `${userPos.x}%`, top: `${userPos.y}%`, zIndex: 100 }}
-                            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                             style={{ transform: 'translate(-50%, -50%)' }}
                         >
                             <AgentAvatar
@@ -725,166 +586,77 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                                 lookDirection={userDir}
                                 emote={activeEmote}
                             />
-                            {/* Proximity Radius Debug/Hint (Optional visual) */}
-                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[30vw] h-[30vw] min-w-[300px] min-h-[300px] rounded-full border-2 border-emerald-400/10 bg-emerald-400/5 -z-10 pointer-events-none"></div>
                         </motion.div>
                     </div>
                 </div>
+            </div>
 
-                {/* V6 Floating Chat Panel via Portal */}
-                {chatPortalTarget && createPortal(
-                    <div className="w-full h-full bg-slate-50 border border-slate-200 flex flex-col relative z-[9999] shadow-2xl rounded-xl overflow-hidden pointer-events-auto">
-
-                        {/* Header for Chat */}
-                        <div className="px-4 py-3 border-b border-slate-200 bg-white flex items-center justify-between shadow-sm z-10">
-                            <div className="flex items-center">
-                                <MessageSquare className="w-4 h-4 text-emerald-500 mr-2" />
-                                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Discussion</span>
-                                <Badge variant="secondary" className="ml-2 text-[10px]">
-                                    Buddy: {buddy?.name || buddyDefinition.name}
-                                </Badge>
-                                <Badge variant="secondary" className="ml-1 text-[10px]">
-                                    {buddyReaction.emote} {buddyReaction.label}
-                                </Badge>
+            {chatPortalTarget && createPortal(
+                <div data-brainstorm-chat-root="true" className="pointer-events-auto flex h-full w-full flex-col overflow-hidden rounded-[22px] border border-white/8 bg-[linear-gradient(180deg,#151922,#0e131a)] shadow-[0_32px_80px_rgba(0,0,0,0.45)]">
+                    <div className="border-b border-white/8 px-4 py-3">
+                        <div className="mb-3 flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                                <div className="rounded-[8px] bg-[#1b2230] px-2 py-1 text-[11px] font-semibold text-[#7aa2ff]">Claude</div>
+                                <div className="max-w-[220px] truncate text-[12px] text-slate-300">{currentThought?.thought || 'Transcript'}</div>
                             </div>
-                            <div className="flex items-center">
-                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div>
-                            </div>
+                            <button className="text-slate-500">×</button>
                         </div>
-
-                        {/* Conversation Log */}
-                        <div
-                            ref={scrollContainerRef}
-                            className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-slate-50"
-                        >
-                            {(() => {
-                                if (visibleThoughts.length === 0) {
-                                    return (
-                                        <div className="text-center text-slate-400 text-sm py-8 flex flex-col items-center gap-2">
-                                            <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">
-                                                <MessageSquare className="w-4 h-4 text-slate-500" />
-                                            </div>
-                                            <p className="font-bold">아직 대화가 없습니다.</p>
-                                        </div>
-                                    );
-                                }
-
-                                return visibleThoughts.map((log: AgentThought, i: number) => {
-                                    const isUser = log.agent === 'user';
-
-                                    // Default mapping logic
-                                    let agentData: any = isUser ? { name: 'YOU', baseColor: 'bg-emerald-600', role: 'user' } : null;
-
-                                    if (!isUser) {
-                                        // Try exact match
-                                        agentData = AGENTS.find(a => a.role.toLowerCase() === log.agent.toLowerCase());
-                                        // Fallback by keyword parsing or index
-                                        if (!agentData) {
-                                            if (log.agent.toLowerCase().includes('lead') || log.agent.toLowerCase().includes('main')) {
-                                                agentData = AGENTS.find(a => a.role === 'main-agent');
-                                            } else if (log.agent.toLowerCase().includes('dev') || log.agent.toLowerCase().includes('software')) {
-                                                agentData = AGENTS.find(a => a.role === 'software-engineer');
-                                            } else if (log.agent.toLowerCase().includes('design') || log.agent.toLowerCase().includes('style')) {
-                                                agentData = AGENTS.find(a => a.role === 'designer');
-                                            } else {
-                                                // If still not matched, fallback to PM
-                                                agentData = AGENTS[0];
-                                            }
-                                        }
-                                    }
-                                    // TypeScript fallback
-                                    if (!agentData) agentData = AGENTS[0];
-
-                                    return (
-                                        <motion.div
-                                            key={log.id}
-                                            initial={{ opacity: 0, scale: 0.95 }}
-                                            animate={{ opacity: 1, scale: 1 }}
-                                            className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}
-                                        >
-                                            {/* Avatar Circle */}
-                                            <div className="shrink-0 flex flex-col items-center">
-                                                <div className="w-8 h-8 rounded-full bg-white border border-slate-200 flex items-center justify-center p-1 relative shadow-sm">
-                                                    <div className={`w-full h-full rounded-full ${agentData.baseColor}`} />
-                                                    {log.id === currentThought?.id && !isUser && (
-                                                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full animate-pulse" />
-                                                    )}
-                                                </div>
-                                                <div className="text-[10px] font-bold text-slate-600 mt-1 uppercase">
-                                                    {agentData.name}
-                                                </div>
-                                            </div>
-
-                                            {/* Message Bubble */}
-                                            <div className={`max-w-[85%] flex flex-col ${isUser ? 'items-end' : 'items-start'}`}>
-                                                {!isUser && (
-                                                    <Badge variant="secondary" className="mb-1 text-[10px] bg-white border border-slate-200 text-slate-500 hover:bg-slate-100 px-2 py-0">
-                                                        {log.type}
-                                                    </Badge>
-                                                )}
-                                                <div className={`text-[13px] leading-relaxed font-medium break-words w-full relative group/msg ${isUser ? 'text-emerald-900 bg-emerald-50 px-3 py-2 rounded-2xl rounded-tr-none text-right' : 'text-slate-700 bg-white px-3 py-2 rounded-2xl rounded-tl-none border border-slate-200 shadow-sm'}`}>
-                                                    {log.thought}
-                                                    {!isUser && tts.enabled && (
-                                                        <button
-                                                            onClick={() => tts.speak(log.thought, log.agent)}
-                                                            className="absolute -right-1 -bottom-1 opacity-0 group-hover/msg:opacity-100 transition-opacity w-5 h-5 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center hover:bg-blue-200"
-                                                            title="이 메시지 재생"
-                                                        >
-                                                            <Volume2 className="w-2.5 h-2.5 text-blue-600" />
-                                                        </button>
-                                                    )}
-                                                    {tts.isSpeaking && tts.speakingAgent === log.agent && log.id === lastSpokenIdRef.current && (
-                                                        <span className="inline-flex items-center gap-[2px] ml-1.5 align-middle">
-                                                            {[0, 1, 2].map(i => (
-                                                                <motion.span
-                                                                    key={i}
-                                                                    className="inline-block w-[2px] bg-blue-500 rounded-full"
-                                                                    animate={{ height: ['4px', '10px', '4px'] }}
-                                                                    transition={{ duration: 0.6, repeat: Infinity, delay: i * 0.15 }}
-                                                                />
-                                                            ))}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </motion.div>
-                                    );
-                                });
-                            })()}
-                        </div>
-
-                        {/* Input Area */}
-                        <div className="p-4 border-t border-slate-200 bg-white shadow-[0_-4px_10px_rgba(0,0,0,0.02)] z-10">
-                            <div className="relative flex items-center">
-                                <Input
-                                    value={userInput}
-                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUserInput(e.target.value)}
-                                    onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleSendMessage()}
-                                    onFocus={() => setIsUserFocused(true)}
-                                    onBlur={() => setIsUserFocused(false)}
-                                    placeholder={nearestAgent ? `${nearestAgent.name}에게 귓속말하기...` : "메시지 입력..."}
-                                    className={`h-10 w-full pl-4 pr-12 text-[13px] border text-slate-800 placeholder:text-slate-400 rounded-full transition-all font-medium shadow-inner ${nearestAgent ? 'bg-emerald-50/50 border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-200' : 'bg-slate-50 border-slate-200 focus:bg-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-50'}`}
-                                    disabled={isSending}
-                                />
-                                <Button
-                                    size="sm"
-                                    onClick={handleSendMessage}
-                                    disabled={isSending || !userInput.trim()}
-                                    className="absolute right-1 h-8 w-8 p-0 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full transition-all active:scale-95 flex items-center justify-center shadow-sm disabled:opacity-50 disabled:bg-slate-300"
-                                >
-                                    <Send className="w-3.5 h-3.5 ml-0.5" />
-                                </Button>
-                            </div>
+                        <div className="flex items-center gap-2 rounded-[10px] border border-emerald-500/20 bg-[#14251a] px-3 py-2 text-[12px] text-emerald-300">
+                            <TerminalSquare className="h-4 w-4" />
+                            <span>Open in Terminal</span>
                         </div>
                     </div>
-                    , chatPortalTarget)}
-            </div>
+
+                    <div ref={scrollContainerRef} className="custom-scrollbar flex-1 overflow-y-auto px-4 py-3">
+                        {visibleThoughts.map((log) => {
+                            const isUser = log.agent === 'user';
+                            return (
+                                <div key={log.id} className={`mb-3 rounded-[12px] border px-3 py-2 ${isUser ? 'border-emerald-500/20 bg-emerald-500/8' : 'border-white/6 bg-white/4'}`}>
+                                    <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-[0.18em]">
+                                        <span className={isUser ? 'text-emerald-300' : 'text-slate-500'}>{roleLabel(log.agent)}</span>
+                                        <span className="text-slate-600">{new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    </div>
+                                    <div className="text-[13px] leading-relaxed text-slate-200">{log.thought}</div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    <div className="border-t border-white/8 px-4 py-3">
+                        <div className="mb-2 flex items-center justify-between">
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Transcript</div>
+                            <div className="text-[10px] text-slate-500">{nearestAgent ? `${nearestAgent.name} in range` : 'broadcast'}</div>
+                        </div>
+                        <div className="relative flex items-center">
+                            <Input
+                                value={userInput}
+                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUserInput(e.target.value)}
+                                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleSendMessage()}
+                                onFocus={() => setIsUserFocused(true)}
+                                onBlur={() => setIsUserFocused(false)}
+                                placeholder={nearestAgent ? `${nearestAgent.name}에게 메시지...` : '메시지 입력...'}
+                                className="h-10 rounded-full border-white/10 bg-white/5 pl-4 pr-12 text-[13px] text-slate-100 placeholder:text-slate-500"
+                                disabled={isSending}
+                            />
+                            <Button
+                                size="sm"
+                                onClick={handleSendMessage}
+                                disabled={isSending || !userInput.trim()}
+                                className="absolute right-1 h-8 w-8 rounded-full bg-emerald-500 p-0 text-white hover:bg-emerald-600"
+                            >
+                                <Send className="h-3.5 w-3.5" />
+                            </Button>
+                        </div>
+                    </div>
+                </div>,
+                chatPortalTarget
+            )}
 
             <style jsx global>{`
                 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
                 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-                .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
-                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+                .custom-scrollbar::-webkit-scrollbar-thumb { background: #313846; border-radius: 99px; }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475164; }
             `}</style>
         </div>
     );

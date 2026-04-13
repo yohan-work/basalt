@@ -1049,8 +1049,22 @@ export function TaskDetailsModal({
         <>
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
-                className={`sm:max-w-5xl h-[85vh] flex flex-col p-0 gap-0 transition-all duration-300 ${view === 'brainstorm' ? 'overflow-visible !translate-x-[calc(-50%-190px)]' : 'overflow-hidden !translate-x-[-50%]'}`}
+                className={`sm:max-w-5xl h-[85vh] flex flex-col p-0 gap-0 transition-all duration-300 ${view === 'brainstorm' ? 'sm:max-w-[1120px] overflow-visible !translate-x-[calc(-50%-200px)]' : 'overflow-hidden !translate-x-[-50%]'}`}
                 style={{ overflow: view === 'brainstorm' ? 'visible' : 'hidden' }}
+                onPointerDownOutside={(event) => {
+                    if (view !== 'brainstorm') return;
+                    const target = event.target as HTMLElement | null;
+                    if (target?.closest('[data-brainstorm-chat-root="true"]')) {
+                        event.preventDefault();
+                    }
+                }}
+                onInteractOutside={(event) => {
+                    if (view !== 'brainstorm') return;
+                    const target = event.target as HTMLElement | null;
+                    if (target?.closest('[data-brainstorm-chat-root="true"]')) {
+                        event.preventDefault();
+                    }
+                }}
             >
                 <div className="flex flex-col h-full w-full overflow-hidden sm:rounded-lg bg-background">
                     {/* Header */}
@@ -1188,7 +1202,7 @@ export function TaskDetailsModal({
                                 <TaskLivePreview key={`${task.id}-${fileChanges?.length ?? 0}`} taskId={task.id} />
                             </div>
                         ) : view === 'brainstorm' ? (
-                            <div className="flex-1 flex flex-col p-4 bg-slate-950 rounded-b-lg" style={{ overflow: 'visible' }}>
+                            <div className="flex-1 flex flex-col p-4 bg-[linear-gradient(180deg,#eef2f7,#dfe7f0)] rounded-b-lg" style={{ overflow: 'visible' }}>
                                 <div className="flex-1 relative" style={{ overflow: 'visible' }}>
                                     <AgentDiscussion
                                         taskId={task.id}
@@ -1197,13 +1211,13 @@ export function TaskDetailsModal({
                                     />
                                 </div>
 
-                                <div className="mt-3 p-3 bg-slate-900 border border-slate-700/70 shrink-0">
-                                    <h4 className="text-[10px] font-bold text-slate-300 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
-                                        <div className="w-0.5 h-2.5 bg-[#3b9eff]" />
+                                <div className="mt-3 shrink-0 rounded-[20px] border border-white/70 bg-white/78 p-3 shadow-[0_18px_32px_rgba(15,23,42,0.10)] backdrop-blur">
+                                    <h4 className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                                        <div className="h-2.5 w-0.5 bg-[#3b9eff]" />
                                         Analysis Summary
                                     </h4>
                                     <ScrollArea className="max-h-[80px]">
-                                        <p className="text-[11px] text-slate-100/90 leading-relaxed font-medium">
+                                        <p className="text-[11px] font-medium leading-relaxed text-slate-700">
                                             {typeof metadata.analysis === 'object' &&
                                             metadata.analysis !== null &&
                                             'summary' in metadata.analysis
@@ -2579,7 +2593,7 @@ export function TaskDetailsModal({
 
                 {/* External Portal Target for Brainstorm Chat */}
                 {view === 'brainstorm' && (
-                    <div id="agent-discussion-chat-portal" className="absolute top-0 -right-[400px] w-[380px] h-full pointer-events-none" />
+                    <div id="agent-discussion-chat-portal" className="absolute top-0 -right-[396px] w-[380px] h-full pointer-events-none" />
                 )}
             </DialogContent>
         </Dialog>

@@ -1,87 +1,78 @@
 import React from 'react';
 
+function Desk({ className }: { className: string }) {
+    return (
+        <div className={`absolute ${className}`}>
+            <div className="absolute inset-0 rounded-[2px] border border-black/25 bg-[#a5793d]" />
+            <div className="absolute left-[8%] top-[12%] h-[26%] w-[84%] rounded-[1px] bg-[#b98a4c]" />
+            <div className="absolute left-[12%] top-[22%] h-[26%] w-[24%] border border-black/20 bg-[#5375b8]" />
+            <div className="absolute right-[12%] top-[22%] h-[26%] w-[24%] border border-black/20 bg-[#5375b8]" />
+            <div className="absolute left-[10%] bottom-[-18%] h-[22%] w-[10%] bg-[#684724]" />
+            <div className="absolute right-[10%] bottom-[-18%] h-[22%] w-[10%] bg-[#684724]" />
+            <div className="absolute left-[16%] bottom-[-38%] h-[16%] w-[20%] border border-black/20 bg-[#86612e]" />
+            <div className="absolute right-[16%] bottom-[-38%] h-[16%] w-[20%] border border-black/20 bg-[#86612e]" />
+        </div>
+    );
+}
+
+function Couch({ className }: { className: string }) {
+    return (
+        <div className={`absolute ${className}`}>
+            <div className="absolute inset-0 rounded-[4px] border border-black/20 bg-[#6f4f4e]" />
+            <div className="absolute inset-x-[8%] top-[14%] h-[34%] rounded-[3px] bg-[#8d6865]" />
+            <div className="absolute left-[10%] bottom-[-10%] h-[14%] w-[16%] bg-[#5c403e]" />
+            <div className="absolute right-[10%] bottom-[-10%] h-[14%] w-[16%] bg-[#5c403e]" />
+        </div>
+    );
+}
+
 export function OfficeLayout() {
     return (
-        <div className="absolute inset-0 w-full h-full bg-[#f1f5f9] overflow-hidden flex items-center justify-center">
-            {/* Minimal Dot Grid Background */}
-            <div
-                className="absolute inset-0 opacity-20"
-                style={{
-                    backgroundImage: 'radial-gradient(#94a3b8 1px, transparent 1px)',
-                    backgroundSize: '24px 24px'
-                }}
-            />
+        <div className="absolute inset-0 overflow-hidden rounded-b-[18px] bg-[#111319]">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.04),transparent_34%)]" />
+            <div className="absolute inset-0 opacity-18 [background-image:linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:28px_28px]" />
 
-            {/* Overall wrapper to keep things organized relative to the center */}
-            <div className="relative w-full max-w-5xl h-[600px]">
+            <div className="absolute left-[6%] top-[6%] h-[86%] w-[84%] rounded-[18px] border border-white/16 bg-[#e7e2d6] p-[9px] shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_26px_80px_rgba(0,0,0,0.45)]">
+                <div className="relative h-full w-full rounded-[10px] border border-black/18 bg-[#ddd5c6]">
+                    <div className="absolute inset-y-0 left-[47.8%] w-[4.4%] border-x border-black/18 bg-[#c9b69d]" />
+                    <div className="absolute left-0 top-0 h-full w-[47.8%] border-r border-black/18 bg-[#d8d6d0]" />
+                    <div className="absolute right-0 top-0 h-full w-[47.8%] bg-[#78726d]" />
 
-                {/* 1. Boardroom (Top Left) */}
-                <div className="absolute top-[5%] left-[5%] w-[38%] h-[40%] bg-white rounded-md shadow-md border-[2px] border-slate-200 overflow-hidden isolate">
-                    {/* Pink accent side line */}
-                    <div className="absolute top-0 left-0 w-8 h-full bg-pink-50" />
+                    <div className="absolute left-[2%] top-[4%] h-[92%] w-[43.5%] opacity-42 [background-image:linear-gradient(rgba(110,116,120,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(110,116,120,0.18)_1px,transparent_1px)] [background-size:12px_12px]" />
+                    <div className="absolute right-[2%] top-[4%] h-[92%] w-[43.5%] opacity-35 [background-image:linear-gradient(rgba(255,255,255,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.12)_1px,transparent_1px)] [background-size:12px_12px]" />
 
-                    {/* Checkered pattern background */}
-                    <div className="absolute inset-0 opacity-10" style={{ backgroundImage: `linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%, #e2e8f0), linear-gradient(45deg, #e2e8f0 25%, transparent 25%, transparent 75%, #e2e8f0 75%, #e2e8f0)`, backgroundSize: '20px 20px', backgroundPosition: '0 0, 10px 10px' }}></div>
+                    <div className="absolute left-[4%] top-[3%] rounded-full bg-black/55 px-3 py-1 text-[8px] font-semibold uppercase tracking-[0.22em] text-white">Work Room</div>
+                    <div className="absolute right-[4%] top-[3%] rounded-full bg-black/55 px-3 py-1 text-[8px] font-semibold uppercase tracking-[0.22em] text-white">Break Room</div>
 
-                    <div className="absolute top-4 left-4 bg-slate-900 text-white text-[10px] font-bold px-3 py-1 rounded-sm uppercase tracking-wider z-10 shadow-sm">Boardroom</div>
+                    <Desk className="left-[7%] top-[12%] h-[10%] w-[12%]" />
+                    <Desk className="left-[25%] top-[12%] h-[10%] w-[12%]" />
+                    <Desk className="left-[7%] top-[29%] h-[10%] w-[12%]" />
+                    <Desk className="left-[25%] top-[29%] h-[10%] w-[12%]" />
+                    <Desk className="left-[7%] top-[46%] h-[10%] w-[12%]" />
+                    <Desk className="left-[25%] top-[46%] h-[10%] w-[12%]" />
+                    <Desk className="left-[7%] top-[63%] h-[10%] w-[12%]" />
+                    <Desk className="left-[25%] top-[63%] h-[10%] w-[12%]" />
+                    <Desk className="left-[7%] top-[80%] h-[10%] w-[12%]" />
+                    <Desk className="left-[25%] top-[80%] h-[10%] w-[12%]" />
 
-                    {/* Giant Dark Gray Oval Table */}
-                    <div className="absolute top-1/2 left-[55%] -translate-x-1/2 -translate-y-1/2 w-[65%] h-[50%] bg-[#2d3748] rounded-full shadow-md border-[3px] border-[#1a202c] overflow-hidden z-10">
-                        {/* Inner detail */}
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[70%] h-[40%] bg-[#4a5568] rounded-full opacity-60"></div>
+                    <div className="absolute left-[49%] top-[16%] h-[68%] w-[2%] bg-[#b0936d]" />
+                    <div className="absolute left-[46%] top-[49%] h-[4%] w-[8%] bg-[#b0936d]" />
+
+                    <Couch className="right-[11%] top-[12%] h-[10%] w-[18%]" />
+                    <Couch className="right-[18%] top-[54%] h-[10%] w-[18%]" />
+                    <div className="absolute right-[20%] top-[30%] rounded-[4px] border border-black/25 bg-[#2f334f] px-4 py-2 text-[18px] font-medium text-white shadow-[0_6px_18px_rgba(0,0,0,0.25)]">
+                        Idle ×
                     </div>
 
-                    {/* Circular decorations / plants */}
-                    <div className="absolute bottom-6 left-6 w-8 h-8 rounded-full border-[3px] border-emerald-300 flex items-center justify-center bg-transparent z-10">
-                        <div className="w-3 h-3 rounded-full bg-emerald-400"></div>
+                    <div className="absolute right-[9%] bottom-[8%] flex gap-3">
+                        <div className="h-[10px] w-[26px] bg-[#8a643c]" />
+                        <div className="h-[10px] w-[26px] bg-[#8a643c]" />
                     </div>
-                    {/* Top right target-like shape */}
-                    <div className="absolute top-6 right-8 w-6 h-6 rounded-full border-[2px] border-emerald-300 z-10"></div>
+
+                    <div className="absolute right-[14%] top-[40%] h-[6px] w-[6px] rounded-full bg-[#ffdf5d]" />
+                    <div className="absolute right-[30%] top-[55%] h-[6px] w-[6px] rounded-full bg-[#ffdf5d]" />
+                    <div className="absolute right-[23%] top-[72%] h-[6px] w-[6px] rounded-full bg-[#ffdf5d]" />
                 </div>
-
-                {/* 2. Patio (Top Right) */}
-                <div className="absolute top-[8%] right-[5%] w-[42%] h-[35%] bg-emerald-50/50 rounded-md shadow-sm border-[3px] border-emerald-200 p-4 isolate font-mono">
-                    <div className="absolute top-4 right-4 bg-white text-emerald-600 text-[10px] font-bold px-3 py-1 rounded-sm uppercase tracking-wider z-10 shadow-sm">Patio</div>
-
-                    {/* Large green bush/shape */}
-                    <div className="absolute top-6 left-6 w-16 h-16 rounded-full bg-emerald-500 shadow-sm z-10 opacity-90"></div>
-                    <div className="absolute top-16 left-12 w-10 h-10 rounded-full bg-emerald-400 shadow-sm z-10 opacity-90 border-2 border-emerald-50"></div>
-
-                    {/* Blue striped area (Pool or Rug) */}
-                    <div className="absolute bottom-4 right-4 w-[55%] h-[60%] border-[2px] border-cyan-300 bg-cyan-50 opacity-80"
-                        style={{
-                            backgroundImage: `repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(165,243,252,0.5) 5px, rgba(165,243,252,0.5) 10px)`
-                        }}>
-                    </div>
-                </div>
-
-                {/* 3. Engineering Hub (Bottom Center-Left) */}
-                <div className="absolute bottom-[10%] left-[8%] w-[55%] h-[40%] bg-[#fff8f1] rounded-md shadow-sm border-[3px] border-orange-100 p-4 isolate">
-                    <div className="absolute top-4 left-4 text-orange-400 text-[10px] font-extrabold uppercase tracking-widest z-10">Engineering Hub</div>
-
-                    {/* Concentric rings design element */}
-                    <div className="absolute top-0 right-[20%] w-24 h-24 rounded-full border-[10px] border-slate-100/80 -translate-y-1/2 -mb-10 flex justify-center items-center">
-                        <div className="w-2 h-2 rounded-full bg-slate-400"></div>
-                    </div>
-
-                    {/* Minimalist White Desk Blocks */}
-                    <div className="absolute bottom-6 left-[10%] w-[35%] h-[20%] bg-white rounded-sm shadow-md border-b-[6px] border-slate-200 border-x border-t flex justify-center items-center">
-                        <div className="w-[60%] h-1 bg-slate-200 rounded">
-                            <div className="w-8 h-full bg-cyan-300 mx-auto rounded"></div>
-                        </div>
-                    </div>
-
-                    <div className="absolute bottom-6 right-[10%] w-[35%] h-[20%] bg-white rounded-sm shadow-md border-b-[6px] border-slate-200 border-x border-t flex justify-center items-center">
-                        <div className="w-[60%] h-1 bg-slate-200 rounded"></div>
-                    </div>
-                </div>
-
-                {/* 4. Studio Hub Placeholder Area (Bottom Right) */}
-                <div className="absolute bottom-[10%] right-[10%] w-[15%] h-[20%]">
-                    {/* Optional extra elements for the Design/Studio area could go here, 
-                        or it can just be open space with the dots */}
-                </div>
-
             </div>
         </div>
     );

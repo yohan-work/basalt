@@ -71,14 +71,14 @@ export function BuddyAscii({
         <motion.div
             {...motionProps}
             className={cx(
-                'inline-flex flex-col rounded-xl border bg-slate-950/95 px-3 py-2 text-slate-100 shadow-lg',
+                'inline-flex flex-col rounded-[22px] border border-white/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.82))] px-3 py-2 text-slate-900 shadow-[0_18px_40px_rgba(15,23,42,0.12)] backdrop-blur',
                 accentRing,
                 className
             )}
         >
             <pre
                 className={cx(
-                    'font-mono whitespace-pre text-slate-100',
+                    'font-mono whitespace-pre text-slate-900',
                     compact ? 'text-[9px] leading-3' : 'text-[10px] leading-3'
                 )}
             >
@@ -88,7 +88,7 @@ export function BuddyAscii({
                 <span>{reaction.emote}</span>
                 <span className="font-semibold">{reaction.label}</span>
             </div>
-            <div className={cx('text-slate-400', compact ? 'text-[10px]' : 'text-[11px]')}>
+            <div className={cx('text-slate-500', compact ? 'text-[10px]' : 'text-[11px]')}>
                 {reaction.comment}
             </div>
         </motion.div>
