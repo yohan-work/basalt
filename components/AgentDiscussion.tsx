@@ -30,27 +30,27 @@ interface AgentDiscussionProps {
 const AGENTS = [
     {
         role: 'product-manager', name: 'PM', color: 'bg-emerald-500', baseColor: 'bg-emerald-500',
-        zone: { idle: { left: '70%', top: '36%' }, meeting: { left: '64%', top: '58%' } }
+        zone: { idle: { left: '72%', top: '30%' }, meeting: { left: '32%', top: '26%' } }
     },
     {
         role: 'main-agent', name: 'Lead', color: 'bg-blue-500', baseColor: 'bg-blue-500',
-        zone: { idle: { left: '31%', top: '30%' }, meeting: { left: '63%', top: '31%' } }
+        zone: { idle: { left: '79%', top: '39%' }, meeting: { left: '25%', top: '26%' } }
     },
     {
         role: 'software-engineer', name: 'Dev', color: 'bg-indigo-500', baseColor: 'bg-indigo-500',
-        zone: { idle: { left: '26%', top: '62%' }, meeting: { left: '73%', top: '52%' } }
+        zone: { idle: { left: '67%', top: '64%' }, meeting: { left: '25%', top: '59%' } }
     },
     {
         role: 'designer', name: 'Design', color: 'bg-pink-500', baseColor: 'bg-pink-500',
-        zone: { idle: { left: '35%', top: '79%' }, meeting: { left: '67%', top: '70%' } }
+        zone: { idle: { left: '77%', top: '72%' }, meeting: { left: '32%', top: '59%' } }
     }
 ];
 
 function roleLabel(role: string) {
-    if (role === 'main-agent') return 'Codex';
-    if (role === 'product-manager') return 'Claude';
-    if (role === 'software-engineer') return 'Gemini';
-    if (role === 'designer') return 'Style';
+    if (role === 'main-agent') return 'Lead';
+    if (role === 'product-manager') return 'PM';
+    if (role === 'software-engineer') return 'Dev';
+    if (role === 'designer') return 'Design';
     if (role === 'user') return 'You';
     return role;
 }
@@ -501,7 +501,12 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                     <div ref={meetingZoneRef} className="relative z-20 h-full w-full">
                         {AGENTS.map((agent) => {
                             const isSpeaking = activeAgentData?.role === agent.role;
-                            const isTarget = !!(activeAgentData && prevAgentData?.role === agent.role && (currentThought?.type === 'critique' || currentThought?.type === 'agreement'));
+                            const isTarget = !!(
+                                activeAgentData &&
+                                prevAgentData?.role === agent.role &&
+                                activeAgentData.role !== agent.role &&
+                                (currentThought?.type === 'critique' || currentThought?.type === 'agreement')
+                            );
                             const isDebating = currentThought?.type === 'critique' && (isSpeaking || isTarget);
                             const isNearest = nearestAgent?.role === agent.role;
 
@@ -596,7 +601,7 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                     <div className="border-b border-white/8 px-4 py-3">
                         <div className="mb-3 flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                                <div className="rounded-[8px] bg-[#1b2230] px-2 py-1 text-[11px] font-semibold text-[#7aa2ff]">Claude</div>
+                                <div className="rounded-[8px] bg-[#1b2230] px-2 py-1 text-[11px] font-semibold text-[#7aa2ff]">{currentThought ? roleLabel(currentThought.agent) : 'Transcript'}</div>
                                 <div className="max-w-[220px] truncate text-[12px] text-slate-300">{currentThought?.thought || 'Transcript'}</div>
                             </div>
                             <button className="text-slate-500">×</button>
