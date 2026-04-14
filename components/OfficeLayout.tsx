@@ -1,5 +1,12 @@
 import React from 'react';
 
+export interface OfficeLayoutReactions {
+    workMode?: 'thinking' | 'review' | 'blocked' | 'speaking' | null;
+    breakMode?: 'idle' | 'thinking' | null;
+    doorwayPulse?: boolean;
+    terminalPulse?: boolean;
+}
+
 function Desk({ className }: { className: string }) {
     return (
         <div className={`absolute ${className}`}>
@@ -26,7 +33,25 @@ function Couch({ className }: { className: string }) {
     );
 }
 
-export function OfficeLayout() {
+export function OfficeLayout({ reactions }: { reactions?: OfficeLayoutReactions }) {
+    const workTone =
+        reactions?.workMode === 'blocked'
+            ? 'bg-[radial-gradient(circle_at_center,rgba(251,113,133,0.24),transparent_68%)]'
+            : reactions?.workMode === 'review'
+              ? 'bg-[radial-gradient(circle_at_center,rgba(251,191,36,0.2),transparent_70%)]'
+              : reactions?.workMode === 'thinking'
+                ? 'bg-[radial-gradient(circle_at_center,rgba(56,189,248,0.18),transparent_72%)]'
+                : reactions?.workMode === 'speaking'
+                  ? 'bg-[radial-gradient(circle_at_center,rgba(52,211,153,0.18),transparent_72%)]'
+                  : '';
+
+    const breakTone =
+        reactions?.breakMode === 'thinking'
+            ? 'bg-[radial-gradient(circle_at_center,rgba(125,211,252,0.12),transparent_74%)]'
+            : reactions?.breakMode === 'idle'
+              ? 'bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.07),transparent_78%)]'
+              : '';
+
     return (
         <div className="absolute inset-0 overflow-hidden rounded-b-[18px] bg-[#111319]">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.04),transparent_34%)]" />
@@ -37,6 +62,33 @@ export function OfficeLayout() {
                     <div className="absolute inset-y-0 left-[47.8%] w-[4.4%] border-x border-black/18 bg-[#c9b69d]" />
                     <div className="absolute left-0 top-0 h-full w-[47.8%] border-r border-black/18 bg-[#d8d6d0]" />
                     <div className="absolute right-0 top-0 h-full w-[47.8%] bg-[#78726d]" />
+                    {workTone && <div className={`absolute left-[3%] top-[7%] h-[86%] w-[41.5%] rounded-[12px] opacity-90 ${workTone}`} />}
+                    {breakTone && <div className={`absolute right-[3%] top-[8%] h-[82%] w-[41%] rounded-[12px] opacity-80 ${breakTone}`} />}
+                    {reactions?.workMode === 'speaking' && (
+                        <div className="absolute left-[10%] top-[12%] h-[62%] w-[28%] rounded-[999px] bg-[radial-gradient(circle_at_center,rgba(74,222,128,0.18),transparent_72%)]" />
+                    )}
+                    {reactions?.workMode === 'review' && (
+                        <>
+                            <div className="absolute left-[8%] top-[28%] h-[14%] w-[30%] rounded-[8px] border border-amber-200/25 bg-amber-300/8" />
+                            <div className="absolute left-[8%] top-[62%] h-[14%] w-[30%] rounded-[8px] border border-amber-200/20 bg-amber-300/6" />
+                        </>
+                    )}
+                    {reactions?.workMode === 'blocked' && (
+                        <>
+                            <div className="absolute left-[21%] top-[46%] h-[18%] w-[14%] rounded-[6px] border border-rose-300/30 bg-rose-400/10 shadow-[0_0_18px_rgba(251,113,133,0.18)]" />
+                            <div className="absolute left-[47.2%] top-[44%] h-[10%] w-[5.5%] rounded-[4px] bg-[linear-gradient(180deg,rgba(251,113,133,0.38),rgba(251,113,133,0.08))]" />
+                        </>
+                    )}
+                    {reactions?.doorwayPulse && (
+                        <>
+                            <div className="absolute left-[49.2%] top-[18%] h-[9%] w-[1.6%] rounded-full bg-cyan-300/40 shadow-[0_0_10px_rgba(125,211,252,0.45)]" />
+                            <div className="absolute left-[49.2%] top-[52%] h-[9%] w-[1.6%] rounded-full bg-cyan-300/40 shadow-[0_0_10px_rgba(125,211,252,0.45)]" />
+                            <div className="absolute left-[46.6%] top-[49.6%] h-[2.6%] w-[7%] rounded-full bg-cyan-300/30" />
+                        </>
+                    )}
+                    {reactions?.terminalPulse && (
+                        <div className="absolute right-[11.4%] top-[38.8%] h-[8px] w-[8px] rounded-full bg-cyan-200/80 shadow-[0_0_14px_rgba(125,211,252,0.75)]" />
+                    )}
 
                     <div className="absolute left-[2%] top-[4%] h-[92%] w-[43.5%] opacity-42 [background-image:linear-gradient(rgba(110,116,120,0.18)_1px,transparent_1px),linear-gradient(90deg,rgba(110,116,120,0.18)_1px,transparent_1px)] [background-size:12px_12px]" />
                     <div className="absolute right-[2%] top-[4%] h-[92%] w-[43.5%] opacity-35 [background-image:linear-gradient(rgba(255,255,255,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.12)_1px,transparent_1px)] [background-size:12px_12px]" />
@@ -60,9 +112,9 @@ export function OfficeLayout() {
 
                     <Couch className="right-[11%] top-[12%] h-[10%] w-[18%]" />
                     <Couch className="right-[18%] top-[54%] h-[10%] w-[18%]" />
-                    <div className="absolute right-[20%] top-[30%] rounded-[4px] border border-black/25 bg-[#2f334f] px-4 py-2 text-[18px] font-medium text-white shadow-[0_6px_18px_rgba(0,0,0,0.25)]">
+                    {/* <div className="absolute right-[20%] top-[30%] rounded-[4px] border border-black/25 bg-[#2f334f] px-4 py-2 text-[18px] font-medium text-white shadow-[0_6px_18px_rgba(0,0,0,0.25)]">
                         Idle ×
-                    </div>
+                    </div> */}
 
                     <div className="absolute right-[9%] bottom-[8%] flex gap-3">
                         <div className="h-[10px] w-[26px] bg-[#8a643c]" />

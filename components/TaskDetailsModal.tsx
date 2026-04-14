@@ -1208,6 +1208,10 @@ export function TaskDetailsModal({
                                         taskId={task.id}
                                         isActive={task.status === 'planning' || task.status === 'working'}
                                         buddy={selectedBuddy}
+                                        executionDiscussions={executionDiscussions}
+                                        agentInbox={agentInbox}
+                                        collaboration={collaboration}
+                                        impactRiskLevel={impactPreview?.riskLevel ?? null}
                                     />
                                 </div>
 

@@ -11,7 +11,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AgentAvatar } from './AgentAvatar';
 import { OfficeLayout } from './OfficeLayout';
-import type { TaskBuddyInstance } from '@/lib/types/agent-visualization';
+import type {
+    AgentInboxEntry,
+    ExecutionDiscussionEntry,
+    OrchestratorCollaborationMap,
+    TaskBuddyInstance,
+} from '@/lib/types/agent-visualization';
 
 interface AgentThought {
     id: string;
@@ -25,7 +30,14 @@ interface AgentDiscussionProps {
     taskId: string;
     isActive: boolean;
     buddy?: TaskBuddyInstance | null;
+    executionDiscussions?: ExecutionDiscussionEntry[];
+    agentInbox?: AgentInboxEntry[];
+    collaboration?: OrchestratorCollaborationMap;
+    impactRiskLevel?: string | null;
 }
+
+type AgentVisualState = 'speaking' | 'blocked' | 'review' | 'thinking' | 'idle';
+type OfficeRoomMode = 'thinking' | 'review' | 'blocked' | 'speaking' | null;
 
 const AGENTS = [
     {
@@ -55,7 +67,27 @@ function roleLabel(role: string) {
     return role;
 }
 
-export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscussionProps) {
+function resolveAgentByRoleLike(role: string) {
+    const agentStr = role.toLowerCase();
+    for (const agent of AGENTS) {
+        if (agentStr === agent.role.toLowerCase() || (agent.role === 'designer' && agentStr === 'style-architect')) return agent;
+        if (agent.role === 'main-agent' && (agentStr.includes('lead') || agentStr.includes('main') || agentStr.includes('codex'))) return agent;
+        if (agent.role === 'product-manager' && (agentStr.includes('pm') || agentStr.includes('product') || agentStr.includes('claude'))) return agent;
+        if (agent.role === 'software-engineer' && (agentStr.includes('dev') || agentStr.includes('software') || agentStr.includes('gemini'))) return agent;
+        if (agent.role === 'designer' && (agentStr.includes('design') || agentStr.includes('style'))) return agent;
+    }
+    return null;
+}
+
+export function AgentDiscussion({
+    taskId,
+    isActive,
+    buddy = null,
+    executionDiscussions = [],
+    agentInbox = [],
+    collaboration,
+    impactRiskLevel = null,
+}: AgentDiscussionProps) {
     const [allThoughts, setAllThoughts] = useState<AgentThought[]>([]);
     const [visibleThoughts, setVisibleThoughts] = useState<AgentThought[]>([]);
     const [currentThoughtIndex, setCurrentThoughtIndex] = useState(-1);
@@ -63,6 +95,7 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
     const [isSending, setIsSending] = useState(false);
     const [isUserFocused, setIsUserFocused] = useState(false);
     const [showInteractions, setShowInteractions] = useState<{ id: number, x: number }[]>([]);
+    const [agentPings, setAgentPings] = useState<{ id: number; role: string }[]>([]);
     const [movingAgents, setMovingAgents] = useState<Set<string>>(new Set());
     const [idleOffsets, setIdleOffsets] = useState<Record<string, { dx: number, dy: number }>>({});
     const [workingAgents, setWorkingAgents] = useState<Set<string>>(new Set());
@@ -296,17 +329,7 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
 
     const getAgentData = React.useCallback((thought: AgentThought | null) => {
         if (!thought || thought.agent === 'user') return null;
-        const agentStr = thought.agent.toLowerCase();
-        for (const agent of AGENTS) {
-            if (agentStr === agent.role.toLowerCase() || (agent.role === 'designer' && agentStr === 'style-architect')) return agent;
-            if (agent.role === 'main-agent' && (agentStr.includes('lead') || agentStr.includes('main'))) return agent;
-            if (agent.role === 'software-engineer' && (agentStr.includes('dev') || agentStr.includes('software'))) return agent;
-            if (agent.role === 'designer' && (agentStr.includes('design') || agentStr.includes('style'))) return agent;
-        }
-        if (!agentStr.includes('lead') && !agentStr.includes('dev') && !agentStr.includes('design') && !agentStr.includes('main') && !agentStr.includes('software') && !agentStr.includes('style')) {
-            return AGENTS[0];
-        }
-        return null;
+        return resolveAgentByRoleLike(thought.agent) ?? AGENTS[0];
     }, []);
 
     const currentThought = currentThoughtIndex >= 0 ? allThoughts[currentThoughtIndex] : null;
@@ -361,6 +384,14 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
             setShowInteractions((prev) => prev.filter((p) => p.id !== newId));
         }, 800);
 
+        if (nearestAgent) {
+            const pingId = Date.now() + 1;
+            setAgentPings((prev) => [...prev, { id: pingId, role: nearestAgent.role }]);
+            setTimeout(() => {
+                setAgentPings((prev) => prev.filter((ping) => ping.id !== pingId));
+            }, 1800);
+        }
+
         setIsSending(true);
         try {
             const res = await fetch('/api/agent/discuss', {
@@ -386,6 +417,132 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
         isWarning: currentThought?.type === 'critique',
         isComplete: currentThought?.type === 'agreement' && currentThoughtIndex === allThoughts.length - 1,
     });
+
+    const latestThoughtByRole = React.useMemo(() => {
+        const map = new Map<string, AgentThought>();
+        for (const thought of allThoughts) {
+            const agent = resolveAgentByRoleLike(thought.agent);
+            if (!agent) continue;
+            map.set(agent.role, thought);
+        }
+        return map;
+    }, [allThoughts]);
+
+    const agentVisualStates = React.useMemo(() => {
+        const openInboxByRole = new Map<string, number>();
+        for (const entry of agentInbox) {
+            if (entry.status === 'completed') continue;
+            const targetAgent = resolveAgentByRoleLike(entry.to) ?? resolveAgentByRoleLike(entry.from);
+            if (!targetAgent) continue;
+            openInboxByRole.set(targetAgent.role, (openInboxByRole.get(targetAgent.role) ?? 0) + 1);
+        }
+
+        const reviewRoles = new Set<string>();
+        for (const discussion of executionDiscussions.slice(-6)) {
+            for (const thought of discussion.thoughts || []) {
+                const agent = resolveAgentByRoleLike(thought.agent);
+                if (!agent) continue;
+                if (thought.type === 'critique') reviewRoles.add(agent.role);
+            }
+        }
+
+        const result = new Map<string, { state: AgentVisualState; label: string; tone: string; icon: string }>();
+        for (const agent of AGENTS) {
+            const latestThought = latestThoughtByRole.get(agent.role);
+            const hasOpenInbox = (openInboxByRole.get(agent.role) ?? 0) > 0;
+            const isSpeaking = activeAgentData?.role === agent.role;
+            const isReview = reviewRoles.has(agent.role) || latestThought?.type === 'critique';
+            const isThinking = nextAgentData?.role === agent.role || (workingAgents.has(agent.role) && !isSpeaking);
+            const isBlocked =
+                hasOpenInbox ||
+                (impactRiskLevel === 'high' && (agent.role === 'main-agent' || agent.role === 'product-manager'));
+
+            if (isSpeaking) {
+                result.set(agent.role, { state: 'speaking', label: 'Speaking', tone: 'border-emerald-300/60 bg-emerald-500/15 text-emerald-200', icon: '●' });
+            } else if (isBlocked) {
+                result.set(agent.role, { state: 'blocked', label: 'Blocked', tone: 'border-rose-300/60 bg-rose-500/15 text-rose-200', icon: '!' });
+            } else if (isReview) {
+                result.set(agent.role, { state: 'review', label: 'Review', tone: 'border-amber-300/60 bg-amber-500/15 text-amber-200', icon: '◌' });
+            } else if (isThinking) {
+                result.set(agent.role, { state: 'thinking', label: 'Thinking', tone: 'border-sky-300/60 bg-sky-500/15 text-sky-200', icon: '…' });
+            } else {
+                result.set(agent.role, { state: 'idle', label: 'Idle', tone: 'border-white/10 bg-black/30 text-slate-400', icon: '○' });
+            }
+        }
+        return result;
+    }, [activeAgentData, agentInbox, executionDiscussions, impactRiskLevel, latestThoughtByRole, nextAgentData, workingAgents]);
+
+    const relationLinks = React.useMemo(() => {
+        const links: Array<{ from: string; to: string; tone: string; dashed?: boolean }> = [];
+        if (activeAgentData && prevAgentData && activeAgentData.role !== prevAgentData.role && (currentThought?.type === 'critique' || currentThought?.type === 'agreement')) {
+            links.push({
+                from: activeAgentData.role,
+                to: prevAgentData.role,
+                tone: currentThought?.type === 'critique' ? 'rgba(251,191,36,0.8)' : 'rgba(52,211,153,0.8)',
+            });
+        }
+
+        for (const entry of agentInbox.slice(-3)) {
+            if (entry.status === 'completed') continue;
+            const from = resolveAgentByRoleLike(entry.from);
+            const to = resolveAgentByRoleLike(entry.to);
+            if (!from || !to || from.role === to.role) continue;
+            links.push({ from: from.role, to: to.role, tone: 'rgba(125,211,252,0.7)', dashed: true });
+        }
+
+        if (activeAgentData && collaboration?.[activeAgentData.role]) {
+            const edges = Object.entries(collaboration[activeAgentData.role]).sort((a, b) => (b[1]?.weight ?? 0) - (a[1]?.weight ?? 0)).slice(0, 1);
+            for (const [toRole, edge] of edges) {
+                const to = resolveAgentByRoleLike(toRole);
+                if (!to || to.role === activeAgentData.role || (edge?.weight ?? 0) <= 0) continue;
+                links.push({ from: activeAgentData.role, to: to.role, tone: 'rgba(167,139,250,0.55)' });
+            }
+        }
+
+        return links;
+    }, [activeAgentData, collaboration, currentThought, prevAgentData, agentInbox]);
+
+    const roomReactions = React.useMemo(() => {
+        const workRoles = new Set<string>();
+        if (activeAgentData) workRoles.add(activeAgentData.role);
+        if (
+            prevAgentData &&
+            activeAgentData &&
+            prevAgentData.role !== activeAgentData.role &&
+            (currentThought?.type === 'critique' || currentThought?.type === 'agreement')
+        ) {
+            workRoles.add(prevAgentData.role);
+        }
+
+        let workMode: OfficeRoomMode = null;
+        for (const role of workRoles) {
+            const state = agentVisualStates.get(role)?.state;
+            if (state === 'blocked') {
+                workMode = 'blocked';
+                break;
+            }
+            if (state === 'review') {
+                workMode = 'review';
+                continue;
+            }
+            if (state === 'thinking' && !workMode) {
+                workMode = 'thinking';
+                continue;
+            }
+            if (state === 'speaking' && !workMode) {
+                workMode = 'speaking';
+            }
+        }
+
+        const breakThinking = AGENTS.some((agent) => !workRoles.has(agent.role) && agentVisualStates.get(agent.role)?.state === 'thinking');
+
+        return {
+            workMode,
+            breakMode: (breakThinking ? 'thinking' : 'idle') as 'thinking' | 'idle',
+            doorwayPulse: relationLinks.some((link) => link.dashed) || currentThought?.type === 'critique' || currentThought?.type === 'agreement',
+            terminalPulse: relationLinks.some((link) => link.dashed),
+        };
+    }, [activeAgentData, agentVisualStates, currentThought?.type, prevAgentData, relationLinks]);
 
     if (allThoughts.length === 0) {
         return (
@@ -461,7 +618,7 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
 
                 <div className="relative min-h-0 flex-1 overflow-hidden">
                     <div className="absolute inset-0 pointer-events-none z-0">
-                        <OfficeLayout />
+                        <OfficeLayout reactions={roomReactions} />
                     </div>
 
                     <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden">
@@ -499,6 +656,35 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                     </div>
 
                     <div ref={meetingZoneRef} className="relative z-20 h-full w-full">
+                        {relationLinks.length > 0 && (
+                            <svg className="absolute inset-0 z-10 h-full w-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
+                                {relationLinks.map((link, index) => {
+                                    const from = AGENTS.find((agent) => agent.role === link.from);
+                                    const to = AGENTS.find((agent) => agent.role === link.to);
+                                    if (!from || !to) return null;
+                                    const fromIsSpeaking = activeAgentData?.role === from.role;
+                                    const toIsSpeaking = activeAgentData?.role === to.role;
+                                    const fromX = parseFloat(fromIsSpeaking ? from.zone.meeting.left : from.zone.idle.left);
+                                    const fromY = parseFloat(fromIsSpeaking ? from.zone.meeting.top : from.zone.idle.top);
+                                    const toX = parseFloat(toIsSpeaking ? to.zone.meeting.left : to.zone.idle.left);
+                                    const toY = parseFloat(toIsSpeaking ? to.zone.meeting.top : to.zone.idle.top);
+                                    return (
+                                        <line
+                                            key={`${link.from}-${link.to}-${index}`}
+                                            x1={fromX}
+                                            y1={fromY}
+                                            x2={toX}
+                                            y2={toY}
+                                            stroke={link.tone}
+                                            strokeWidth="0.28"
+                                            strokeDasharray={link.dashed ? '1.4 1' : undefined}
+                                            opacity="0.8"
+                                        />
+                                    );
+                                })}
+                            </svg>
+                        )}
+
                         {AGENTS.map((agent) => {
                             const isSpeaking = activeAgentData?.role === agent.role;
                             const isTarget = !!(
@@ -534,6 +720,8 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                             const isThinking = nextAgentData?.role === agent.role;
                             const isWalking = movingAgents.has(agent.role);
                             const isWorking = workingAgents.has(agent.role) && !isSpeaking && !isWalking;
+                            const visualState = agentVisualStates.get(agent.role) ?? { state: 'idle', label: 'Idle', tone: 'border-white/10 bg-black/30 text-slate-400', icon: '○' };
+                            const hasPing = agentPings.some((ping) => ping.role === agent.role);
 
                             let currentEmote: 'thumbsup' | 'heart' | 'question' | 'sweat' | 'exclamation' | 'idea' | null = null;
                             if (isTarget) {
@@ -556,6 +744,21 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                                         return next;
                                     })}
                                 >
+                                    <div className={`absolute -top-5 left-1/2 -translate-x-1/2 rounded-full border px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.14em] shadow-[0_8px_20px_rgba(0,0,0,0.25)] ${visualState.tone}`}>
+                                        <span className="mr-1">{visualState.icon}</span>
+                                        {visualState.label}
+                                    </div>
+                                    <AnimatePresence>
+                                        {hasPing && (
+                                            <motion.div
+                                                initial={{ opacity: 0, scale: 0.7 }}
+                                                animate={{ opacity: [0, 1, 0], scale: [0.75, 1.22, 1.55] }}
+                                                exit={{ opacity: 0 }}
+                                                transition={{ duration: 1.6, ease: 'easeOut' }}
+                                                className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-full border border-cyan-300/70 shadow-[0_0_18px_rgba(125,211,252,0.45)]"
+                                            />
+                                        )}
+                                    </AnimatePresence>
                                     <AgentAvatar
                                         role={agent.role}
                                         name={agent.name}
@@ -570,6 +773,18 @@ export function AgentDiscussion({ taskId, isActive, buddy = null }: AgentDiscuss
                                         emote={currentEmote}
                                     />
                                     {isNearest && <div className="absolute -bottom-2 left-1/2 h-3 w-10 -translate-x-1/2 rounded-full bg-emerald-400/35 blur-[6px]" />}
+                                    {visualState.state === 'speaking' && (
+                                        <div className="absolute inset-x-0 bottom-4 mx-auto h-4 w-14 rounded-full bg-emerald-400/18 blur-[7px]" />
+                                    )}
+                                    {visualState.state === 'thinking' && (
+                                        <div className="absolute inset-x-1 bottom-4 h-2 rounded-full bg-sky-400/18 blur-[6px]" />
+                                    )}
+                                    {visualState.state === 'blocked' && (
+                                        <div className="absolute inset-x-1 bottom-4 h-3 rounded-full bg-rose-500/30 blur-[6px]" />
+                                    )}
+                                    {visualState.state === 'review' && (
+                                        <div className="absolute inset-x-2 bottom-5 h-2 rounded-full bg-amber-400/25 blur-[5px]" />
+                                    )}
                                 </motion.div>
                             );
                         })}
