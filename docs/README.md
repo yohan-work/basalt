@@ -5,13 +5,13 @@
 ## 처음 볼 문서
 
 1. [`../README.md`](../README.md)  
-   서비스 소개, 사용 흐름, 실행 방법.
+   서비스가 해결하는 문제, AI 처리 방식, 사용 흐름, 실행 방법.
 2. [`features.md`](./features.md)  
-   주요 기능과 화면에서 확인되는 결과.
+   주요 기능, 상태 흐름, 화면에서 확인되는 결과.
 3. [`llm.md`](./llm.md)  
    사용 모델, 모델별 역할, 프롬프트/처리 방식.
 4. [`architecture/overview.md`](./architecture/overview.md)  
-   UI, API, Orchestrator, Supabase, LLM의 전체 흐름.
+   UI, API, Orchestrator, Supabase, LLM의 실행 구조.
 5. [`setup.md`](./setup.md)  
    로컬 실행, Supabase 스키마, Ollama, QA 옵션.
 

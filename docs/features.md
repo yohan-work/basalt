@@ -6,13 +6,13 @@
 
 ## 핵심 기능
 
-| 기능 | 사용자가 하는 일 | 화면/데이터 결과 |
+| 기능 | 사용자가 하는 일 | 저장/표시 결과 |
 | --- | --- | --- |
 | 프로젝트 연결 | 로컬 프론트엔드 프로젝트 이름과 경로를 등록 | `ProjectSelector`, `Projects` 테이블 |
 | 태스크 생성 | 짧은 UI 수정 요청을 등록 | 칸반 `Request` 카드, `Tasks` 테이블 |
-| AI 계획 생성 | `Plan` 단계에서 실행 workflow 생성 | `Tasks.workflow`, 실행 로그 |
-| AI 실행 | `Dev (Working)` 단계에서 workflow step 실행 | 코드 변경, `Execution_Logs`, `metadata.fileChanges` |
-| 검증/정리 | `Test`와 상세 화면에서 결과 확인 | `metadata.qaPageCheck`, `metadata.qaSignoff`, 복구/인수인계 Markdown |
+| AI 계획 생성 | `Plan` 단계에서 실행 workflow 생성 | `Tasks.workflow`, plan 로그, 영향 범위 미리보기 |
+| AI 실행 | `Dev (Working)` 단계에서 workflow step 실행 | 코드 변경, `Execution_Logs`, `metadata.fileChanges`, step 진행 상태 |
+| 검증/정리 | `Test`와 상세 화면에서 결과 확인 | `metadata.qaPageCheck`, `metadata.qaSignoff`, QA 캡처, 복구/인수인계 Markdown |
 
 ## 기본 사용 흐름
 
@@ -21,6 +21,17 @@
 3. 영향 범위 확인이 필요한 경우 미리보기 내용을 확인합니다.
 4. `Dev (Working)`에서 `Execute`를 실행합니다.
 5. `Test` 단계와 `Task Details`에서 로그, 검증 결과, QA 캡처, 후속 정리 내용을 확인합니다.
+
+## 상태 흐름
+
+| 상태 | 사용자가 보는 것 | 내부 결과 |
+| --- | --- | --- |
+| `Request` | 새 태스크 카드와 프로젝트 선택 상태 | `Tasks.status = pending` |
+| `Plan` | AI가 만든 작업 계획과 영향 범위 | `Tasks.workflow`, `metadata.impactPreview` |
+| `Dev (Working)` | 실행 중 step, agent 로그, 코드 변경 진행 | `Execution_Logs`, `metadata.fileChanges` |
+| `Test` | 검증 결과, QA 캡처, 작업 이력 | `metadata.qaPageCheck`, `metadata.qaSignoff` |
+| `Review`/`Done` | 리뷰 결과 또는 완료된 작업 기록 | 리뷰 메타데이터, 완료 태스크 아카이브 |
+| `Failed` | 실패 원인과 복구 가이드 | `metadata.lastError`, `metadata.executionRepairs` |
 
 ## AI 보조 기능
 
@@ -50,6 +61,7 @@
 - `agent-browser`가 있으면 콘솔 오류, 페이지 오류, 동일 오리진 fetch/XHR 4xx/5xx, 스크린샷/반응형 캡처를 보강합니다.
 - QA 결과는 `metadata.qaPageCheck`와 `metadata.qaSignoff`에 저장됩니다.
 - 캡처 PNG는 대상 프로젝트의 `.basalt/basalt-qa/<taskId>/` 아래에 저장되고, `GET /api/project/qa-artifact`로 표시됩니다.
+- 성공 시 `검수 완료` 탭에서 스모크 결과, 최종 문구, main/mobile/tablet/desktop 캡처 슬롯을 확인할 수 있습니다.
 
 엄격한 검증이 필요하면 환경 변수로 조정합니다.
 

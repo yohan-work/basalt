@@ -98,6 +98,6 @@ flowchart TB
 | `lib/profiler.ts` | 대상 프로젝트 스택·패키지·라우트 컨텍스트 수집 |
 | `lib/supabase.ts` | Supabase 클라이언트 |
 | `supabase/schema.sql` | 최소 실행용 DB 스키마 |
-| `docs/` | 평가/운영/아키텍처 문서 |
+| `docs/` | 기능, 운영, 아키텍처 문서 |
 
 상세 실행 흐름은 [`orchestrator.md`](./orchestrator.md), 팀 오케스트레이션은 [`team-orchestrator.md`](./team-orchestrator.md)를 참고하세요.
