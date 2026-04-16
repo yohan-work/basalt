@@ -1,6 +1,6 @@
-# API 계약서 모음
+# 주요 API 계약서
 
-`docs/api.md`의 라우트를 AI가 바로 실행/해석할 수 있도록 계약 단위로 정리합니다.
+`docs/api.md`의 전체 라우트 중 데모와 핵심 실행 흐름에 직접 쓰이는 API를 계약 단위로 정리합니다. 모든 엔드포인트 목록은 [`../api.md`](../api.md)를 기준으로 합니다.
 
 ## 공통 계약
 
@@ -31,6 +31,87 @@
 ### 성공기준
 - 실행이 시작되면 `working` 계열 상태가 기록됨
 - 진행 메타데이터(`metadata.executionOptions` 등)가 업데이트됨
+
+## Contract: POST /api/agent/plan
+
+### 목표
+태스크 설명과 대상 프로젝트 컨텍스트를 바탕으로 실행 가능한 workflow를 만든다.
+
+### 입력
+- `taskId` (필수)
+- 실행 옵션: `planningDepth`, `coordinationMode`, `proactiveMode` 등
+
+### 제약
+- 태스크가 존재해야 함
+- 대상 프로젝트가 연결되어 있으면 path 접근이 가능해야 함
+
+### 출력
+- `Tasks.workflow`
+- plan 관련 실행 로그
+- 선택적으로 `metadata.planArtifacts.deepPlan`
+
+### 성공기준
+- 이후 `execute`가 사용할 수 있는 step 목록이 저장됨
+- 필요한 agent/skill과 주요 위험이 설명됨
+
+## Contract: GET /api/agent/stream
+
+### 목표
+Plan, Execute, Verify, Ralph 실행 진행 상황을 SSE로 스트리밍한다.
+
+### 입력
+- `taskId` (필수, query)
+- `action`: `plan` | `execute` | `verify` | `ralph`
+- 실행 옵션 query: `discussionMode`, `strategyPreset`, `multiPhaseCodegen`, `planningDepth`, `coordinationMode`, `proactiveMode`
+
+### 제약
+- 지원하는 action이어야 함
+- 장시간 실행 중 연결 종료 가능성을 고려해야 함
+
+### 출력
+- 진행 이벤트, 로그 이벤트, 완료/오류 이벤트
+- 실행 옵션은 `Tasks.metadata.executionOptions`에 반영될 수 있음
+
+### 성공기준
+- UI가 진행 상태를 실시간으로 표시하고 종료 후 태스크 상태를 재조회할 수 있음
+
+## Contract: POST /api/agent/verify
+
+### 목표
+실행 결과를 검증하고 QA/PR 준비에 필요한 메타데이터를 저장한다.
+
+### 입력
+- `taskId` (필수)
+
+### 제약
+- 태스크가 검증 가능한 상태여야 함
+- 대상 프로젝트 dev 서버가 있으면 QA URL 추론 가능성이 높아짐
+
+### 출력
+- 검증 결과
+- `metadata.qaPageCheck`, `metadata.qaSignoff` 등 QA 관련 메타데이터
+
+### 성공기준
+- 검증 결과가 pass/fail과 근거를 포함해 저장됨
+
+## Contract: POST /api/agent/retry
+
+### 목표
+실패한 태스크를 이전 metadata와 오류 정보를 바탕으로 재개한다.
+
+### 입력
+- `taskId` (필수)
+
+### 제약
+- 실패 상태 또는 재시도 가능한 상태여야 함
+- 무한 재시도를 피하기 위해 retry count와 실패 원인을 보존해야 함
+
+### 출력
+- 재시도 실행 로그
+- 갱신된 태스크 상태와 metadata
+
+### 성공기준
+- 실패 원인이 다음 실행 컨텍스트에 반영됨
 
 ## Contract: POST /api/agent/review/suggestions
 

@@ -4,6 +4,19 @@
 
 Basalt의 단일 태스크 실행 핵심은 `lib/agents/Orchestrator.ts`입니다.
 
+## 실행 흐름 개요
+
+Orchestrator는 태스크 하나를 `계획 -> 실행 -> 검증 -> 정리` 순서로 밀어주는 실행 관리자입니다. 사용자가 버튼을 누르면 API route가 Orchestrator를 만들고, Orchestrator는 Supabase에서 태스크와 프로젝트 정보를 읽은 뒤 agent/skill을 호출합니다.
+
+| 단계 | 책임 | 주요 결과 |
+| --- | --- | --- |
+| Plan | 태스크 분석, workflow 생성, 필요한 agent/skill 결정 | `Tasks.workflow`, plan 로그 |
+| Execute | workflow step 실행, 코드 생성/수정, 실패 시 repair | `Execution_Logs`, `metadata.fileChanges` |
+| Dev 종료 QA | 대상 앱 dev URL 스모크, verify, screenshot/responsive | `metadata.qaPageCheck`, `metadata.qaSignoff` |
+| Retry/Recovery | 실패 원인 정리, 다음 라운드 또는 후속 정리 연결 | `metadata.executionRepairs`, 복구 가이드 |
+
+핵심 설계 의도는 단일 LLM 답변에 의존하지 않고, 상태 전이, 로그, 검증, 수리 루프를 별도 책임으로 분리하는 것입니다.
+
 ## 계약
 
 ### 목표
