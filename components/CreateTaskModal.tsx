@@ -224,7 +224,7 @@ export function CreateTaskModal({ open, onOpenChange, onSubmit, selectedProjectI
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent
-                className="sm:max-w-lg max-h-[min(90dvh,calc(100vh-2rem))] flex flex-col overflow-hidden gap-4"
+                className="!left-[50%] !top-[50%] !translate-x-[-50%] !translate-y-[-50%] sm:max-w-lg max-h-[min(90dvh,calc(100vh-2rem))] flex flex-col overflow-hidden gap-4"
                 onKeyDown={handleKeyDown}
             >
                 <DialogHeader className="shrink-0">

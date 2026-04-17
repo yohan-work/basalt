@@ -565,8 +565,8 @@ export function AgentDiscussion({
                     <div className="rounded-[14px] border border-[#f2c94c]/70 bg-[#fff7df] p-3 text-slate-800 shadow-[0_14px_36px_rgba(0,0,0,0.18)]">
                         <div className="mb-2 flex items-center gap-2">
                             <div className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Buddy</div>
-                            <div className="text-[12px] font-semibold">{buddy?.name || buddyDefinition.name}</div>
-                            <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{buddyDefinition.rarity}</div>
+                            {/* <div className="text-[12px] font-semibold">{buddy?.name || buddyDefinition.name}</div> */}
+                            {/* <div className="text-[10px] uppercase tracking-[0.18em] text-slate-500">{buddyDefinition.rarity}</div> */}
                         </div>
                         <pre className="text-[12px] leading-4 text-slate-900">{buddyDefinition.ascii}</pre>
                         <div className="mt-2 text-[12px] font-medium">{buddyReaction.emote} {buddyReaction.label}</div>
@@ -819,11 +819,6 @@ export function AgentDiscussion({
                                 <div className="rounded-[8px] bg-[#1b2230] px-2 py-1 text-[11px] font-semibold text-[#7aa2ff]">{currentThought ? roleLabel(currentThought.agent) : 'Transcript'}</div>
                                 <div className="max-w-[220px] truncate text-[12px] text-slate-300">{currentThought?.thought || 'Transcript'}</div>
                             </div>
-                            <button className="text-slate-500">×</button>
-                        </div>
-                        <div className="flex items-center gap-2 rounded-[10px] border border-emerald-500/20 bg-[#14251a] px-3 py-2 text-[12px] text-emerald-300">
-                            <TerminalSquare className="h-4 w-4" />
-                            <span>Open in Terminal</span>
                         </div>
                     </div>
 
