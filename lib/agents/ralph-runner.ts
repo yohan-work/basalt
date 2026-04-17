@@ -114,12 +114,18 @@ async function getTaskRow(taskId: string) {
     return data;
 }
 
-async function setTaskFailedWithMetadata(taskId: string, lastError: string, failedAction: string): Promise<void> {
+async function setTaskFailedWithMetadata(
+    taskId: string,
+    lastError: string,
+    failedAction: string,
+    emitter?: StreamEmitter
+): Promise<void> {
     const { data, error } = await supabase.from('Tasks').select('metadata').eq('id', taskId).single();
     if (error) throw new Error(error.message);
     const meta = { ...(data?.metadata || {}), lastError, failedAction, failedAt: new Date().toISOString() };
     const { error: u } = await supabase.from('Tasks').update({ status: 'failed', metadata: meta }).eq('id', taskId);
     if (u) throw new Error(u.message);
+    emitter?.emit({ type: 'task_status', taskId, status: 'failed' });
 }
 
 async function recordRalphRoundProgress(
@@ -283,7 +289,7 @@ export async function runRalphSession(
                 const gate = await runRalphFeedbackGate(projectPath);
                 if (!gate.ok && gate.failure) {
                     appendRalphGuardrail(projectPath, taskId, `피드백 게이트: ${gate.failure.slice(0, 900)}`);
-                    await setTaskFailedWithMetadata(taskId, gate.failure.slice(0, 2000), 'ralph_feedback_gate');
+                    await setTaskFailedWithMetadata(taskId, gate.failure.slice(0, 2000), 'ralph_feedback_gate', emitter);
                     await recordRalphRoundProgress(projectPath, taskId, round, 'BASALT_RALPH_FEEDBACK_GATE: npm 스크립트 실패');
                     continue;
                 }

@@ -76,8 +76,37 @@ export function KanbanBoard() {
         return nextTasks;
     };
 
+    const refreshTask = async (taskId: string) => {
+        const { data, error } = await supabase.from('Tasks').select('*').eq('id', taskId).single();
+        if (error || !data) {
+            if (error) console.error('Error refreshing task:', error);
+            return;
+        }
+
+        const refreshedTask = data as Task;
+        const belongsToCurrentProject =
+            !selectedProjectId || refreshedTask.project_id === selectedProjectId;
+
+        setTasks(prev =>
+            belongsToCurrentProject
+                ? upsertTask(prev, refreshedTask)
+                : prev.filter(task => task.id !== taskId)
+        );
+        setSelectedTask(prev => (prev && prev.id === taskId ? refreshedTask : prev));
+        setProcessingTaskIds(prev => {
+            const next = new Set(prev);
+            next.delete(taskId);
+            return next;
+        });
+    };
+
     // SSE stream for real-time progress
     const stream = useEventStream({
+        onEvent: (event) => {
+            if (event.type === 'task_status') {
+                void refreshTask(event.taskId);
+            }
+        },
         onError: (msg) => {
             showActionError(`Stream error: ${msg}`);
             void fetchTasks(false);
@@ -342,8 +371,9 @@ export function KanbanBoard() {
             const data = await parseResponseAsJson(res);
             if (!res.ok) {
                 showActionError('승인 실패: ' + apiErrorText(data, res.statusText));
+            } else {
+                await refreshTask(task.id);
             }
-            // Realtime subscription이 UI를 자동 업데이트
         } catch (err) {
             console.error('Approve error:', err);
             showActionError('승인 중 오류가 발생했습니다.');

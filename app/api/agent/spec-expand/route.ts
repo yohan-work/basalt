@@ -87,7 +87,7 @@ ${stackSummary || '(프로젝트 없음 또는 조회 실패)'}`;
             return NextResponse.json({ error: upErr.message }, { status: 500 });
         }
 
-        return NextResponse.json({ markdown, generatedAt });
+        return NextResponse.json({ success: true, markdown, generatedAt });
     } catch (e: unknown) {
         const message = e instanceof Error ? e.message : 'Unknown error';
         console.error('spec-expand:', e);

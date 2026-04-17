@@ -7,8 +7,11 @@
  * that the frontend can consume via EventSource.
  */
 
+export type TaskStatus = 'pending' | 'planning' | 'working' | 'testing' | 'review' | 'done' | 'failed';
+
 export type StreamEvent =
     | { type: 'phase_start'; phase: string; taskId: string }
+    | { type: 'task_status'; taskId: string; status: TaskStatus }
     | {
           type: 'codegen_subphase';
           phase: 'plan' | 'implement' | 'verify';

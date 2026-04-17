@@ -284,7 +284,9 @@ export class Orchestrator {
     private async updateStatus(status: AgentTask['status']) {
         try {
             this.incrementDbUpdate();
-            await supabase.from('Tasks').update({ status }).eq('id', this.taskId);
+            const { error } = await supabase.from('Tasks').update({ status }).eq('id', this.taskId);
+            if (error) throw error;
+            this.emitter?.emit({ type: 'task_status', taskId: this.taskId, status });
         } catch (e: any) {
             console.error('Supabase Status Update Error:', e);
         }
@@ -1266,9 +1268,11 @@ export class Orchestrator {
                 }
             }
 
-            const clarifyBlock = formatClarificationForPlan((task as any)?.metadata?.clarifyingGate);
+            const taskMetadata = (task as any)?.metadata;
+            const specExpansionBlock = formatSpecExpansionForPlan(taskMetadata?.specExpansion);
+            const clarifyBlock = formatClarificationForPlan(taskMetadata?.clarifyingGate);
             const minimalistHint = `\n\n[MINIMALIST STRATEGY — MANDATORY]\n- DO NOT use TanStack Table or Prisma for UI tasks.\n- Use standard HTML <table> and local mock data arrays ONLY.\n- Prioritize zero-error delivery over library features.`;
-            const effectiveDescription = `${taskDescription}${clarifyBlock}${minimalistHint}`;
+            const effectiveDescription = `${taskDescription}${specExpansionBlock}${clarifyBlock}${minimalistHint}`;
 
             // Load all available agents, excluding git-manager which is reserved for Orchestrator automation
             const availableAgents = AgentLoader.listAgents().filter(a => a.name !== 'git-manager');

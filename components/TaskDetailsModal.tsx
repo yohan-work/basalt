@@ -108,6 +108,11 @@ type MarkdownLineView = {
     codeFence?: boolean;
 };
 
+type SpecExpansionPreview = {
+    markdown?: string;
+    generatedAt?: string;
+};
+
 function renderMarkdownInline(content: string): ReactNode[] {
     const nodes: ReactNode[] = [];
     const regex = /\*\*([^\n*]+?)\*\*|`([^`\n]+)`|~~([^\n~]+)~~|_([^_\n]+)_/g;
@@ -382,6 +387,7 @@ export function TaskDetailsModal({
         DEFAULT_EXECUTION_OPTIONS
     );
     const [clarifyDraftAnswers, setClarifyDraftAnswers] = useState<Record<string, string>>({});
+    const [specExpansionOverride, setSpecExpansionOverride] = useState<SpecExpansionPreview | null>(null);
     const [isGeneratingClarify, setIsGeneratingClarify] = useState(false);
     const [isSubmittingClarify, setIsSubmittingClarify] = useState(false);
     const [isAckImpact, setIsAckImpact] = useState(false);
@@ -458,6 +464,17 @@ export function TaskDetailsModal({
                   ['generatedAt', 'status', 'questions']
               )
             : '';
+    const specExpansionSig =
+        task && typeof task.metadata === 'object' && task.metadata !== null
+            ? JSON.stringify(
+                  (task.metadata as Record<string, unknown>).specExpansion ?? null,
+                  ['generatedAt']
+              )
+            : '';
+
+    useEffect(() => {
+        setSpecExpansionOverride(null);
+    }, [task?.id, specExpansionSig]);
 
     useEffect(() => {
         if (!open || !task) return;
@@ -597,7 +614,8 @@ export function TaskDetailsModal({
         && !needsImpactAck;
 
     const showPreviewTab = Boolean(task.project_id) && ['working', 'testing'].includes(task.status);
-    const specExpansion = metadata.specExpansion as { markdown?: string; generatedAt?: string } | undefined;
+    const metadataSpecExpansion = metadata.specExpansion as SpecExpansionPreview | undefined;
+    const specExpansion = specExpansionOverride || metadataSpecExpansion;
     const showRecoveryPanel =
         task.status === 'failed' || task.status === 'testing' || task.status === 'review' || Boolean(metadata.qaPageCheck);
     const showHandoffPanel =
@@ -967,7 +985,10 @@ export function TaskDetailsModal({
             });
             const data = await parseResponseAsJson(res);
             if (!res.ok) throw new Error(apiErrorText(data, '스펙 확장 실패'));
-            /* Realtime으로 task.metadata 갱신됨 — 표시는 다음 페치에서 */
+            setSpecExpansionOverride({
+                markdown: typeof data.markdown === 'string' ? data.markdown : '',
+                generatedAt: typeof data.generatedAt === 'string' ? data.generatedAt : new Date().toISOString(),
+            });
         } catch (e) {
             setActionError(e instanceof Error ? e.message : '스펙 확장에 실패했습니다.');
         } finally {
