@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { MODEL_CONFIG } from '@/lib/model-config';
 import { getDesignPresetById, PAGE_TASK_TEMPLATE_ID } from '@/lib/design-preset';
+import { generateText } from '@/lib/llm';
 import { supabase } from '@/lib/supabase';
 import { ProjectProfiler } from '@/lib/profiler';
 
@@ -95,30 +96,17 @@ export async function POST(req: Request) {
         const systemPrompt = await buildSystemPrompt(projectId, { templateId, designPreset });
         const userDraft = `Title: ${title}\nDescription: ${description}`;
         
-        const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+        const enhancedPrompt = await generateText(
+            systemPrompt,
+            `Enhance this exact draft into a detailed developer task prompt:\n\n${userDraft}`,
+            MODEL_CONFIG.SMART_MODEL
+        );
 
-        const ollamaRes = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: MODEL_CONFIG.SMART_MODEL,
-                system: systemPrompt,
-                prompt: `Enhance this exact draft into a detailed developer task prompt:\n\n${userDraft}`,
-                stream: false
-            })
-        });
-
-        if (!ollamaRes.ok) {
-            throw new Error(`Ollama API error: ${ollamaRes.status} ${ollamaRes.statusText}`);
+        if (!enhancedPrompt) {
+            throw new Error('Failed to generate enhanced prompt from LLM (empty response)');
         }
 
-        const data = await ollamaRes.json();
-        
-        if (!data || !data.response) {
-            throw new Error('Failed to generate enhanced prompt from LLM (No response field)');
-        }
-
-        return NextResponse.json({ enhancedPrompt: data.response.trim() });
+        return NextResponse.json({ enhancedPrompt: enhancedPrompt.trim() });
 
     } catch (error: any) {
         console.error('Enhance Prompt Error:', error);

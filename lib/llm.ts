@@ -10,6 +10,8 @@ import http from 'http';
 import { URL } from 'url';
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+const LLM_PROVIDER = process.env.LLM_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'ollama');
+const GEMINI_API_BASE_URL = process.env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
 
 const TIMEOUT_MS = {
     CODE: 180_000,  // 180s (3m) for code generation (Reduced from 600s)
@@ -39,6 +41,88 @@ export interface LLMTelemetryHooks {
     }) => void;
     onRequestEnd?: (meta: { mode: string; model: string; latencyMs: number }) => void;
     onError?: (meta: { mode: string; model: string; message: string }) => void;
+}
+
+function isGeminiProvider(): boolean {
+    return LLM_PROVIDER === 'gemini';
+}
+
+function getGeminiApiKey(): string {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+        throw new Error('GEMINI_API_KEY is required when LLM_PROVIDER=gemini');
+    }
+    return key;
+}
+
+function normalizeGeminiModelName(model: string): string {
+    return model.startsWith('models/') ? model.slice('models/'.length) : model;
+}
+
+function extractGeminiText(data: any): string {
+    const parts = data?.candidates?.[0]?.content?.parts;
+    if (!Array.isArray(parts)) {
+        const reason = data?.candidates?.[0]?.finishReason || data?.promptFeedback?.blockReason || 'No candidates';
+        throw new Error(`Gemini response did not include text parts: ${reason}`);
+    }
+    return parts.map((part: any) => part?.text || '').join('');
+}
+
+function extractGeminiTokens(data: any): LLMResponse['tokens'] {
+    const usage = data?.usageMetadata;
+    if (!usage) return undefined;
+    return {
+        prompt_eval_count: usage.promptTokenCount || 0,
+        eval_count: usage.candidatesTokenCount || usage.totalTokenCount || 0,
+    };
+}
+
+async function geminiGenerateContent(
+    model: string,
+    systemPrompt: string,
+    userPrompt: string,
+    timeout: number,
+    generationConfig?: Record<string, unknown>
+): Promise<{ text: string; tokens?: LLMResponse['tokens'] }> {
+    const modelName = normalizeGeminiModelName(model);
+    const url = `${GEMINI_API_BASE_URL}/models/${encodeURIComponent(modelName)}:generateContent`;
+    const body = {
+        system_instruction: {
+            parts: [{ text: systemPrompt }],
+        },
+        contents: [
+            {
+                role: 'user',
+                parts: [{ text: userPrompt }],
+            },
+        ],
+        generationConfig: {
+            temperature: 0.2,
+            ...generationConfig,
+        },
+    };
+
+    console.log(`[LLM] Starting Gemini request (Model: ${modelName}, Body: ${Math.round(JSON.stringify(body).length / 1024)}KB, Timeout: ${timeout}ms)`);
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': getGeminiApiKey(),
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(timeout),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        const message = data?.error?.message || `${response.status} ${response.statusText}`;
+        throw new Error(`Gemini API Error: ${message}`);
+    }
+
+    return {
+        text: extractGeminiText(data),
+        tokens: extractGeminiTokens(data),
+    };
 }
 
 /**
@@ -241,25 +325,31 @@ Task: ${prompt}
         telemetry?.onRequestStart?.({ mode: 'code', model });
         let fullText = '';
         let tokens: LLMResponse['tokens'] = undefined;
-        await withRetry(async () => {
-            await ollamaRequest(
-                `${OLLAMA_BASE_URL}/api/generate`,
-                { model, system: systemPromptText, prompt: userPromptText, stream: false },
-                TIMEOUT_MS.CODE,
-                async (res) => {
-                    const chunks: any[] = [];
-                    for await (const chunk of res) chunks.push(chunk);
-                    const data = JSON.parse(Buffer.concat(chunks).toString());
-                    fullText = data.response;
-                    if (data.prompt_eval_count || data.eval_count) {
-                        tokens = {
-                            prompt_eval_count: data.prompt_eval_count || 0,
-                            eval_count: data.eval_count || 0
-                        };
+        if (isGeminiProvider()) {
+            const result = await withRetry(() => geminiGenerateContent(model, systemPromptText, userPromptText, TIMEOUT_MS.CODE));
+            fullText = result.text;
+            tokens = result.tokens;
+        } else {
+            await withRetry(async () => {
+                await ollamaRequest(
+                    `${OLLAMA_BASE_URL}/api/generate`,
+                    { model, system: systemPromptText, prompt: userPromptText, stream: false },
+                    TIMEOUT_MS.CODE,
+                    async (res) => {
+                        const chunks: any[] = [];
+                        for await (const chunk of res) chunks.push(chunk);
+                        const data = JSON.parse(Buffer.concat(chunks).toString());
+                        fullText = data.response;
+                        if (data.prompt_eval_count || data.eval_count) {
+                            tokens = {
+                                prompt_eval_count: data.prompt_eval_count || 0,
+                                eval_count: data.eval_count || 0
+                            };
+                        }
                     }
-                }
-            );
-        });
+                );
+            });
+        }
 
         const files = extractFilesFromRaw(fullText);
         const tokenMeta = tokens as { prompt_eval_count: number; eval_count: number } | undefined;
@@ -318,25 +408,31 @@ Task: ${prompt}
         telemetry?.onRequestStart?.({ mode: 'surgical-edit', model });
         let fullText = '';
         let tokens: LLMResponse['tokens'] = undefined;
-        await withRetry(async () => {
-            await ollamaRequest(
-                `${OLLAMA_BASE_URL}/api/generate`,
-                { model, system: systemPromptText, prompt: userPromptText, stream: false },
-                TIMEOUT_MS.CODE,
-                async (res) => {
-                    const chunks: any[] = [];
-                    for await (const chunk of res) chunks.push(chunk);
-                    const data = JSON.parse(Buffer.concat(chunks).toString());
-                    fullText = data.response;
-                    if (data.prompt_eval_count || data.eval_count) {
-                        tokens = {
-                            prompt_eval_count: data.prompt_eval_count || 0,
-                            eval_count: data.eval_count || 0
-                        };
+        if (isGeminiProvider()) {
+            const result = await withRetry(() => geminiGenerateContent(model, systemPromptText, userPromptText, TIMEOUT_MS.CODE));
+            fullText = result.text;
+            tokens = result.tokens;
+        } else {
+            await withRetry(async () => {
+                await ollamaRequest(
+                    `${OLLAMA_BASE_URL}/api/generate`,
+                    { model, system: systemPromptText, prompt: userPromptText, stream: false },
+                    TIMEOUT_MS.CODE,
+                    async (res) => {
+                        const chunks: any[] = [];
+                        for await (const chunk of res) chunks.push(chunk);
+                        const data = JSON.parse(Buffer.concat(chunks).toString());
+                        fullText = data.response;
+                        if (data.prompt_eval_count || data.eval_count) {
+                            tokens = {
+                                prompt_eval_count: data.prompt_eval_count || 0,
+                                eval_count: data.eval_count || 0
+                            };
+                        }
                     }
-                }
-            );
-        });
+                );
+            });
+        }
 
         const files = extractFilesFromRaw(fullText);
         const tokenMeta = tokens as { prompt_eval_count: number; eval_count: number } | undefined;
@@ -379,27 +475,40 @@ export async function generateText(
     try {
         const result = await withRetry(async () => {
             let fullText = '';
-            await ollamaRequest(
-                `${OLLAMA_BASE_URL}/api/generate`,
-                { model, system: systemPrompt, prompt: userPrompt, stream: false },
-                TIMEOUT_MS.JSON, // using JSON timeout as it's a general text task
-                async (res) => {
-                    const chunks: any[] = [];
-                    for await (const chunk of res) chunks.push(chunk);
-                    const data = JSON.parse(Buffer.concat(chunks).toString());
-                    fullText = data.response;
-                    const promptTokens = data.prompt_eval_count || 0;
-                    const completionTokens = data.eval_count || 0;
-                    if (promptTokens || completionTokens) {
-                        telemetry?.onTokenUsage?.({
-                            mode: 'text',
-                            model,
-                            promptTokens,
-                            completionTokens,
-                        });
-                    }
+            if (isGeminiProvider()) {
+                const data = await geminiGenerateContent(model, systemPrompt, userPrompt, TIMEOUT_MS.JSON);
+                fullText = data.text;
+                if (data.tokens) {
+                    telemetry?.onTokenUsage?.({
+                        mode: 'text',
+                        model,
+                        promptTokens: data.tokens.prompt_eval_count,
+                        completionTokens: data.tokens.eval_count,
+                    });
                 }
-            );
+            } else {
+                await ollamaRequest(
+                    `${OLLAMA_BASE_URL}/api/generate`,
+                    { model, system: systemPrompt, prompt: userPrompt, stream: false },
+                    TIMEOUT_MS.JSON, // using JSON timeout as it's a general text task
+                    async (res) => {
+                        const chunks: any[] = [];
+                        for await (const chunk of res) chunks.push(chunk);
+                        const data = JSON.parse(Buffer.concat(chunks).toString());
+                        fullText = data.response;
+                        const promptTokens = data.prompt_eval_count || 0;
+                        const completionTokens = data.eval_count || 0;
+                        if (promptTokens || completionTokens) {
+                            telemetry?.onTokenUsage?.({
+                                mode: 'text',
+                                model,
+                                promptTokens,
+                                completionTokens,
+                            });
+                        }
+                    }
+                );
+            }
             return fullText.trim();
         });
         telemetry?.onRequestEnd?.({ mode: 'text', model, latencyMs: Date.now() - startedAt });
@@ -427,23 +536,35 @@ export async function generateJSON(
         const result = await withRetry(async () => {
             let fullText = '';
             let tokens: { prompt_eval_count: number; eval_count: number } | undefined;
-            await ollamaRequest(
-                `${OLLAMA_BASE_URL}/api/generate`,
-                { model, system: systemPrompt, prompt: userPromptText, stream: false },
-                TIMEOUT_MS.JSON,
-                async (res) => {
-                    const chunks: any[] = [];
-                    for await (const chunk of res) chunks.push(chunk);
-                    const data = JSON.parse(Buffer.concat(chunks).toString());
-                    fullText = data.response;
-                    if (data.prompt_eval_count || data.eval_count) {
-                        tokens = {
-                            prompt_eval_count: data.prompt_eval_count || 0,
-                            eval_count: data.eval_count || 0
-                        };
+            if (isGeminiProvider()) {
+                const data = await geminiGenerateContent(
+                    model,
+                    systemPrompt,
+                    userPromptText,
+                    TIMEOUT_MS.JSON,
+                    { responseMimeType: 'application/json' }
+                );
+                fullText = data.text;
+                tokens = data.tokens;
+            } else {
+                await ollamaRequest(
+                    `${OLLAMA_BASE_URL}/api/generate`,
+                    { model, system: systemPrompt, prompt: userPromptText, stream: false },
+                    TIMEOUT_MS.JSON,
+                    async (res) => {
+                        const chunks: any[] = [];
+                        for await (const chunk of res) chunks.push(chunk);
+                        const data = JSON.parse(Buffer.concat(chunks).toString());
+                        fullText = data.response;
+                        if (data.prompt_eval_count || data.eval_count) {
+                            tokens = {
+                                prompt_eval_count: data.prompt_eval_count || 0,
+                                eval_count: data.eval_count || 0
+                            };
+                        }
                     }
-                }
-            );
+                );
+            }
             const parsed = JSON.parse(cleanJSON(fullText));
             if (tokens) {
                 telemetry?.onTokenUsage?.({
@@ -586,25 +707,32 @@ Task: ${prompt}
         telemetry?.onRequestStart?.({ mode: 'code_stream', model });
         let fullText = '';
         let tokens: LLMResponse['tokens'] = undefined;
-        await withRetry(async () => {
-            await ollamaStreamRequest(
-                `${OLLAMA_BASE_URL}/api/generate`,
-                { model, system: systemPromptText, prompt: userPromptText }, // NO format: 'json' here for speed
-                TIMEOUT_MS.CODE,
-                (chunk) => {
-                    const token = chunk.response || '';
-                    fullText += token;
-                    if (chunk.prompt_eval_count || chunk.eval_count) {
-                        tokens = {
-                            prompt_eval_count: chunk.prompt_eval_count || 0,
-                            eval_count: chunk.eval_count || 0
-                        };
-                    }
-                    if (token && emitter) emitter.emit({ type: 'llm_token', token, context: 'code_generation' });
-                },
-                onHeartbeat
-            );
-        });
+        if (isGeminiProvider()) {
+            const result = await withRetry(() => geminiGenerateContent(model, systemPromptText, userPromptText, TIMEOUT_MS.CODE));
+            fullText = result.text;
+            tokens = result.tokens;
+            if (fullText && emitter) emitter.emit({ type: 'llm_token', token: fullText, context: 'code_generation' });
+        } else {
+            await withRetry(async () => {
+                await ollamaStreamRequest(
+                    `${OLLAMA_BASE_URL}/api/generate`,
+                    { model, system: systemPromptText, prompt: userPromptText }, // NO format: 'json' here for speed
+                    TIMEOUT_MS.CODE,
+                    (chunk) => {
+                        const token = chunk.response || '';
+                        fullText += token;
+                        if (chunk.prompt_eval_count || chunk.eval_count) {
+                            tokens = {
+                                prompt_eval_count: chunk.prompt_eval_count || 0,
+                                eval_count: chunk.eval_count || 0
+                            };
+                        }
+                        if (token && emitter) emitter.emit({ type: 'llm_token', token, context: 'code_generation' });
+                    },
+                    onHeartbeat
+                );
+            });
+        }
 
         if (emitter && typeof (emitter as any).emit === 'function') {
             (emitter as any).emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'code_generation' });
@@ -634,17 +762,22 @@ Do NOT write any explanatory text. Only output files using the format above.`;
 
             let retryText = '';
             try {
-                await ollamaRequest(
-                    `${OLLAMA_BASE_URL}/api/generate`,
-                    { model, system: systemPromptText, prompt: retryPrompt, stream: false },
-                    TIMEOUT_MS.CODE,
-                    async (res) => {
-                        const chunks: any[] = [];
-                        for await (const chunk of res) chunks.push(chunk);
-                        const data = JSON.parse(Buffer.concat(chunks).toString());
-                        retryText = data.response || '';
-                    }
-                );
+                if (isGeminiProvider()) {
+                    const result = await geminiGenerateContent(model, systemPromptText, retryPrompt, TIMEOUT_MS.CODE);
+                    retryText = result.text || '';
+                } else {
+                    await ollamaRequest(
+                        `${OLLAMA_BASE_URL}/api/generate`,
+                        { model, system: systemPromptText, prompt: retryPrompt, stream: false },
+                        TIMEOUT_MS.CODE,
+                        async (res) => {
+                            const chunks: any[] = [];
+                            for await (const chunk of res) chunks.push(chunk);
+                            const data = JSON.parse(Buffer.concat(chunks).toString());
+                            retryText = data.response || '';
+                        }
+                    );
+                }
                 files = extractFilesFromRaw(retryText);
                 if (files.length > 0) {
                     console.log(`[generateCodeStream] Retry succeeded: extracted ${files.length} file(s).`);
@@ -708,25 +841,38 @@ export async function generateJSONStream(
         telemetry?.onRequestStart?.({ mode: 'json_stream', model });
         let fullText = '';
         let tokens: { prompt_eval_count: number; eval_count: number } | undefined;
-        await withRetry(async () => {
-            await ollamaStreamRequest(
-                `${OLLAMA_BASE_URL}/api/generate`,
-                { model, system: systemPrompt, prompt: userPromptText },
+        if (isGeminiProvider()) {
+            const result = await withRetry(() => geminiGenerateContent(
+                model,
+                systemPrompt,
+                userPromptText,
                 TIMEOUT_MS.JSON,
-                (chunk) => {
-                    const token = chunk.response || '';
-                    fullText += token;
-                    if (chunk.prompt_eval_count || chunk.eval_count) {
-                        tokens = {
-                            prompt_eval_count: chunk.prompt_eval_count || 0,
-                            eval_count: chunk.eval_count || 0
-                        };
-                    }
-                    if (token) emitter.emit({ type: 'llm_token', token, context: 'json_generation' });
-                },
-                onHeartbeat
-            );
-        });
+                { responseMimeType: 'application/json' }
+            ));
+            fullText = result.text;
+            tokens = result.tokens;
+            if (fullText) emitter.emit({ type: 'llm_token', token: fullText, context: 'json_generation' });
+        } else {
+            await withRetry(async () => {
+                await ollamaStreamRequest(
+                    `${OLLAMA_BASE_URL}/api/generate`,
+                    { model, system: systemPrompt, prompt: userPromptText },
+                    TIMEOUT_MS.JSON,
+                    (chunk) => {
+                        const token = chunk.response || '';
+                        fullText += token;
+                        if (chunk.prompt_eval_count || chunk.eval_count) {
+                            tokens = {
+                                prompt_eval_count: chunk.prompt_eval_count || 0,
+                                eval_count: chunk.eval_count || 0
+                            };
+                        }
+                        if (token) emitter.emit({ type: 'llm_token', token, context: 'json_generation' });
+                    },
+                    onHeartbeat
+                );
+            });
+        }
 
         if (emitter && typeof (emitter as any).emit === 'function') {
             (emitter as any).emit({ type: 'llm_complete', fullResponse: fullText.slice(0, 200), context: 'json_generation' });

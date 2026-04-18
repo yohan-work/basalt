@@ -1,19 +1,22 @@
 
+const LLM_PROVIDER = process.env.LLM_PROVIDER || (process.env.GEMINI_API_KEY ? 'gemini' : 'ollama');
+const USE_GEMINI_DEFAULTS = LLM_PROVIDER === 'gemini';
+
 export const MODEL_CONFIG = {
     // Used for simple summaries, status updates, or quick classifications
     // Override with FAST_MODEL env var
-    FAST_MODEL: process.env.FAST_MODEL || 'llama3.2:latest',
+    FAST_MODEL: process.env.FAST_MODEL || (USE_GEMINI_DEFAULTS ? 'gemini-2.5-flash-lite' : 'llama3.2:latest'),
 
     // Used for complex planning, reasoning, and argument generation
     // Override with SMART_MODEL env var
-    SMART_MODEL: process.env.SMART_MODEL || 'gemma4:e2b',
+    SMART_MODEL: process.env.SMART_MODEL || (USE_GEMINI_DEFAULTS ? 'gemini-2.5-flash' : 'gemma4:e2b'),
 
     // Used for writing code
     // Override with CODING_MODEL env var
-    CODING_MODEL: process.env.CODING_MODEL || 'qwen2.5-coder:7b',
+    CODING_MODEL: process.env.CODING_MODEL || (USE_GEMINI_DEFAULTS ? 'gemini-2.5-flash' : 'qwen2.5-coder:7b'),
 
     // Default fallback
-    DEFAULT: process.env.DEFAULT_MODEL || 'llama3.2:latest'
+    DEFAULT: process.env.DEFAULT_MODEL || (USE_GEMINI_DEFAULTS ? 'gemini-2.5-flash' : 'llama3.2:latest')
 } as const;
 
 export type ModelType = keyof typeof MODEL_CONFIG;
@@ -32,6 +35,13 @@ let _validated = false;
 export async function validateModels(): Promise<void> {
     if (_validated) return;
     _validated = true;
+
+    if (LLM_PROVIDER === 'gemini') {
+        if (!process.env.GEMINI_API_KEY) {
+            console.warn('[ModelConfig] LLM_PROVIDER=gemini 이지만 GEMINI_API_KEY가 없습니다.');
+        }
+        return;
+    }
 
     const ollamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
 
