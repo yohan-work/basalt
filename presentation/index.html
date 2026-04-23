@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Basalt Presentation</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="deck" aria-live="polite">
+      <section class="slide active title-slide">
+        <div class="pills">
+          <span>Concentrix</span>
+          <span>AI Agent Workflow</span>
+        </div>
+        <h1>Basalt</h1>
+        <p class="subtitle">AI와 함께 작업을<br />계획/실행/검증까지</p>
+        <p class="speaker">Yohan Choi</p>
+      </section>
+
+      <section class="slide opening-slide" data-reveal>
+        <div class="photo-collage" aria-hidden="true">
+          <figure class="photo-card photo-card-a">
+            <img src="./assets/images/aws.jpg" alt="" />
+            <figcaption>AWS</figcaption>
+          </figure>
+          <figure class="photo-card photo-card-b">
+            <img src="./assets/images/aws2.jpg" alt="" />
+            <figcaption>AWS</figcaption>
+          </figure>
+          <figure class="photo-card photo-card-c">
+            <img src="./assets/images/aws3.jpg" alt="" />
+            <figcaption>AWS</figcaption>
+          </figure>
+          <figure class="photo-card photo-card-d">
+            <img src="./assets/images/google.jpg" alt="" />
+            <figcaption>Google</figcaption>
+          </figure>
+          <figure class="photo-card photo-card-e">
+            <img src="./assets/images/google2.jpg" alt="" />
+            <figcaption>Google</figcaption>
+          </figure>
+          <figure class="photo-card photo-card-f">
+            <img src="./assets/images/toss.jpg" alt="" />
+            <figcaption>Toss</figcaption>
+          </figure>
+          <figure class="photo-card photo-card-g">
+            <img src="./assets/images/kakao.jpg" alt="" />
+            <figcaption>Kakao</figcaption>
+          </figure>
+          <figure class="photo-card photo-card-h">
+            <img src="./assets/images/microsoft.jpg" alt="" />
+            <figcaption>Microsoft</figcaption>
+          </figure>
+          <figure class="photo-card photo-card-i">
+            <img src="./assets/images/anthropic.jpg" alt="" />
+            <figcaption>Anthropic</figcaption>
+          </figure>
+        </div>
+
+        <div class="opening-content">
+          <div class="pills">
+            <span>Research</span>
+            <span>Networking</span>
+          </div>
+          <h2>이 기업들의<br />공통점은 무엇일까요?</h2>
+          <p class="opening-note reveal-late">
+            작년부터 직접 참여한 컨퍼런스와 AI 네트워킹 현장
+          </p>
+          <div class="company-tags reveal-question-item">
+            <span>AWS</span>
+            <span>Google</span>
+            <span>Toss</span>
+            <span>Kakao</span>
+            <span>Microsoft</span>
+            <span>Anthropic</span>
+          </div>
+        </div>
+      </section>
+      <!-- google, aws, toss, kakao, microsoft, anthropic -->
+      <section class="slide">
+        <p class="eyebrow">Observation</p>
+        <h2>AI 관심은 높지만<br />업무 적용은 어렵다</h2>
+        <div class="chain compact">
+          <span>개발자</span>
+          <span>비개발 직군</span>
+          <span>반복 업무</span>
+          <span>검증 부담</span>
+          <span>실무 적용</span>
+        </div>
+      </section>
+
+      <section class="slide">
+        <p class="eyebrow">Problem</p>
+        <h2>페이지 하나에도<br />반복되는 과정이 있다</h2>
+        <div class="chain compact">
+          <span>요청 해석</span>
+          <span>구조 판단</span>
+          <span>컴포넌트 설계</span>
+          <span>코드 작성</span>
+          <span>화면 확인</span>
+          <span>결과 정리</span>
+        </div>
+      </section>
+
+      <section class="slide">
+        <p class="eyebrow">Why</p>
+        <h2>반복되는 개발 흐름을<br />하나의 작업 단위로 묶기</h2>
+        <div class="compare">
+          <article>
+            <strong>Before</strong>
+            <p>개발자가 매번 직접 판단하고 기록</p>
+          </article>
+          <article class="accent">
+            <strong>Basalt</strong>
+            <p>요청부터 검증까지 흐름으로 관리</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="slide">
+        <p class="eyebrow">Service Flow</p>
+        <h2>Request에서 Done까지</h2>
+        <div class="pipeline">
+          <div><b>Request</b><span>task 등록</span></div>
+          <div><b>Plan</b><span>workflow 생성</span></div>
+          <div><b>Dev</b><span>코드 수정</span></div>
+          <div><b>Test</b><span>검증</span></div>
+          <div><b>Done</b><span>결과 정리</span></div>
+        </div>
+      </section>
+
+      <section class="slide kanban-walkthrough" data-kanban-reveal>
+        <div class="kanban-heading">
+          <p class="eyebrow">Service Flow</p>
+          <h2>작업은 Kanban 흐름으로 관리됩니다</h2>
+        </div>
+
+        <div class="kanban-frame">
+          <img
+            class="kanban-image"
+            src="./assets/images/kanban.png"
+            alt="Basalt Kanban board"
+          />
+          <div class="kanban-highlight" aria-hidden="true"></div>
+        </div>
+
+        <div class="kanban-caption" aria-live="polite">
+          <span class="kanban-stage-label">Request</span>
+          <p>사용자가 처리할 작업을 등록합니다.</p>
+        </div>
+      </section>
+
+      <section class="slide">
+        <p class="eyebrow">Core Value</p>
+        <h2>코드만 남기는 것이 아니라<br />과정을 남긴다</h2>
+        <div class="grid-list">
+          <span>Workflow</span>
+          <span>Changed Files</span>
+          <span>Execution Logs</span>
+          <span>Verification</span>
+          <span>Screenshots</span>
+          <span>Summary</span>
+        </div>
+      </section>
+
+      <section class="slide">
+        <p class="eyebrow">AI Structure</p>
+        <h2>Orchestrator가<br />Agent와 Skill을 조율한다</h2>
+        <div class="architecture role-map">
+          <div class="node main">
+            <strong>Orchestrator</strong>
+            <span>작업 흐름을 관리</span>
+          </div>
+          <div class="branches">
+            <div class="node">
+              <strong>Agent</strong>
+              <span>역할을 맡은 AI 담당자</span>
+            </div>
+            <div class="node">
+              <strong>Skill</strong>
+              <span>실행에 사용하는 도구</span>
+            </div>
+            <div class="node">
+              <strong>Project Context</strong>
+              <span>실제 프로젝트 정보</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <p class="eyebrow">Technical Stack</p>
+        <h2>화면, 데이터, 모델을<br />역할에 맞게 분리</h2>
+        <div class="stack-model-layout">
+          <div class="stack-card">
+            <strong>Next.js</strong>
+            <span>화면과 API 구성</span>
+          </div>
+          <div class="stack-card storage">
+            <strong>DB</strong>
+            <span>project, task, workflow, logs, verification</span>
+          </div>
+          <div class="model-card">
+            <strong>3 LLM Models</strong>
+            <div class="model-pills">
+              <span>Fast<small>llama3.2:latest</small></span>
+              <span>Smart<small>gemma4:e2b</small></span>
+              <span>Coding<small>qwen2.5-coder:7b</small></span>
+            </div>
+          </div>
+        </div>
+        <div class="experiment-strip">
+          <span>Hugging Face</span>
+          <span>tuning</span>
+          <span>quantization</span>
+          <span>format conversion</span>
+          <span>benchmark</span>
+        </div>
+      </section>
+
+      <!-- <section class="slide">
+        <p class="eyebrow">Execution Record</p>
+        <h2>실행 결과는<br />작업 기록으로 남는다</h2>
+        <div class="record-flow">
+          <div class="record-node primary">Orchestrator 실행</div>
+          <div class="record-node storage">Supabase 저장</div>
+          <div class="record-node review">Task Details 확인</div>
+        </div>
+        <div class="record-grid">
+          <span>Workflow</span>
+          <span>Execution Logs</span>
+          <span>Changed Files</span>
+          <span>Verification Result</span>
+          <span>Summary</span>
+        </div>
+      </section> -->
+
+      <section class="slide">
+        <p class="eyebrow">Project Context</p>
+        <h2>AI가 추측하지 않도록<br />프로젝트 맥락을 먼저 읽는다</h2>
+        <div class="context-flow">
+          <div class="context-box source">
+            <strong>Connected Project</strong>
+            <span>local frontend app</span>
+          </div>
+          <div class="context-box center">
+            <strong>Project Context</strong>
+            <ul>
+              <li>project structure</li>
+              <li>package.json</li>
+              <li>router</li>
+              <li>UI components</li>
+            </ul>
+          </div>
+          <div class="context-box output">
+            <strong>Plan / Code / Verify</strong>
+            <span>맥락 기반 실행</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="slide">
+        <p class="eyebrow">Demo</p>
+        <h2>시연에서 볼 것</h2>
+        <ol class="demo-list">
+          <li>Task 등록</li>
+          <li>Workflow 생성과 실행</li>
+          <li>검증 결과와 변경 이력 확인</li>
+        </ol>
+      </section>
+
+      <section class="slide">
+        <p class="eyebrow">Next Improvements</p>
+        <h2>실행 환경 고도화입니다</h2>
+        <div class="improvement-grid">
+          <article>
+            <strong>Compute</strong>
+          </article>
+          <article>
+            <strong>Runtime</strong>
+          </article>
+          <article>
+            <strong>Productization</strong>
+          </article>
+        </div>
+        <p class="improvement-note">
+          기능 검증을 넘어, 더 빠르고 안정적인 실행 환경으로 확장하는 단계
+        </p>
+      </section>
+
+      <section class="slide closing-slide">
+        <img
+          src="./assets/images/concentrix_logo.webp"
+          alt=""
+          style="width: 270px; margin-bottom: 30px"
+        />
+        <h2>감사합니다</h2>
+        <div class="closing-footer">
+          <span>AI Agent Workflow</span>
+          <span>Yohan Choi</span>
+        </div>
+      </section>
+    </main>
+
+    <div class="progress" aria-hidden="true">
+      <span id="current">1</span>
+      <span>/</span>
+      <span id="total">15</span>
+    </div>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
